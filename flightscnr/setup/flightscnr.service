@@ -1,0 +1,33 @@
+[Unit]
+Description=FlightScnr Pi — Round Touch Flight Tracker
+Documentation=https://github.com/yashmulgaonkar/FlightScnr_Pi
+# Start after networking and the display manager (X11 on :0).
+# WantedBy=graphical.target below registers this unit for boot without creating
+# an ordering cycle (do not also add After=graphical.target).
+After=network-online.target display-manager.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/flightscnr.env
+WorkingDirectory=__REPO_DIR__/flightscnr
+Environment=FLIGHTSCNR_DATA_DIR=/var/lib/flightscnr
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=__XAUTHORITY__
+Environment=XDG_RUNTIME_DIR=__XDG_RUNTIME_DIR__
+Environment=SDL_VIDEODRIVER=x11
+
+# Wait for the desktop X session before launching pygame (up to 90s after boot).
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 90); do [ -S /tmp/.X11-unix/X0 ] && [ -f "${XAUTHORITY}" ] && exit 0; sleep 1; done; echo "X11 not ready after 90s"; exit 1'
+ExecStartPre=/bin/bash -c 'mkdir -p /var/lib/flightscnr/maps'
+
+ExecStart=__REPO_DIR__/.venv/bin/python3 __REPO_DIR__/flightscnr/flightscnr.py
+Restart=always
+RestartSec=10
+TimeoutStopSec=15
+KillMode=mixed
+User=root
+Group=root
+
+[Install]
+WantedBy=graphical.target

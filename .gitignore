@@ -32,18 +32,23 @@ Thumbs.db
 .fr24/
 
 # Runtime data & downloaded databases
-its-a-plane-python/.cache/
-its-a-plane-python/airports.json
-its-a-plane-python/cities.json
-its-a-plane-python/airlines.json
-its-a-plane-python/icao_types.json
-its-a-plane-python/close.txt
-its-a-plane-python/farthest.txt
-its-a-plane-python/tracked_flight.json
+flightscnr/.cache/
+flightscnr/airports.json
+flightscnr/cities.json
+flightscnr/airlines.json
+flightscnr/icao_types.json
+flightscnr/close.txt
+flightscnr/farthest.txt
+flightscnr/tracked_flight.json
 
 # Extracted assets (use logo.zip in repo)
 logo/
 logo2/
+combined_logos/
+logo-diff/
+icons/
+flightscnr/icons
+flightscnr/fonts/
 
 # Local Pi settings persisted at runtime
 round_touch_settings.json

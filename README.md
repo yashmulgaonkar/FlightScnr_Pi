@@ -1,10 +1,10 @@
 # FlightScnr Pi
 
-Round **1080×1080 touch display** flight tracker for Raspberry Pi. UI modeled after [FlightScnr](https://github.com/yashmulgaonkar/FlightScnr), with a flight-tracking backend derived from [plane-tracker-rgb-pi](https://github.com/c0wsaysmoo/plane-tracker-rgb-pi) (FR24 gRPC, ADS-B, weather, web portal).
+Round **1080×1080 touch display** flight tracker for Raspberry Pi. UI modeled after [FlightScnr](https://github.com/yashmulgaonkar/FlightScnr). Uses FR24 gRPC, ADS-B, weather APIs, and a built-in web portal.
 
-A paid FR24 subscription API key is recommended but not strictly required — ADS-B fallback is available.
+**API keys:** `FR24_API_KEY` and `TOMORROW_API_KEY` are required for the full experience (flight details + clock weather). Without FR24, the radar can still show ADS-B positions only (`ADSB_ENABLED=True`).
 
-**Quick setup:** `its-a-plane-python/setup/update-pi.sh`
+**Quick setup:** `sudo bash install-pi.sh` (after clone)
 
 ---
 
@@ -23,10 +23,38 @@ A paid FR24 subscription API key is recommended but not strictly required — AD
 ```bash
 git clone https://github.com/yashmulgaonkar/FlightScnr_Pi.git ~/FlightScnr_Pi
 cd ~/FlightScnr_Pi
-sudo bash its-a-plane-python/setup/update-pi.sh
+sudo bash install-pi.sh
 ```
 
-This creates a virtualenv, installs dependencies, extracts airline logos, and installs the `plane-tracker` systemd service.
+This installs system packages, creates a virtualenv, extracts airline logos from `logo.zip`, creates `/var/lib/flightscnr/`, installs `/etc/flightscnr.env`, and registers the `flightscnr` systemd service.
+
+### Updates (git pull)
+
+After the initial install, updates are a single command:
+
+```bash
+bash ~/FlightScnr_Pi/install-pi.sh update
+```
+
+That runs `git pull --ff-only`, refreshes Python dependencies if `requirements.txt` changed, reinstalls the systemd unit if needed, and restarts the service.
+
+Or manually:
+
+```bash
+cd ~/FlightScnr_Pi
+git pull
+sudo bash install-pi.sh
+```
+
+**What stays outside git** (safe across updates):
+
+| Path | Purpose |
+|------|---------|
+| `/etc/flightscnr.env` | API keys and settings (never overwritten by install) |
+| `/var/lib/flightscnr/` | Runtime data, maps, web portal state |
+| `.venv/` | Python virtualenv (refreshed on install) |
+| `logo/` | Extracted from `logo.zip` on install |
+| `flightscnr/airlines.json` etc. | Downloaded on first app run |
 
 ### 2. Configure
 
@@ -37,14 +65,22 @@ cp .env.example .env
 nano .env
 ```
 
-On first service install, `install-service.sh` copies `.env` → `/etc/plane-tracker.env`. After that, edit production config there:
+On first install, `install-pi.sh` copies `.env` → `/etc/flightscnr.env` (if that file does not already exist). After that, edit production config there:
 
 ```bash
-sudo nano /etc/plane-tracker.env
-sudo systemctl restart plane-tracker
+sudo nano /etc/flightscnr.env
+sudo systemctl restart flightscnr
 ```
 
-Required: `FR24_API_KEY`, `TOMORROW_API_KEY`, and location (`HOME_LAT` / `HOME_LON` or zone corners). See `.env.example` for all options.
+| Variable | Required? | What it does |
+|----------|-----------|--------------|
+| `FR24_API_KEY` | **Yes** (full app) | FR24 gRPC feed — routes, airlines, flight details, tracked flights |
+| `TOMORROW_API_KEY` | **Yes** (clock weather) | Temperature on the clock screen |
+| `HOME_LAT` / `HOME_LON` | **Yes** | Radar center and search zone |
+| `AIRLABS_API_KEY` | Optional | Pre-departure schedule when a flight isn't airborne yet |
+| `ADSB_ENABLED` | Default `True` | Free ADS-B positions; sole radar source if FR24 is missing |
+
+Without `FR24_API_KEY`, the app still starts but only shows ADS-B aircraft (callsign, position, altitude — no routes or rich flight-detail screens). See `.env.example` for all options.
 
 Display settings for the round panel:
 
@@ -57,9 +93,9 @@ DISPLAY_FULLSCREEN=True
 ### 3. Run
 
 ```bash
-sudo systemctl start plane-tracker
-sudo systemctl status plane-tracker
-sudo journalctl -u plane-tracker -f
+sudo systemctl start flightscnr
+sudo systemctl status flightscnr
+sudo journalctl -u flightscnr -f
 ```
 
 ---
@@ -79,7 +115,7 @@ Visual design follows FlightScnr: dark green radar background, animated sweep, m
 | **Flight detail** | Tap aircraft on radar | PREV/NEXT or swipe to cycle flights; RADAR → back |
 | **Tracked flight** | Web portal | RADAR footer → back |
 
-Radar center can be set in `/etc/plane-tracker.env` or from the web portal (saved to `/var/lib/plane-tracker/location.json`).
+Radar center can be set in `/etc/flightscnr.env` or from the web portal (saved to `/var/lib/flightscnr/location.json`).
 
 ---
 
@@ -89,20 +125,20 @@ Open from any device on the same LAN:
 
 **`http://<hostname>.local`**
 
-(e.g. `http://raspberrypi.local` — port 80 by default; set `WEB_PORT` in `/etc/plane-tracker.env` to change.)
+(e.g. `http://raspberrypi.local` — port 80 by default; set `WEB_PORT` in `/etc/flightscnr.env` to change.)
 
 - Set radar center coordinates
 - Track a specific flight (shown on the **Tracked** screen)
 - View closest / farthest flight maps and logs
 - **Flight Statistics** — daily overhead flight counts and charts
 
-UI preferences (brightness, units, theme, min height) are stored on-device in `/var/lib/plane-tracker/round_touch_settings.json`.
+UI preferences (brightness, units, theme, min height) are stored on-device in `/var/lib/flightscnr/round_touch_settings.json`.
 
 ---
 
 ## Data & caching
 
-Runtime data lives in `/var/lib/plane-tracker/`:
+Runtime data lives in `/var/lib/flightscnr/`:
 
 | File | Purpose |
 |------|---------|
@@ -113,7 +149,7 @@ Runtime data lives in `/var/lib/plane-tracker/`:
 | `close.txt` / `farthest.txt` | Closest / farthest flight logs |
 | `maps/` | Cached map tiles and generated maps |
 
-Offline databases (`airports.json`, `airlines.json`, `icao_types.json`) download automatically on first run into `its-a-plane-python/`.
+Offline databases (`airports.json`, `airlines.json`, `icao_types.json`) download automatically on first run into `flightscnr/`.
 
 API caching (FR24 feed ~90s, flight details ~30min, weather ~1hr) reduces quota usage during 24/7 operation.
 
@@ -121,15 +157,16 @@ API caching (FR24 feed ~90s, flight details ~30min, weather ~1hr) reduces quota 
 
 ## Configuration reference
 
-All settings are environment variables — see `.env.example`. Production values go in `/etc/plane-tracker.env`.
+All settings are environment variables — see `.env.example`. Production values go in `/etc/flightscnr.env`.
 
 | Area | Examples |
 |------|----------|
-| API keys | `FR24_API_KEY`, `TOMORROW_API_KEY` |
+| API keys (required) | `FR24_API_KEY`, `TOMORROW_API_KEY` |
+| API keys (optional) | `AIRLABS_API_KEY` |
 | Location | `HOME_LAT`, `HOME_LON`, `SEARCH_RADIUS_NM` |
 | Display | `DISPLAY_WIDTH`, `DISPLAY_HEIGHT`, `BRIGHTNESS`, `NIGHT_START` |
 | Web | `WEB_PORT` (default `80`) |
-| Filtering | `MIN_HEIGHT`, `ADSB_ENABLED` |
+| Data sources | `ADSB_ENABLED`, `MIN_HEIGHT` |
 
 ---
 
