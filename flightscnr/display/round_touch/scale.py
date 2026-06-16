@@ -47,6 +47,11 @@ def format_active_tag(use_miles: bool) -> str:
     return format_scale_tag(active_band()["label_km"], use_miles)
 
 
+def format_band_tag(index: int, use_miles: bool) -> str:
+    idx = max(0, min(int(index), len(SCALE_BANDS) - 1))
+    return format_scale_tag(SCALE_BANDS[idx]["label_km"], use_miles)
+
+
 def index_for_radius_nm(radius_nm: float) -> int:
     """Scale band index that fits the configured search radius."""
     radius_km = radius_nm * 1.852

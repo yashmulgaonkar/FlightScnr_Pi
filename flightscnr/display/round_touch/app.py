@@ -182,8 +182,12 @@ class RoundTouchDisplay:
         elif row == 1:
             settings.toggle_distance_units()
         elif row == 2:
-            settings.toggle_compass_rose()
+            settings.cycle_scale()
+            scale.select(settings.scale_index())
+            map_bg.request_background()
         elif row == 3:
+            settings.toggle_compass_rose()
+        elif row == 4:
             settings.cycle_min_height()
 
     def _open_flight_at(self, x: int, y: int, alt_x: int | None = None, alt_y: int | None = None) -> bool:

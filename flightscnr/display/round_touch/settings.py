@@ -5,7 +5,6 @@ import logging
 import os
 
 from display.round_touch import color_presets, theme
-
 logger = logging.getLogger("flightscnr.display")
 
 DATA_DIR = os.environ.get("FLIGHTSCNR_DATA_DIR", "/var/lib/flightscnr")
@@ -95,6 +94,9 @@ def _load():
     if "tracked_stats_mode" in state:
         del state["tracked_stats_mode"]
         migrated = True
+    if "font_index" in state:
+        del state["font_index"]
+        migrated = True
     if migrated:
         _save(state)
     return state
@@ -157,12 +159,32 @@ def toggle_compass_rose():
 
 
 def scale_index():
-    return int(_state.get("scale_index", 1))
+    from display.round_touch import scale
+
+    try:
+        idx = int(_state.get("scale_index", 1))
+    except (TypeError, ValueError):
+        idx = 1
+    return max(0, min(idx, len(scale.SCALE_BANDS) - 1))
 
 
 def set_scale_index(index: int):
-    _state["scale_index"] = index
+    from display.round_touch import scale
+
+    _state["scale_index"] = max(0, min(int(index), len(scale.SCALE_BANDS) - 1))
     _save(_state)
+
+
+def cycle_scale():
+    from display.round_touch import scale
+
+    set_scale_index((scale_index() + 1) % len(scale.SCALE_BANDS))
+
+
+def scale_label() -> str:
+    from display.round_touch import scale
+
+    return scale.format_band_tag(scale_index(), distance_in_miles())
 
 
 def theme_index() -> int:

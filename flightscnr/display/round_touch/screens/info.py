@@ -100,7 +100,7 @@ def _display_layout() -> tuple[int, int, int]:
     body_font = draw.load_font(theme.FONT_BODY)
     row_y = top + theme.s(4)
     row_h = body_font.get_height() + theme.s(8)
-    return row_y, row_h, 4
+    return row_y, row_h, 5
 
 
 def display_row_at(x: int, y: int) -> int | None:
@@ -161,6 +161,7 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
         rows = [
             f"Brightness: {settings.brightness_percent()}%",
             f"Units: {units}",
+            f"Range: {settings.scale_label()}",
             f"Compass Rose: {rose}",
             f"Min height: {settings.min_height_ft()} ft",
         ]

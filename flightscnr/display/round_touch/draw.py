@@ -10,17 +10,19 @@ _font_cache = {}
 
 
 def load_font(size: int, bold=False) -> pygame.font.Font:
+    from display.round_touch.ui_fonts import resolve_font_path
+
     key = (size, bold)
     if key not in _font_cache:
-        names = ["dejavusans", "dejavusansmono", "liberationsans", "arial", "sans"]
-        font = None
-        for name in names:
-            path = pygame.font.match_font(name, bold=bold)
-            if path:
-                font = pygame.font.Font(path, size)
-                break
-        if font is None:
-            font = pygame.font.SysFont(None, size, bold=bold)
+        path = resolve_font_path(bold=bold)
+        if path:
+            font = pygame.font.Font(path, size)
+        else:
+            fallback = pygame.font.match_font("dejavusans", bold=bold)
+            if fallback:
+                font = pygame.font.Font(fallback, size)
+            else:
+                font = pygame.font.SysFont(None, size, bold=bold)
         _font_cache[key] = font
     return _font_cache[key]
 

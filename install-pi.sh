@@ -69,6 +69,30 @@ install_apt_packages() {
     log_ok "System packages ready"
 }
 
+install_ui_fonts() {
+    local inter_dir="$APP_DIR/fonts/inter"
+
+    log_step "UI font (Inter)"
+
+    mkdir -p "$inter_dir"
+    if [ ! -f "$inter_dir/Inter-Regular.ttf" ] || [ ! -f "$inter_dir/Inter-Bold.ttf" ]; then
+        local tmp
+        tmp=$(mktemp -d)
+        if curl -fsSL -o "$tmp/Inter.zip" \
+            "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip"; then
+            unzip -qo -j "$tmp/Inter.zip" \
+                "extras/ttf/Inter-Regular.ttf" "extras/ttf/Inter-Bold.ttf" \
+                -d "$inter_dir"
+            log_ok "Inter fonts ready"
+        else
+            log_warn "Could not download Inter fonts — UI may fall back to DejaVu"
+        fi
+        rm -rf "$tmp"
+    else
+        log_ok "Inter fonts ready"
+    fi
+}
+
 extract_logos() {
     local logo_zip="$REPO_ROOT/logo.zip"
     local logo_dir="$REPO_ROOT/logo"
@@ -198,6 +222,7 @@ cmd_install() {
     echo "============================================"
 
     install_apt_packages
+    install_ui_fonts
     extract_logos
     setup_venv
     setup_data_dir

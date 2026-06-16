@@ -48,7 +48,5 @@ combined_logos/
 logo-diff/
 icons/
 flightscnr/icons
-flightscnr/fonts/
-
 # Local Pi settings persisted at runtime
 round_touch_settings.json
