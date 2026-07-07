@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 _CACHE: dict = {"ts": 0.0, "payload": None, "date": None}
 _CACHE_TTL_S = 1800
+_FAIL_RETRY_S = 120
 
 
 def _today() -> date:
@@ -137,19 +138,39 @@ def refresh(force: bool = False) -> dict | None:
 
     units = unit_symbol()
     today = _today()
-    if (
-        not force
-        and _CACHE["payload"]
-        and now - _CACHE["ts"] < _CACHE_TTL_S
-        and _CACHE["payload"].get("unit") == units
-        and _CACHE.get("date") == today
-    ):
-        return _CACHE["payload"]
+    cached = _CACHE.get("payload")
+    if not force and cached and cached.get("unit") == units and _CACHE.get("date") == today:
+        ttl = _CACHE_TTL_S if cached.get("ready") else _FAIL_RETRY_S
+        if now - _CACHE["ts"] < ttl:
+            return cached
 
     temp_hum = grab_temperature_and_humidity()
     intervals = grab_forecast("display")
-    if temp_hum is None and not intervals:
-        return _CACHE["payload"]
+    no_temp = (
+        temp_hum is None
+        or (
+            isinstance(temp_hum, tuple)
+            and len(temp_hum) >= 2
+            and temp_hum[0] is None
+            and temp_hum[1] is None
+        )
+    )
+    if no_temp and not intervals:
+        # Avoid retry storms when provider is rate-limiting or temporarily unavailable.
+        payload = _CACHE.get("payload") or {
+            "temp": None,
+            "humidity": None,
+            "unit": unit_symbol(),
+            "days": [],
+            "sunrise": "—",
+            "sunset": "—",
+            "weather_label": "—",
+            "ready": False,
+        }
+        _CACHE["ts"] = now
+        _CACHE["date"] = today
+        _CACHE["payload"] = payload
+        return payload
 
     temp, humidity = temp_hum if temp_hum else (None, None)
     days = _parse_days(intervals or [])

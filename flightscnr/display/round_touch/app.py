@@ -262,6 +262,10 @@ class RoundTouchDisplay:
         if screen == SCREEN_RADAR:
             self._radar_visible_since = time.time()
             self._auto_idle_clock = False
+        else:
+            # Reset secondary timeout window when entering any non-radar screen.
+            # Without this, a stale timestamp can immediately bounce back to radar.
+            self._note_activity()
         self.screen = screen
         if screen == SCREEN_CLOCK:
             self._safe_draw()
