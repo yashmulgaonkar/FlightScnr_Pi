@@ -70,7 +70,7 @@ if [ -f "$VERSION_FILE" ]; then
     CURRENT="$(tr -d '[:space:]' < "$VERSION_FILE")"
 fi
 
-read -r NEXT_VERSION <<PY
+NEXT_VERSION="$(python3 <<PY
 import os, sys
 sys.path.insert(0, os.path.join("$REPO_ROOT", "flightscnr"))
 from datetime import date
@@ -82,6 +82,7 @@ if "$ITERATION":
     kwargs["iteration"] = int("$ITERATION")
 print(bump_version("$CURRENT" or None, **kwargs))
 PY
+)"
 
 echo "Current: ${CURRENT:-<none>}"
 echo "Next:    $NEXT_VERSION"
