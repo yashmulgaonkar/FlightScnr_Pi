@@ -60,10 +60,11 @@ class RadarGestureHandler:
         """Process a FINGER* event on radar. Returns scale index delta."""
         if self._pinch.is_pinching():
             allow_zoom = True
+        elif self._touch.is_dragging():
+            # Single-finger swipe: ignore phantom 2nd contacts (stuck driver ids).
+            allow_zoom = False
         else:
-            allow_zoom = not (
-                self._touch.is_dragging() and self._pinch.finger_count() < 2
-            )
+            allow_zoom = self._pinch.finger_count() >= 2
         scale_delta = self._pinch.handle_event(event, allow_zoom=allow_zoom)
         if scale_delta:
             self._touch.cancel_gesture()

@@ -14,8 +14,19 @@ SWIPE_DOWN = 2
 SWIPE_LEFT = 3
 SWIPE_RIGHT = 4
 
-# Resistive panels (e.g. ads7846) emit mouse events; FINGER duplicates break gestures.
-_USE_FINGER_EVENTS = False
+# Capacitive panels (Waveshare DSI) emit FINGER events; resistive panels use mouse.
+def _use_finger_events() -> bool:
+    import os
+
+    raw = os.environ.get("TOUCH_USE_FINGER_EVENTS", "false").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+_USE_FINGER_EVENTS = _use_finger_events()
+
+
+def use_finger_events() -> bool:
+    return _USE_FINGER_EVENTS
 
 
 def _gesture_threshold_px() -> int:
@@ -45,6 +56,7 @@ class TouchInput:
         self._drag_end = None
         self._last_motion = None
         self._max_dist = 0.0
+        self._active_fid: int | None = None
         self._pending_swipe = SWIPE_NONE
         self._pending_swipe_start = None
         self._pending_swipe_end = None
@@ -93,6 +105,7 @@ class TouchInput:
         self._drag_end = None
         self._last_motion = None
         self._max_dist = 0.0
+        self._active_fid = None
 
         if travel < threshold:
             self._pending_swipe = SWIPE_NONE
@@ -109,6 +122,9 @@ class TouchInput:
         """True while a mouse-button gesture is in progress."""
         return self._start is not None
 
+    def active_finger_id(self) -> int | None:
+        return self._active_fid
+
     def blocks_pinch(self) -> bool:
         """True once single-finger movement looks like a swipe (not a pinch setup)."""
         if self._start is None:
@@ -121,23 +137,49 @@ class TouchInput:
         self._drag_end = None
         self._last_motion = None
         self._max_dist = 0.0
+        self._active_fid = None
         self._clear_pending()
 
     def handle_event(self, event: pygame.event.Event):
+        if _USE_FINGER_EVENTS and event.type in (
+            pygame.MOUSEBUTTONDOWN,
+            pygame.MOUSEBUTTONUP,
+            pygame.MOUSEMOTION,
+        ):
+            return
+
         if event.type in (pygame.FINGERDOWN, pygame.FINGERUP) and not _USE_FINGER_EVENTS:
             return
 
         if event.type == pygame.FINGERDOWN:
+            fid = int(event.finger_id)
+            if self._start is not None and self._active_fid not in (None, fid):
+                # Stuck driver finger id — hand off to the real touch.
+                if self._max_dist < _gesture_threshold_px() * 0.3:
+                    self.cancel_gesture()
+                else:
+                    return
             self._clear_pending()
             width = pygame.display.get_surface().get_width()
             height = pygame.display.get_surface().get_height()
+            self._active_fid = fid
             self._start = _logical_pos((event.x * width, event.y * height))
             self._drag_end = self._start
             self._last_motion = self._start
             self._max_dist = 0.0
             return
 
+        if event.type == pygame.FINGERMOTION and self._start is not None:
+            if int(event.finger_id) != self._active_fid:
+                return
+            width = pygame.display.get_surface().get_width()
+            height = pygame.display.get_surface().get_height()
+            self._track_point(_logical_pos((event.x * width, event.y * height)))
+            return
+
         if event.type == pygame.FINGERUP and self._start is not None:
+            if int(event.finger_id) != self._active_fid:
+                return
             width = pygame.display.get_surface().get_width()
             height = pygame.display.get_surface().get_height()
             sx, sy = self._start

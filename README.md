@@ -1,5 +1,5 @@
 # FlightScnr Pi
-A round **4in touch display** flight tracker for Raspberry Pi. The on-device UI is modeled after my other project, [FlightScnr](https://github.com/yashmulgaonkar/FlightScnr): dark radar aesthetic, animated sweep, map tiles, and gesture navigation. A built-in **web portal** configures everything from your phone or laptop on the same network.
+A [round **4in touch display**](https://www.waveshare.com/4inch-dsi-lcd-c.htm?&aff_id=108718) flight tracker for Raspberry Pi. The on-device UI is modeled after my other project, [FlightScnr](https://github.com/yashmulgaonkar/FlightScnr): dark radar aesthetic, animated sweep, map tiles, and gesture navigation. A built-in **web portal** configures everything from your phone or laptop on the same network.
 
 ![FlightScnr Pi on a round display](docs/images/flightscnrpi.jpg)
 
@@ -99,10 +99,10 @@ Portal preferences are stored on the Pi in `/var/lib/flightscnr/` and apply with
 
 | Source | Required? | Provides |
 |--------|-----------|----------|
-| **FR24 API** | Yes (full app) | Routes, airlines, flight details, tracked flights, enriched radar |
+| [**FR24 API**](https://fr24api.flightradar24.com/docs/getting-started) | Yes (full app) | Routes, airlines, flight details, tracked flights, enriched radar |
 | **[adsb.fi](https://adsb.fi)** | Optional (on by default) | Free live positions over the internet — merges with FR24 or fills the radar when FR24 is off (`ADSB_ENABLED=True`). **Not** a USB ADS-B receiver. |
-| **Tomorrow.io** | Yes (weather) | Clock temperature and multi-day forecast |
-| **AirLabs** | Optional | Scheduled departure info when a tracked flight is not yet airborne |
+| [**Tomorrow.io**](https://app.tomorrow.io/signup) | Yes (weather) | Clock temperature and multi-day forecast |
+| [**AirLabs**](https://airlabs.co/signup) | Optional | Scheduled departure info when a tracked flight is not yet airborne |
 
 API responses are **cached** (e.g. FR24 feed ~90s, flight details ~30 min, weather ~1 hr) to reduce quota use during 24/7 operation. Offline databases (`airports.json`, `airlines.json`, `icao_types.json`) download on first run.
 
@@ -120,8 +120,8 @@ API responses are **cached** (e.g. FR24 feed ~90s, flight details ~30 min, weath
 | 1 | **Waveshare 4″ DSI LCD (C)** | 720x720 round IPS, **10-point capacitive** touch, DSI + I2C. Part of Waveshare “4inch DSI LCD (C)” line - not the 480x800 or HDMI round variants. | [Waveshare Link](https://www.waveshare.com/4inch-dsi-lcd-c.htm?&aff_id=108718)|
 | 1 | **microSD card** (32 GB+, A2 recommended) | Flash **Raspberry Pi OS (64-bit) with desktop**. |
 | 1 | **USB-C power supply** (5 V, **3 A** minimum) | Official Pi 4 PSU or equivalent. Budget headroom for the DSI panel. |
-| 1 | **Network** | Wi‑Fi (built in) or Ethernet for flight data, maps, weather, and the web portal. |
-| 1 | **Case / stand** | 3D-printed desktop enclosure. | [MakerWorld Link]()|
+| 1 | **Enclosure / Stand** | 3D-printed desktop enclosure. | [MakerWorld Link](https://makerworld.com/en/models/3024952-flightscnrpi-large-ads-b-traffic-sweeping-radar#profileId-3399104)|
+|4|M4x8mm button head screws|Screws to attach sceen to the enclosure||
 | 0–1 | **Heatsink + fan** (optional) | Recommended for 24/7 operation on Pi 4. | [Waveshare Link](https://www.waveshare.com/pi4-fan-pwm.htm?&aff_id=108718) |
 
 ---

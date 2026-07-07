@@ -17,6 +17,7 @@ from utilities.route_enrichment import (
 )
 from display.round_touch import (
     draw,
+    ghost_touch_filter,
     gesture_handler,
     input_handler,
     map_bg,
@@ -97,6 +98,7 @@ class RoundTouchDisplay:
         self.input = input_handler.TouchInput()
         self.pinch = pinch_handler.PinchZoom()
         self.gestures = gesture_handler.RadarGestureHandler(self.input, self.pinch)
+        self._ghost_filter = ghost_touch_filter.GhostTouchFilter()
         self.screen = SCREEN_RADAR
         self.settings_page = info.PAGE_MAIN
         self.flights = []
@@ -475,11 +477,6 @@ class RoundTouchDisplay:
                     opened = self._open_flight_at(swipe_start[0], swipe_start[1])
                 if opened:
                     self._safe_draw()
-                else:
-                    self._open_screen(SCREEN_TRACKED)
-                    self._scroll.reset()
-                    self._note_activity()
-                    self._safe_draw()
         elif swipe == input_handler.SWIPE_LEFT and self.screen == SCREEN_TRACKED:
             self._return_to_radar()
             self._safe_draw()
@@ -768,20 +765,34 @@ class RoundTouchDisplay:
                         logger.debug("Display lost focus (continuing)")
                         continue
                     if gesture_handler.RadarGestureHandler.is_touch_event(event):
+                        if not self._ghost_filter.allow(
+                            event,
+                            self.gestures.touch.cancel_gesture,
+                            self.gestures.touch.is_dragging,
+                        ):
+                            continue
                         self._note_off_hours_override()
-                        if gesture_handler.RadarGestureHandler.is_pointer_down(event):
+                        if gesture_handler.RadarGestureHandler.is_pointer_down(event) or (
+                            input_handler.use_finger_events()
+                            and event.type == pygame.FINGERDOWN
+                        ):
                             self._wake_for_off_hours_touch()
                         touch_debug.log_event(event)
-                        if (
-                            self.screen == SCREEN_RADAR
-                            and gesture_handler.RadarGestureHandler.is_pointer_down(event)
-                        ):
-                            self.gestures.on_pointer_down()
-                        elif (
-                            self.screen == SCREEN_RADAR
-                            and gesture_handler.RadarGestureHandler.is_pointer_up(event)
-                        ):
-                            self.gestures.on_pointer_up()
+                        if self.screen == SCREEN_RADAR:
+                            if gesture_handler.RadarGestureHandler.is_pointer_down(
+                                event
+                            ) or (
+                                input_handler.use_finger_events()
+                                and event.type == pygame.FINGERDOWN
+                            ):
+                                self.gestures.on_pointer_down()
+                            elif gesture_handler.RadarGestureHandler.is_pointer_up(event) or (
+                                input_handler.use_finger_events()
+                                and event.type == pygame.FINGERUP
+                                and int(event.finger_id)
+                                == self.gestures.touch.active_finger_id()
+                            ):
+                                self.gestures.on_pointer_up()
                         self.gestures.handle_input_event(event)
                         if (
                             self.screen == SCREEN_RADAR
