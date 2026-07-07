@@ -1,18 +1,14 @@
 # FlightScnr Pi
+A round **4in touch display** flight tracker for Raspberry Pi. The on-device UI is modeled after my other project, [FlightScnr](https://github.com/yashmulgaonkar/FlightScnr): dark radar aesthetic, animated sweep, map tiles, and gesture navigation. A built-in **web portal** configures everything from your phone or laptop on the same network.
+
+![FlightScnr Pi on a round display](docs/images/flightscnrpi.jpg)
+
 
 <p align="center">
   <a href="https://buymeacoffee.com/yashmulgaonkar" target="_blank">
     <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 35px;">
   </a>
 </p>
-
-A round **4in touch display** flight tracker for Raspberry Pi. The on-device UI is modeled after my other project, [FlightScnr](https://github.com/yashmulgaonkar/FlightScnr): dark radar aesthetic, animated sweep, map tiles, and gesture navigation. A built-in **web portal** configures everything from your phone or laptop on the same network.
-
-**Quick setup:** clone the repo, then `sudo bash install-pi.sh`
-
-![FlightScnr Pi on a round display](docs/images/hero.jpg)
-
-> **Screenshot:** add `docs/images/hero.jpg` - see [docs/images/README.md](docs/images/README.md) for the full list.
 
 ---
 
@@ -45,13 +41,11 @@ The UI is designed for a **4in round LCD with touch** (default layout: **720x720
 - **Auto-return** to clock when no aircraft are visible (optional, portal setting)
 - **Off-hours** schedule can dim the panel, turn it off, or force the clock screen at night
 
-![Radar screen](docs/images/radar.png)
+![Radar screen](docs/images/flightscnrpi.jpg)
 
-![Flight detail](docs/images/flight-detail.png) · ![Tracked flight](docs/images/tracked.png)
+![Flight detail](docs/images/flight-detail.jpg) · ![Tracked flight](docs/images/tracked.jpg)
 
-![Clock and forecast](docs/images/clock.png) · ![Forecast](docs/images/forecast.png)
-
-> **Screenshots:** add files under `docs/images/` - filenames above match [docs/images/README.md](docs/images/README.md).
+![Clock and forecast](docs/images/clock.jpg) · ![Forecast](docs/images/forecast.jpg)
 
 #### Radar features
 
@@ -75,8 +69,6 @@ Open from any device on your LAN:
 
 **`http://<hostname>.local`** (default port **80**; change with `WEB_PORT` in `/etc/flightscnr.env`)
 
-![Web portal](docs/images/web-portal.png)
-
 | Section | Purpose |
 |---------|---------|
 | **Radar** | Set radar center (lat/lon), range, distance units, min altitude, color theme, compass, sweep |
@@ -97,7 +89,7 @@ Open from any device on your LAN:
 | `/closest`, `/farthest` | Maps and logs for closest / farthest aircraft seen |
 | `/counter` | Raw flight counter JSON |
 
-![Flight statistics](docs/images/stats.png)
+<img width="1190" height="721" alt="image" src="https://github.com/user-attachments/assets/3e4f4f7b-a0c9-41e6-9798-cca13743c8e4" />
 
 Portal preferences are stored on the Pi in `/var/lib/flightscnr/` and apply without wiping on update.
 
@@ -119,8 +111,6 @@ API responses are **cached** (e.g. FR24 feed ~90s, flight details ~30 min, weath
 ## Hardware
 
 ![Hardware assembly](docs/images/assembly.jpg)
-
-> **Screenshot:** add `docs/images/assembly.jpg` - Pi with display mounted (see [docs/images/README.md](docs/images/README.md)).
 
 ### Bill of materials
 
