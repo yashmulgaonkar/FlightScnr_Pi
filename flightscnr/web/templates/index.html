@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>FlightScnr Settings</title>
+    <title>FlightScnrPi Settings</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <style>
         :root{--bg:#0a0a0a;--card:#141414;--card2:#1c1c1c;--line:#333;--text:#ececec;
@@ -63,7 +63,6 @@
         .wifi-note,.foot{text-align:center;font-size:.8rem;color:var(--muted);}
         .wifi-note{margin-top:.6rem}
         .foot{margin:1rem 0 .2rem}
-        .hidden{display:none}
         .update-card .body{padding-top:.75rem}
         .update-row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.35rem 0 .6rem}
         .update-badge{display:inline-block;padding:.2rem .55rem;border-radius:999px;font-size:.75rem;
@@ -73,11 +72,12 @@
         .btn-danger{background:#4a1515;border-color:#7a2222}
         .btn-danger:hover{background:#5c1a1a}
         .system-card .body{padding-top:.75rem}
+        .hidden{display:none}
     </style>
 </head>
 <body>
 <div class="wrap">
-    <div class="app-head"><div class="logo"></div><h1>FlightScnr</h1></div>
+    <div class="app-head"><div class="logo"></div><h1>FlightScnrPi</h1></div>
     <p class="subtitle">Portal settings for radar, display, alerts, tracking, and API keys.</p>
 
     <details class="card" open>
@@ -154,7 +154,7 @@
                 <label for="idle_clock">Return to clock when no aircraft visible</label>
                 <span class="switch"><input id="idle_clock" type="checkbox"><span class="track"></span></span>
             </div>
-            <button class="btn btn-primary" id="btn-display" type="button">Save display settings</button>
+            <button class="btn btn-primary" id="btn-display" style="margin-top:.7rem" type="button">Save display settings</button>
             <div id="display-status" class="status"></div>
         </div>
     </details>
@@ -184,7 +184,7 @@
                 <div><label for="night_end">End</label><input type="time" id="night_end"></div>
             </div>
             <p class="note">Off-hours applies automatic display dimming/off according to this schedule.</p>
-            <button class="btn btn-primary" id="btn-offhours" type="button">Save off-hours</button>
+            <button class="btn btn-primary" id="btn-offhours" style="margin-top:.7rem" type="button">Save off-hours</button>
             <div id="offhours-status" class="status"></div>
         </div>
     </details>
@@ -210,7 +210,8 @@
             <div class="chk"><label for="alert-hide">Hide non-alerted aircraft on radar</label><span class="switch"><input id="alert-hide" type="checkbox"><span class="track"></span></span></div>
             <label for="alert-watch">Watch list (callsigns)</label>
             <input id="alert-watch" type="text" autocomplete="off" placeholder="UAL123, DAL456">
-            <button class="btn btn-primary" id="btn-alerts" type="button">Save alerts</button>
+            <p class="hint">Comma-separated callsigns (3-letter airline + flight number). Highlights when a watched flight appears on radar. To clear all, delete the text in the field above and tap Save.</p>
+            <button class="btn btn-primary" id="btn-alerts" style="margin-top:.7rem" type="button">Save alerts</button>
             <div id="alert-status" class="status"></div>
         </div>
     </details>
@@ -293,8 +294,9 @@
     <details class="card system-card">
         <summary><span class="ico">&#9881;</span>System<span class="sum">power</span><span class="chev">&#9656;</span></summary>
         <div class="body">
-            <p class="hint">Restart or power off this Raspberry Pi. The display and portal will go offline.</p>
+            <p class="hint">Relaunch the app, or restart / power off this Raspberry Pi. Reboot and shutdown take the display and portal offline.</p>
             <div class="track-row" style="margin-top:.55rem">
+                <button class="btn btn-primary" id="btn-restart-app" type="button">Relaunch app</button>
                 <button class="btn" id="btn-reboot" type="button">Reboot</button>
                 <button class="btn btn-danger" id="btn-shutdown" type="button">Shutdown</button>
             </div>
@@ -483,7 +485,7 @@ function startUpdatePoll() {
 
 async function applyUpdate() {
     clearStatus("updates-status");
-    if (!confirm("Install the latest update and restart FlightScnr? Your settings and API keys are preserved.")) {
+    if (!confirm("Install the latest update and restart FlightScnrPi? Your settings and API keys are preserved.")) {
         return;
     }
     $("btn-update-now").disabled = true;
@@ -805,20 +807,40 @@ async function requestSystemAction(action) {
         return;
     }
     clearStatus("system-status");
-    $("btn-reboot").disabled = true;
-    $("btn-shutdown").disabled = true;
+    setSystemButtonsDisabled(true);
     try {
         const data = await jsonFetch(`/system/${action}`, { method: "POST" });
         showStatus("system-status", data.message || `${label} scheduled.`);
     } catch (e) {
         showStatus("system-status", e.message, true);
-        $("btn-reboot").disabled = false;
-        $("btn-shutdown").disabled = false;
+        setSystemButtonsDisabled(false);
+    }
+}
+
+function setSystemButtonsDisabled(disabled) {
+    $("btn-restart-app").disabled = disabled;
+    $("btn-reboot").disabled = disabled;
+    $("btn-shutdown").disabled = disabled;
+}
+
+async function requestAppRestart() {
+    if (!confirm("Relaunch FlightScnr? The display and portal will reconnect in a few seconds.")) {
+        return;
+    }
+    clearStatus("system-status");
+    setSystemButtonsDisabled(true);
+    try {
+        const data = await jsonFetch("/system/restart-app", { method: "POST" });
+        showStatus("system-status", data.message || "FlightScnr is restarting…");
+    } catch (e) {
+        showStatus("system-status", e.message, true);
+        setSystemButtonsDisabled(false);
     }
 }
 
 $("btn-check-updates").addEventListener("click", checkUpdates);
 $("btn-update-now").addEventListener("click", applyUpdate);
+$("btn-restart-app").addEventListener("click", requestAppRestart);
 $("btn-reboot").addEventListener("click", () => requestSystemAction("reboot"));
 $("btn-shutdown").addEventListener("click", () => requestSystemAction("shutdown"));
 $("btn-radar").addEventListener("click", saveRadar);

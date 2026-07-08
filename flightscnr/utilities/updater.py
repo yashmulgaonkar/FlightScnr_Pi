@@ -200,7 +200,7 @@ def update_running() -> bool:
 
 
 def check_for_update() -> dict:
-    from version import is_newer, normalize_version
+    from version import compare_versions, normalize_version
 
     local = local_version_info()
     remote = remote_version_info()
@@ -211,7 +211,8 @@ def check_for_update() -> dict:
 
     update_available = False
     if local_release and remote_release:
-        update_available = is_newer(remote_release, local_release)
+        # Release tags are authoritative — matching versions are up to date.
+        update_available = compare_versions(local_release, remote_release) < 0
     elif local.get("commit") and remote.get("commit"):
         update_available = local["commit"] != remote["commit"]
 

@@ -15,7 +15,7 @@ def _run_power_command(command: str) -> list[str]:
     return ["/bin/bash", "-c", f"sleep 1.5 && sudo -n {command}"]
 
 
-def _start_power_action(action: str, command: str) -> dict:
+def _start_power_action(action: str, command: str, *, message: str | None = None) -> dict:
     try:
         subprocess.Popen(
             _run_power_command(command),
@@ -28,10 +28,9 @@ def _start_power_action(action: str, command: str) -> dict:
         logger.warning("Could not start %s: %s", action, exc)
         return {"ok": False, "message": f"Could not {action}: {exc}"}
 
-    return {
-        "ok": True,
-        "message": f"{action.capitalize()} scheduled. This device will go offline shortly.",
-    }
+    if message is None:
+        message = f"{action.capitalize()} scheduled. This device will go offline shortly."
+    return {"ok": True, "message": message}
 
 
 def request_reboot() -> dict:
@@ -40,3 +39,11 @@ def request_reboot() -> dict:
 
 def request_shutdown() -> dict:
     return _start_power_action("shutdown", "systemctl poweroff")
+
+
+def request_app_restart() -> dict:
+    return _start_power_action(
+        "restart",
+        "systemctl restart flightscnr",
+        message="FlightScnr is restarting. The display and portal will reconnect shortly.",
+    )

@@ -121,8 +121,9 @@ API responses are **cached** (e.g. FR24 feed ~90s, flight details ~30 min, weath
 | 1 | **microSD card** (32 GB+, A2 recommended) | Flash **Raspberry Pi OS (64-bit) with desktop**. |
 | 1 | **USB-C power supply** (5 V, **3 A** minimum) | Official Pi 4 PSU or equivalent. Budget headroom for the DSI panel. |
 | 1 | **Enclosure / Stand** | 3D-printed desktop enclosure. | [MakerWorld Link](https://makerworld.com/en/models/3024952-flightscnrpi-large-ads-b-traffic-sweeping-radar#profileId-3399104)|
-|4|M4x8mm button head screws|Screws to attach sceen to the enclosure||
-| 0–1 | **Heatsink + fan** (optional) | Recommended for 24/7 operation on Pi 4. | [Waveshare Link](https://www.waveshare.com/pi4-fan-pwm.htm?&aff_id=108718) |
+|4|M4x8mm button head screws|Screws to attach screen to the enclosure||
+|2|M2.5x10mm button head screws|Screws to attach the fan heat sink to the Raspberry Pi||
+| 0–1 | **Heatsink + fan** (optional) | Recommended for 24/7 operation on Pi 4.<br>You will have to bore out the screw holes on the heat sink with a 3mm drill bit to convert them into clearance holes for the M2.5 screws.| [Waveshare Link](https://www.waveshare.com/pi4-fan-pwm.htm?&aff_id=108718) |
 
 ---
 

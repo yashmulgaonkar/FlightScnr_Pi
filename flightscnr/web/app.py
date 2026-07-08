@@ -620,5 +620,12 @@ def system_shutdown():
     return jsonify(system_control.request_shutdown())
 
 
+@app.post("/system/restart-app")
+def system_restart_app():
+    from utilities import system_control
+
+    return jsonify(system_control.request_app_restart())
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=WEB_PORT, debug=False)
