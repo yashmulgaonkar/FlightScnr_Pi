@@ -84,7 +84,7 @@ def tap_footer_action(x: int, y: int) -> str | None:
 
 
 def _theme_row_metrics() -> tuple[int, int, int, int]:
-    body_font = draw.load_font(theme.FONT_BODY)
+    body_font = _display_font()
     swatch_size = theme.s(20)
     swatch_gap = theme.s(10)
     max_label_w = max(body_font.size(name)[0] for name in color_presets.THEME_NAMES)
@@ -111,19 +111,28 @@ def theme_row_at(x: int, y: int, scroll_offset: int = 0) -> int | None:
     return None
 
 
-def _display_layout() -> tuple[int, int, int]:
+def _display_font():
+    """Match flight-detail body size so more Display rows fit the round screen."""
+    return draw.load_font(theme.s(14))
+
+
+def _display_layout(scroll_offset: int = 0) -> tuple[int, int, int]:
     top = nav.content_top_y(has_dots=True)
-    body_font = draw.load_font(theme.FONT_BODY)
-    row_y = top + theme.s(4)
-    row_h = body_font.get_height() + theme.s(8)
+    body_font = _display_font()
+    row_y = top + theme.s(4) - scroll_offset
+    row_h = body_font.get_height() + theme.s(6)
     return row_y, row_h, DISPLAY_ROW_COUNT
 
 
-def display_row_at(x: int, y: int) -> int | None:
-    row_y, row_h, count = _display_layout()
-    body_font = draw.load_font(theme.FONT_BODY)
+def display_row_at(x: int, y: int, scroll_offset: int = 0) -> int | None:
+    row_y, row_h, count = _display_layout(scroll_offset)
+    body_font = _display_font()
+    top = nav.content_top_y(has_dots=True)
+    bottom = nav.content_bottom_y()
     for i in range(count):
         ry = row_y + i * row_h
+        if ry + body_font.get_height() < top or ry > bottom:
+            continue
         half = draw.circle_half_width_at_row(int(ry), body_font.get_height())
         rect = pygame.Rect(
             theme.CENTER_X - half,
@@ -141,7 +150,7 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
     nav.draw_breadcrumb(surface, _breadcrumb(page))
     nav.draw_page_dots(surface, page, len(nav.SETTINGS_PAGES))
 
-    body_font = draw.load_font(theme.FONT_BODY)
+    body_font = _display_font()
     top = nav.content_top_y(has_dots=True)
     bottom = nav.content_bottom_y()
     max_scroll = 0
@@ -158,7 +167,7 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
             _route_api_line("AirLabs", AIRLABS_API_KEY),
             _route_api_line("AIS", AISSTREAM_API_KEY),
         ]
-        detail_font = draw.load_font(theme.FONT_DETAIL)
+        detail_font = draw.load_font(theme.s(13))
         gap = theme.s(2)
         body_top = top + theme.s(4)
         max_scroll = nav.draw_lines_scrolled(
@@ -178,8 +187,10 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
         rose = "on" if settings.show_compass_rose() else "off"
         sweep = "on" if settings.show_sweep_line() else "off"
         idle = "on" if settings.auto_idle_clock_enabled() else "off"
-        ais = "on" if settings.ais_enabled() else "off"
+        traffic = settings.traffic_mode_label()
+        # Traffic first — otherwise it clips off the round viewport.
         rows = [
+            f"Traffic: {traffic}",
             f"Brightness: {settings.brightness_percent()}%",
             f"Units: {units}",
             f"Range: {settings.scale_label()}",
@@ -187,23 +198,26 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
             f"Min height: {settings.min_height_ft()} ft",
             f"Sweep line: {sweep}",
             f"Idle clock: {idle}",
-            f"AIS data: {ais}",
         ]
-        y = top + theme.s(4)
-        row_h = body_font.get_height() + theme.s(8)
+        row_y, row_h, _ = _display_layout(scroll_offset)
+        total_h = theme.s(4) + len(rows) * row_h
+        max_scroll = max(0, total_h - (bottom - top))
         for i, line in enumerate(rows):
-            ry = y + i * row_h
-            if ry + body_font.get_height() > bottom:
-                break
-            half = draw.circle_half_width_at_row(int(ry), body_font.get_height())
+            ry = row_y + i * row_h
+            if ry + body_font.get_height() < top or ry > bottom:
+                continue
+            text_w, text_h = body_font.size(line)
+            pad_x = theme.s(10)
+            pad_y = theme.s(3)
+            # Hug the label — full-circle width looked like a weird tall bar.
             rect = pygame.Rect(
-                theme.CENTER_X - half,
-                ry - theme.s(2),
-                half * 2,
-                body_font.get_height() + theme.s(4),
+                theme.CENTER_X - text_w // 2 - pad_x,
+                ry - pad_y,
+                text_w + pad_x * 2,
+                text_h + pad_y * 2,
             )
             if i == display_focus:
-                pygame.draw.rect(surface, theme.GRID, rect, 1)
+                pygame.draw.rect(surface, theme.GRID, rect, max(1, theme.s(1)))
             draw.draw_center_line(surface, line, int(ry), body_font, theme.MUTED)
 
     else:

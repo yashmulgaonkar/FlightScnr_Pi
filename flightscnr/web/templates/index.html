@@ -117,12 +117,13 @@
                 <label for="show_sweep">Show radar sweep line</label>
                 <span class="switch"><input id="show_sweep" type="checkbox"><span class="track"></span></span>
             </div>
-            <label for="ais_enabled">AIS vessel data (aisstream.io)</label>
-            <select id="ais_enabled">
-                <option value="off">Disabled</option>
-                <option value="on">Enabled</option>
+            <label for="traffic_mode">Radar traffic</label>
+            <select id="traffic_mode">
+                <option value="aircraft">Aircraft only</option>
+                <option value="marine">Marine (AIS) only</option>
+                <option value="both">Aircraft + marine</option>
             </select>
-            <p class="hint">Requires an aisstream.io API key below. Free for non-commercial use.</p>
+            <p class="hint">Marine needs an aisstream.io API key below. Free for non-commercial use.</p>
             <button class="btn btn-primary" id="btn-radar" style="margin-top:.7rem" type="button">Save radar settings</button>
             <div id="radar-status" class="status"></div>
         </div>
@@ -543,7 +544,7 @@ async function loadAll() {
         $("radar_theme").value = String(r.theme_index || 0);
         $("show_compass").checked = !!r.show_compass_rose;
         $("show_sweep").checked = !!r.show_sweep_line;
-        $("ais_enabled").value = r.ais_enabled ? "on" : "off";
+        $("traffic_mode").value = r.traffic_mode || (r.ais_enabled ? "both" : "aircraft");
     } catch (_) {}
 
     try {
@@ -616,7 +617,7 @@ async function saveRadar() {
                 theme_index: Number($("radar_theme").value),
                 show_compass_rose: $("show_compass").checked,
                 show_sweep_line: $("show_sweep").checked,
-                ais_enabled: $("ais_enabled").value === "on",
+                traffic_mode: $("traffic_mode").value,
             }),
         });
         showStatus("radar-status", "Radar settings saved.");

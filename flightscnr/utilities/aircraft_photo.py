@@ -40,7 +40,7 @@ DOWNLOAD_TIMEOUT_S = 12
 META_TTL_S = 14 * 24 * 3600  # hits/misses remembered two weeks
 THUMB_WIDTH = 480
 # Bump when lookup order / type fallback rules change so stale misses retry.
-PHOTO_LOGIC_VERSION = 2
+PHOTO_LOGIC_VERSION = 4
 
 _DATA_DIR = os.environ.get("FLIGHTSCNR_DATA_DIR", "/var/lib/flightscnr")
 _CACHE_DIR = os.path.join(_DATA_DIR, "aircraft_photos")
@@ -57,6 +57,21 @@ _TYPE_ALIASES: dict[str, tuple[str, ...]] = {
     "A21N": ("Airbus A321neo", "Airbus A321-251N"),
     "B38M": ("Boeing 737 MAX 8", "Boeing 737-8"),
     "UH72": ("UH-72 Lakota", "Eurocopter EC145 Army"),
+}
+
+# Prefer a specific Commons file for a type (File: title without "File:" ok).
+_TYPE_PINNED: dict[str, str] = {
+    "C172": (
+        "Cessna 172S Skyhawk SP (N1419D, cn 172S10671) (10-19-2022).jpg"
+    ),
+    "C152": "Cessna 152 Aeroandes (5129490525).jpg",
+    "S22T": "Cirrus SR22T (17159845664).jpg",
+    "SR22": "Cirrus SR22T (17159845664).jpg",
+    "BE33": "N9520Q Beech 35-C33A Debonair s n CE-21 (54312024456).jpg",
+    "C82S": "N61907 Cessna T182T Turbo Skylane TC s n T18208861 (54625681905).jpg",
+    "AS65": (
+        "Aerospatiale MH-65D Dolphin ‘6519’ (27371268621).jpg"
+    ),
 }
 
 
@@ -160,7 +175,186 @@ def _pick_image_url(photo: dict) -> str:
 def _cache_entry_usable(entry: dict) -> bool:
     if int(entry.get("logic_version") or 0) < PHOTO_LOGIC_VERSION:
         return False
+    # Type pins: drop cached type photos that aren't the pinned file.
+    if entry.get("match") == "type":
+        code = normalize_type_code(entry.get("type_code") or "")
+        pinned = _TYPE_PINNED.get(code)
+        if pinned:
+            title = (entry.get("title") or "").replace("File:", "").strip()
+            if title != pinned.strip():
+                return False
     return True
+
+
+def _commons_file_title(name: str) -> str:
+    title = (name or "").strip().replace("_", " ")
+    if title.lower().startswith("file:"):
+        return "File:" + title[5:].lstrip()
+    return f"File:{title}"
+
+
+def _fetch_commons_file(file_title: str) -> dict | None:
+    """Load a specific Commons File: page (for type pins)."""
+    title = _commons_file_title(file_title)
+    params = {
+        "action": "query",
+        "format": "json",
+        "titles": title,
+        "prop": "imageinfo",
+        "iiprop": "url|size|mime|extmetadata",
+        "iiurlwidth": THUMB_WIDTH,
+        "iiextmetadatafilter": "LicenseShortName|Artist|Credit|ImageDescription|ObjectName",
+    }
+    url = f"{COMMONS_API}?{urlencode(params)}"
+    resp = requests.get(
+        url, headers={"User-Agent": COMMONS_UA}, timeout=SEARCH_TIMEOUT_S
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    pages = (data.get("query") or {}).get("pages") or {}
+    for page in pages.values():
+        if page.get("missing") is not None:
+            continue
+        infos = page.get("imageinfo") or []
+        if not infos:
+            continue
+        return {"page": page, "info": infos[0]}
+    return None
+
+
+def _result_from_commons_hit(
+    chosen: dict,
+    *,
+    hex_id: str,
+    type_code: str,
+    now: float,
+    used_query: str,
+) -> dict | None:
+    info = chosen["info"]
+    page = chosen["page"]
+    thumb = info.get("thumburl") or info.get("url")
+    if not thumb:
+        return None
+
+    extmeta = info.get("extmetadata") or {}
+    license_name = _strip_html(_ext_text(extmeta, "LicenseShortName")) or "Commons"
+    artist = _strip_html(_ext_text(extmeta, "Artist"))
+    title = (page.get("title") or "").replace("File:", "")
+    page_url = (
+        "https://commons.wikimedia.org/wiki/"
+        + (page.get("title") or "").replace(" ", "_")
+    )
+
+    _ensure_cache_dir()
+    ext = ".jpg"
+    mime = (info.get("mime") or "").lower()
+    if "png" in mime:
+        ext = ".png"
+    elif "webp" in mime:
+        ext = ".webp"
+    # Shared file for a type so every C172 hex reuses one download.
+    dest = os.path.join(_CACHE_DIR, f"type_{type_code.lower()}{ext}")
+    marker = dest + ".title"
+
+    try:
+        reuse = (
+            os.path.isfile(dest)
+            and os.path.getsize(dest) > 100
+            and os.path.isfile(marker)
+            and open(marker, encoding="utf-8").read().strip() == title
+        )
+        if reuse:
+            ok = True
+        else:
+            ok = _download(thumb, dest, user_agent=COMMONS_UA)
+            if ok:
+                with open(marker, "w", encoding="utf-8") as fh:
+                    fh.write(title + "\n")
+    except (requests.RequestException, OSError) as exc:
+        logger.warning("[photo] commons download failed: %s", exc)
+        ok = False
+    if not ok:
+        return None
+
+    result = {
+        "miss": False,
+        "ts": now,
+        "hex": hex_id,
+        "path": dest,
+        "photographer": artist,
+        "page_url": page_url,
+        "thumb_url": thumb,
+        "source": "wikimedia_commons",
+        "match": "type",
+        "type_code": type_code,
+        "title": title,
+        "license": license_name,
+        "query": used_query,
+        "logic_version": PHOTO_LOGIC_VERSION,
+        "cached": False,
+    }
+    meta = _load_meta()
+    with _lock:
+        meta[hex_id] = {k: v for k, v in result.items() if k != "cached"}
+        _save_meta()
+    logger.info(
+        "[photo] %s: type fallback %s → %s",
+        hex_id,
+        type_code,
+        title[:60],
+    )
+    return result
+
+
+def _lookup_type_commons(type_code: str, hex_id: str, now: float) -> dict | None:
+    code = normalize_type_code(type_code)
+    if not code:
+        return None
+
+    pinned = _TYPE_PINNED.get(code)
+    if pinned:
+        try:
+            logger.info("[photo] commons type pin %s → %s", code, pinned)
+            hit = _fetch_commons_file(pinned)
+        except (requests.RequestException, ValueError, TypeError) as exc:
+            logger.warning("[photo] commons pin fetch failed: %s", exc)
+            hit = None
+        if hit:
+            return _result_from_commons_hit(
+                hit,
+                hex_id=hex_id,
+                type_code=code,
+                now=now,
+                used_query=f"pin:{pinned}",
+            )
+
+    queries = _type_search_queries(code)
+    if not queries:
+        return None
+
+    chosen = None
+    used_query = ""
+    for query in queries:
+        try:
+            logger.info("[photo] commons type search %s %r", code, query)
+            hit = _search_commons_type(query, type_code=code)
+        except (requests.RequestException, ValueError, TypeError) as exc:
+            logger.warning("[photo] commons type search failed: %s", exc)
+            continue
+        if hit:
+            chosen = hit
+            used_query = query
+            break
+    if not chosen:
+        return None
+
+    return _result_from_commons_hit(
+        chosen,
+        hex_id=hex_id,
+        type_code=code,
+        now=now,
+        used_query=used_query,
+    )
 
 
 def _store_miss(hex_id: str, now: float) -> None:
@@ -375,90 +569,6 @@ def _search_commons_type(query: str, *, type_code: str = "") -> dict | None:
     return _pick_commons_page(pages, type_code=type_code)
 
 
-def _lookup_type_commons(type_code: str, hex_id: str, now: float) -> dict | None:
-    code = normalize_type_code(type_code)
-    queries = _type_search_queries(code)
-    if not queries:
-        return None
-
-    chosen = None
-    used_query = ""
-    for query in queries:
-        try:
-            logger.info("[photo] commons type search %s %r", code, query)
-            hit = _search_commons_type(query, type_code=code)
-        except (requests.RequestException, ValueError, TypeError) as exc:
-            logger.warning("[photo] commons type search failed: %s", exc)
-            continue
-        if hit:
-            chosen = hit
-            used_query = query
-            break
-    if not chosen:
-        return None
-
-    info = chosen["info"]
-    page = chosen["page"]
-    thumb = info.get("thumburl") or info.get("url")
-    if not thumb:
-        return None
-
-    extmeta = info.get("extmetadata") or {}
-    license_name = _strip_html(_ext_text(extmeta, "LicenseShortName")) or "Commons"
-    artist = _strip_html(_ext_text(extmeta, "Artist"))
-    title = (page.get("title") or "").replace("File:", "")
-    page_url = (
-        "https://commons.wikimedia.org/wiki/"
-        + (page.get("title") or "").replace(" ", "_")
-    )
-
-    _ensure_cache_dir()
-    ext = ".jpg"
-    mime = (info.get("mime") or "").lower()
-    if "png" in mime:
-        ext = ".png"
-    elif "webp" in mime:
-        ext = ".webp"
-    dest = os.path.join(_CACHE_DIR, f"{hex_id}_type{ext}")
-
-    try:
-        ok = _download(thumb, dest, user_agent=COMMONS_UA)
-    except requests.RequestException as exc:
-        logger.warning("[photo] commons download failed: %s", exc)
-        ok = False
-    if not ok:
-        return None
-
-    result = {
-        "miss": False,
-        "ts": now,
-        "hex": hex_id,
-        "path": dest,
-        "photographer": artist,
-        "page_url": page_url,
-        "thumb_url": thumb,
-        "source": "wikimedia_commons",
-        "match": "type",
-        "type_code": code,
-        "title": title,
-        "license": license_name,
-        "query": used_query,
-        "logic_version": PHOTO_LOGIC_VERSION,
-        "cached": False,
-    }
-    meta = _load_meta()
-    with _lock:
-        meta[hex_id] = {k: v for k, v in result.items() if k != "cached"}
-        _save_meta()
-    logger.info(
-        "[photo] %s: type fallback %s → %s",
-        hex_id,
-        code,
-        title[:60],
-    )
-    return result
-
-
 def lookup_aircraft_photo(
     icao_hex: str,
     *,
@@ -486,12 +596,16 @@ def lookup_aircraft_photo(
         if entry and not force:
             if now - float(entry.get("ts") or 0) < META_TTL_S and _cache_entry_usable(entry):
                 if entry.get("miss"):
-                    return None
-                path = entry.get("path") or ""
-                if path and os.path.isfile(path):
-                    out = dict(entry)
-                    out["cached"] = True
-                    return out
+                    # Misses cached before a type pin was added would stick forever;
+                    # retry when we now have a pin for this type.
+                    if not (type_code and type_code in _TYPE_PINNED):
+                        return None
+                else:
+                    path = entry.get("path") or ""
+                    if path and os.path.isfile(path):
+                        out = dict(entry)
+                        out["cached"] = True
+                        return out
 
     # 1) Planespotters by hex
     logger.info("[photo] planespotters lookup %s", hex_id)

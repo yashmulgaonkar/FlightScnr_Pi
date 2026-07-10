@@ -44,6 +44,70 @@ class TestVesselPhotoHelpers(unittest.TestCase):
         self.assertFalse(vessel_photo._name_is_searchable("CAPT SMITH"))
         self.assertTrue(vessel_photo._name_is_searchable("DR RAY", imo="9123456"))
         self.assertEqual(vessel_photo._search_queries("DR RAY"), [])
+        # First+Last vessel names stay searchable (need title ship cue later)
+        self.assertTrue(vessel_photo._name_is_searchable("MATTHEW TURNER"))
+        self.assertTrue(vessel_photo._looks_like_person_name("MATTHEW TURNER"))
+        self.assertTrue(vessel_photo._requires_title_maritime("MATTHEW TURNER"))
+
+    def test_ship_token_not_in_shipbuilder(self):
+        self.assertFalse(vessel_photo._title_has_maritime_cue(
+            "Matthew Turner (shipbuilder).jpg"
+        ))
+        self.assertTrue(vessel_photo._title_has_maritime_cue(
+            "Matthew Turner schooner.jpg"
+        ))
+        self.assertTrue(vessel_photo._title_has_maritime_cue(
+            "Matthew Turner sailing ship.jpg"
+        ))
+
+    def test_pick_best_rejects_shipbuilder_portrait(self):
+        pages = {
+            "1": {
+                "title": "File:Matthew Turner (shipbuilder).jpg",
+                "imageinfo": [{
+                    "mime": "image/jpeg",
+                    "width": 1600,
+                    "height": 900,
+                    "url": "person",
+                    "extmetadata": {
+                        "ImageDescription": {"value": "Matthew Turner, shipbuilder"},
+                    },
+                }],
+            },
+        }
+        self.assertIsNone(
+            vessel_photo._pick_best_page(pages, name="MATTHEW TURNER")
+        )
+
+    def test_matthew_turner_is_pinned(self):
+        pinned = vessel_photo._VESSEL_PINNED.get("MATTHEW TURNER", "")
+        self.assertIn("Mamma mia!", pinned)
+
+    def test_cape_hudson_is_pinned(self):
+        pinned = vessel_photo._VESSEL_PINNED.get("CAPE HUDSON", "")
+        self.assertIn("MV Cape Hudson", pinned)
+
+    def test_cache_rejects_wrong_pin(self):
+        entry = {
+            "filter_version": vessel_photo.FILTER_VERSION,
+            "title": "Matthew Turner (shipbuilder).jpg",
+            "path": "/tmp/nope.jpg",
+            "miss": False,
+        }
+        self.assertFalse(
+            vessel_photo._cache_entry_still_valid(entry, name="MATTHEW TURNER")
+        )
+        self.assertFalse(
+            vessel_photo._cache_entry_still_valid(
+                {
+                    "filter_version": vessel_photo.FILTER_VERSION,
+                    "title": "Some army tank.jpg",
+                    "path": "/tmp/nope.jpg",
+                    "miss": False,
+                },
+                name="CAPE HUDSON",
+            )
+        )
 
     def test_pick_best_rejects_people_photos(self):
         pages = {

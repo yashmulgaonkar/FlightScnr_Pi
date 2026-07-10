@@ -173,7 +173,10 @@ class RoundTouchDisplay:
             if self.overhead.processing:
                 return
             flights = list(self.overhead.peek_data() or [])
-            if self._ais_vessels:
+            mode = settings.traffic_mode()
+            if mode == "marine":
+                flights = []
+            if mode in ("marine", "both") and self._ais_vessels:
                 flights.extend(self._ais_vessels)
             self.flights = flights
             if self.screen == SCREEN_FLIGHT:
@@ -391,29 +394,30 @@ class RoundTouchDisplay:
     def _apply_display_row(self, row: int):
         self._display_focus = row
         if row == 0:
-            pct = settings.brightness_percent() + 5
+            settings.cycle_traffic_mode()
+            self._last_ais_poll = 0.0
+            self._tick_ais()
+            self._refresh_flights()
+        elif row == 1:
+            pct = settings.brightness_percent() + 10
             if pct > 100:
                 pct = 10
             settings.set_brightness_percent(pct)
             self._apply_brightness()
-        elif row == 1:
-            settings.toggle_distance_units()
         elif row == 2:
+            settings.toggle_distance_units()
+        elif row == 3:
             settings.cycle_scale()
             scale.select(settings.scale_index())
             map_bg.request_background()
-        elif row == 3:
-            settings.toggle_compass_rose()
         elif row == 4:
-            settings.cycle_min_height()
+            settings.toggle_compass_rose()
         elif row == 5:
-            settings.toggle_sweep_line()
+            settings.cycle_min_height()
         elif row == 6:
-            settings.toggle_auto_idle_clock()
+            settings.toggle_sweep_line()
         elif row == 7:
-            settings.toggle_ais_enabled()
-            self._last_ais_poll = 0.0
-            self._tick_ais()
+            settings.toggle_auto_idle_clock()
 
     def _apply_brightness(self):
         from display.round_touch import backlight, off_hours
@@ -653,10 +657,12 @@ class RoundTouchDisplay:
             self._apply_scroll_delta(-dy)
         elif self.screen == SCREEN_DETAILS:
             self._apply_scroll_delta(-dy)
+        elif self.screen == SCREEN_SETTINGS:
+            self._apply_scroll_delta(-dy)
 
     def _handle_settings_tap(self, x: int | None = None, y: int | None = None):
         if self.settings_page == info.PAGE_DISPLAY and x is not None and y is not None:
-            row = info.display_row_at(x, y)
+            row = info.display_row_at(x, y, self._scroll.offset)
             if row is not None:
                 self._apply_display_row(row)
         elif self.settings_page == info.PAGE_COLORS and x is not None and y is not None:
@@ -763,6 +769,10 @@ class RoundTouchDisplay:
             self._scroll.step(delta)
             self._safe_draw()
         elif swipe in (input_handler.SWIPE_UP, input_handler.SWIPE_DOWN) and self.screen == SCREEN_DETAILS:
+            delta = -nav.scroll_step() if swipe == input_handler.SWIPE_UP else nav.scroll_step()
+            self._scroll.step(delta)
+            self._safe_draw()
+        elif swipe in (input_handler.SWIPE_UP, input_handler.SWIPE_DOWN) and self.screen == SCREEN_SETTINGS:
             delta = -nav.scroll_step() if swipe == input_handler.SWIPE_UP else nav.scroll_step()
             self._scroll.step(delta)
             self._safe_draw()

@@ -106,6 +106,66 @@ class TestAircraftPhoto(unittest.TestCase):
         self.assertIn("Alice", line)
         self.assertIn("EC45", line)
 
+    def test_c172_is_pinned(self):
+        pinned = aircraft_photo._TYPE_PINNED.get("C172", "")
+        self.assertIn("Cessna 172S Skyhawk SP", pinned)
+
+    def test_c152_is_pinned(self):
+        pinned = aircraft_photo._TYPE_PINNED.get("C152", "")
+        self.assertIn("Cessna 152 Aeroandes", pinned)
+
+    def test_s22t_is_pinned(self):
+        pinned = aircraft_photo._TYPE_PINNED.get("S22T", "")
+        self.assertIn("Cirrus SR22T", pinned)
+        self.assertEqual(
+            aircraft_photo._TYPE_PINNED.get("SR22"),
+            aircraft_photo._TYPE_PINNED.get("S22T"),
+        )
+
+    def test_be33_is_pinned(self):
+        pinned = aircraft_photo._TYPE_PINNED.get("BE33", "")
+        self.assertIn("Debonair", pinned)
+
+    def test_cached_miss_retries_when_type_pin_exists(self):
+        with mock.patch.object(aircraft_photo, "_load_meta", return_value={
+            "a680d4": {
+                "miss": True,
+                "ts": 9e12,
+                "logic_version": aircraft_photo.PHOTO_LOGIC_VERSION,
+            },
+        }):
+            hit = {
+                "miss": False,
+                "path": "/tmp/type_s22t.jpg",
+                "source": "wikimedia_commons",
+                "match": "type",
+                "type_code": "S22T",
+            }
+            with mock.patch.object(
+                aircraft_photo, "_planespotters_lookup", return_value=None
+            ):
+                with mock.patch.object(
+                    aircraft_photo, "_lookup_type_commons", return_value=hit
+                ) as commons:
+                    result = aircraft_photo.lookup_aircraft_photo(
+                        "A680D4", aircraft_type="S22T"
+                    )
+                    self.assertIsNotNone(result)
+                    commons.assert_called_once()
+
+    def test_as65_is_pinned(self):
+        pinned = aircraft_photo._TYPE_PINNED.get("AS65", "")
+        self.assertIn("MH-65D Dolphin", pinned)
+
+    def test_stale_type_pin_not_usable(self):
+        entry = {
+            "match": "type",
+            "type_code": "C172",
+            "title": "702 Helicopters Cessna 172 Skyhawk N19804.jpg",
+            "logic_version": aircraft_photo.PHOTO_LOGIC_VERSION,
+        }
+        self.assertFalse(aircraft_photo._cache_entry_usable(entry))
+
     def test_hex_miss_falls_back_to_commons_type(self):
         with tempfile.TemporaryDirectory() as tmp:
             aircraft_photo._CACHE_DIR = tmp

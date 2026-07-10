@@ -357,7 +357,10 @@ def _draw_status(surface, flights):
             lines.insert(1, min_line)
         try:
             from display.round_touch import settings as _settings
-            if _settings.ais_enabled():
+            mode = _settings.traffic_mode()
+            if mode == "marine":
+                lines[-1] = "Waiting for AIS…"
+            elif mode == "both":
                 lines[-1] = "Waiting for aircraft / AIS…"
         except Exception:
             pass

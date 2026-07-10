@@ -12,6 +12,7 @@ SETTINGS_PATH = os.path.join(DATA_DIR, "round_touch_settings.json")
 _settings_mtime: float | None = None
 
 MIN_HEIGHT_OPTIONS = (0, 500, 1000, 1500)
+TRAFFIC_MODES = ("aircraft", "marine", "both")
 
 _defaults = {
     "brightness_percent": 100,
@@ -26,6 +27,9 @@ _defaults = {
     "auto_idle_clock": True,
     "flight_detail_timeout_s": 20,
     "clock_timeout_s": 10,
+    # aircraft | marine | both — what the radar shows
+    "traffic_mode": "aircraft",
+    # Kept in sync with traffic_mode for older readers / portal payloads
     "ais_enabled": False,
 }
 
@@ -118,6 +122,15 @@ def _load():
     if "font_index" in state:
         del state["font_index"]
         migrated = True
+    # Migrate legacy ais_enabled bool → traffic_mode enum
+    mode = str(state.get("traffic_mode") or "").strip().lower()
+    if "traffic_mode" not in data or mode not in TRAFFIC_MODES:
+        if "ais_enabled" in data:
+            state["traffic_mode"] = "both" if data.get("ais_enabled") else "aircraft"
+        else:
+            state["traffic_mode"] = mode if mode in TRAFFIC_MODES else "aircraft"
+        migrated = True
+    state["ais_enabled"] = state["traffic_mode"] in ("marine", "both")
     if migrated:
         _save(state)
     return state
@@ -145,6 +158,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("clock_timeout_s"),
         state.get("clock_12hr"),
         state.get("auto_timezone"),
+        state.get("traffic_mode"),
         state.get("ais_enabled"),
     )
 
@@ -259,20 +273,52 @@ def set_show_sweep_line(enabled: bool):
     _save(_state)
 
 
+def traffic_mode() -> str:
+    """What the radar shows: aircraft, marine (AIS), or both."""
+    mode = str(_state.get("traffic_mode") or "").strip().lower()
+    if mode in TRAFFIC_MODES:
+        return mode
+    return "both" if _state.get("ais_enabled") else "aircraft"
+
+
+def traffic_mode_label() -> str:
+    return traffic_mode()
+
+
+def aircraft_enabled() -> bool:
+    return traffic_mode() in ("aircraft", "both")
+
+
 def ais_enabled() -> bool:
-    return bool(_state.get("ais_enabled", False))
+    """True when marine traffic should be fetched / shown."""
+    return traffic_mode() in ("marine", "both")
+
+
+def cycle_traffic_mode():
+    order = list(TRAFFIC_MODES)
+    cur = traffic_mode()
+    nxt = order[(order.index(cur) + 1) % len(order)]
+    set_traffic_mode(nxt)
+
+
+def set_traffic_mode(mode: str):
+    raw = str(mode or "").strip().lower()
+    if raw not in TRAFFIC_MODES:
+        raw = "aircraft"
+    _state["traffic_mode"] = raw
+    _state["ais_enabled"] = raw in ("marine", "both")
+    _save(_state)
+    _sync_ais_client()
 
 
 def toggle_ais_enabled():
-    _state["ais_enabled"] = not ais_enabled()
-    _save(_state)
-    _sync_ais_client()
+    """Legacy: flip between aircraft-only and both (keeps old callers working)."""
+    set_traffic_mode("aircraft" if ais_enabled() else "both")
 
 
 def set_ais_enabled(enabled: bool):
-    _state["ais_enabled"] = bool(enabled)
-    _save(_state)
-    _sync_ais_client()
+    """Legacy portal/API: on → both, off → aircraft-only."""
+    set_traffic_mode("both" if enabled else "aircraft")
 
 
 def _sync_ais_client():

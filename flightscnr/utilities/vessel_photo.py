@@ -84,8 +84,17 @@ def _cache_key(name: str, imo: str = "", mmsi: int | str = "") -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
+# Prefer a specific Commons file for a vessel name (File: title without "File:" ok).
+_VESSEL_PINNED: dict[str, str] = {
+    "MATTHEW TURNER": "Mamma mia! (50437005333).jpg",
+    "CAPE HUDSON": (
+        "MV Cape Hudson Arrives at Indonesia for Super Garuda Shield 24 Offload (8599448).jpg"
+    ),
+    "SEA RELIANCE": "Crowley tug-barge pair, Oakland, California.jpg",
+}
+
 # Bump when match rules change so stale wrong hits (e.g. animal/people photos) are dropped.
-FILTER_VERSION = 4
+FILTER_VERSION = 5
 
 _MARITIME_TOKENS = (
     "ship", "vessel", "boat", "ferry", "tanker", "cargo", "container",
@@ -94,13 +103,16 @@ _MARITIME_TOKENS = (
     "destroyer", "carrier", "submarine", "dredger", "pilot", "harbour",
     "harbor", "port of", "imo ", "imo-", "mmsi", "bulk carrier",
     "general cargo", "ro ro", "motor vessel", "sailing vessel",
+    "schooner", "brigantine", "sloop", "sailboat", "tall ship",
 )
 
-# Strong maritime cues that must appear in the *title* for single-word ship names.
+# Strong maritime cues that must appear in the *title* for short/person-like names.
+# Matched as whole words so "shipbuilder" does not count as "ship".
 _TITLE_MARITIME_TOKENS = (
     "ship", "vessel", "boat", "ferry", "tanker", "cargo", "container",
     "cruise", "yacht", "tug", "barge", "freighter", "trawler", "warship",
     "frigate", "destroyer", "submarine", "dredger", "imo",
+    "schooner", "brigantine", "sloop", "sailboat", "tallship", "tall ship",
 )
 
 _SKIP_TOKENS = (
@@ -109,7 +121,7 @@ _SKIP_TOKENS = (
     "cat", "bird", "animal", "plant", "tree", "portrait", "person", "people",
     "building", "church", "castle", "mountain", "landscape", "stamp",
     "coin", "medal", "poster", "advert", "cartoon", "clipart", "svg",
-    # People / biography — "Dr. Ray", "Capt. …" collide with human photos
+    # People / biography — "Dr. Ray", "Capt. …", "Matthew Turner" collide
     "headshot", "selfie", "biography", "obituary", "memorial", "funeral",
     "wedding", "graduation", "interview", "speaker", "professor", "doctor",
     "physician", "surgeon", "dentist", "nurse", "teacher", "pastor",
@@ -117,6 +129,10 @@ _SKIP_TOKENS = (
     "actor", "actress", "musician", "singer", "author", "writer",
     "man ", "woman ", "men ", "women ", "boy ", "girl ", "child", "children",
     "crowd", "audience", "family of", "born ", "died ",
+    "shipbuilder", "boatbuilder", "shipwright", "naval architect",
+    "painter", "photographer", "inventor", "explorer", "chess",
+    "tank", "army tank", "armored", "armoured", "howitzer", "artillery",
+    "humvee", "bradley", "abrams", "military vehicle",
     # Wildlife / nature — single-word ship names often collide (RACOON, EAGLE, …)
     "raccoon", "racoon", "fox", "bear", "wolf", "deer", "rabbit", "hare",
     "squirrel", "otter", "seal ", "penguin", "dolphin", "whale", "shark",
@@ -168,14 +184,34 @@ def _has_imo(imo: str = "") -> bool:
     return bool(imo and str(imo).isdigit() and len(str(imo)) >= 7)
 
 
-def _looks_like_person_name(name: str) -> bool:
-    """True for honorific + short name patterns (Dr. Ray, Capt. Smith)."""
+def _has_person_honorific(name: str) -> bool:
+    """True for Dr./Capt./Prof. style names that almost always hit people photos."""
     tokens = _name_tokens(name)
     if not tokens:
         return False
-    if tokens[0] in _PERSON_PREFIXES and len(tokens) <= 3:
+    return tokens[0] in _PERSON_PREFIXES and len(tokens) <= 3
+
+
+def _looks_like_person_name(name: str) -> bool:
+    """True for honorific names or First Last patterns (Matthew Turner)."""
+    tokens = _name_tokens(name)
+    if not tokens:
+        return False
+    if _has_person_honorific(name):
+        return True
+    # "MATTHEW TURNER", "JOHN SMITH" — two alphabetic name tokens.
+    # Still searchable, but title must have a real ship cue (not "shipbuilder").
+    if len(tokens) == 2 and all(t.isalpha() and len(t) >= 3 for t in tokens):
         return True
     return False
+
+
+def _word_in_text(token: str, text: str) -> bool:
+    """Whole-word / phrase match so 'ship' does not hit 'shipbuilder'."""
+    tok = (token or "").strip().lower()
+    if not tok:
+        return False
+    return bool(re.search(rf"(?<![a-z0-9]){re.escape(tok)}(?![a-z0-9])", text))
 
 
 def _requires_title_maritime(name: str, *, imo: str = "") -> bool:
@@ -210,7 +246,8 @@ def _name_is_searchable(name: str, *, imo: str = "") -> bool:
     if len(tokens) == 1 and not _has_imo(imo):
         return False
     # "Dr. Ray" / "Capt. Smith" without IMO → people photos dominate Commons.
-    if _looks_like_person_name(clean) and not _has_imo(imo):
+    # First+Last names (Matthew Turner) stay searchable but need a title ship cue.
+    if _has_person_honorific(clean) and not _has_imo(imo):
         return False
     return True
 
@@ -267,7 +304,7 @@ def _name_matches_haystack(name: str, haystack: str) -> bool:
 def _has_maritime_context(haystack: str, imo: str = "") -> bool:
     if imo and str(imo).isdigit() and str(imo) in haystack.replace(" ", ""):
         return True
-    return any(tok in haystack for tok in _MARITIME_TOKENS)
+    return any(_word_in_text(tok, haystack) for tok in _MARITIME_TOKENS)
 
 
 def _title_has_maritime_cue(title: str) -> bool:
@@ -275,7 +312,7 @@ def _title_has_maritime_cue(title: str) -> bool:
     # Strip "File:" prefix noise
     if t.startswith("file:"):
         t = t[5:]
-    return any(tok in t for tok in _TITLE_MARITIME_TOKENS)
+    return any(_word_in_text(tok, t) for tok in _TITLE_MARITIME_TOKENS)
 
 
 def _looks_like_non_vessel(haystack: str, *, name: str = "") -> bool:
@@ -309,6 +346,11 @@ def _cache_entry_still_valid(entry: dict, *, name: str = "", imo: str = "") -> b
     """Reject stale cache rows from looser filter versions / wildlife hits."""
     if int(entry.get("filter_version") or 0) < FILTER_VERSION:
         return False
+    clean = _normalize_name(name)
+    pinned = _VESSEL_PINNED.get(clean)
+    if pinned:
+        title = (entry.get("title") or "").replace("File:", "").strip()
+        return title == pinned.strip()
     title = (entry.get("title") or "").lower()
     if title and _looks_like_non_vessel(title, name=name):
         return False
@@ -320,6 +362,41 @@ def _cache_entry_still_valid(entry: dict, *, name: str = "", imo: str = "") -> b
         if not (imo and str(imo) in title.replace(" ", "")):
             return False
     return True
+
+
+def _commons_file_title(name: str) -> str:
+    title = (name or "").strip().replace("_", " ")
+    if title.lower().startswith("file:"):
+        return "File:" + title[5:].lstrip()
+    return f"File:{title}"
+
+
+def _fetch_commons_file(file_title: str) -> dict | None:
+    """Load a specific Commons File: page (for vessel pins)."""
+    title = _commons_file_title(file_title)
+    params = {
+        "action": "query",
+        "format": "json",
+        "titles": title,
+        "prop": "imageinfo",
+        "iiprop": "url|size|mime|extmetadata",
+        "iiurlwidth": THUMB_WIDTH,
+        "iiextmetadatafilter": "LicenseShortName|Artist|Credit|ImageDescription|ObjectName",
+    }
+    headers = {"User-Agent": USER_AGENT}
+    url = f"{COMMONS_API}?{urlencode(params)}"
+    resp = requests.get(url, headers=headers, timeout=SEARCH_TIMEOUT_S)
+    resp.raise_for_status()
+    data = resp.json()
+    pages = (data.get("query") or {}).get("pages") or {}
+    for page in pages.values():
+        if page.get("missing") is not None:
+            continue
+        infos = page.get("imageinfo") or []
+        if not infos:
+            continue
+        return {"page": page, "info": infos[0]}
+    return None
 
 
 def _pick_best_page(pages: dict, *, name: str = "", imo: str = "") -> dict | None:
@@ -359,7 +436,7 @@ def _pick_best_page(pages: dict, *, name: str = "", imo: str = "") -> dict | Non
         score = float(min(w, 2000))
         if w >= h:
             score += 200
-        if any(tok in haystack for tok in ("ship", "vessel", "boat", "ferry", "tanker", "cargo")):
+        if any(_word_in_text(tok, haystack) for tok in ("ship", "vessel", "boat", "ferry", "tanker", "cargo", "schooner")):
             score += 200
         if _title_has_maritime_cue(title):
             score += 250
@@ -438,7 +515,9 @@ def lookup_vessel_photo(
     clean = _normalize_name(name)
     if not clean and not imo:
         return None
-    if clean and not _name_is_searchable(clean, imo=str(imo or "")) and not (
+    pinned = _VESSEL_PINNED.get(clean) if clean else None
+    # Pinned vessels bypass the ambiguous-name skip.
+    if not pinned and clean and not _name_is_searchable(clean, imo=str(imo or "")) and not (
         imo and str(imo).isdigit() and len(str(imo)) >= 7
     ):
         logger.info("[commons] skip ambiguous name %r", clean)
@@ -467,24 +546,33 @@ def lookup_vessel_photo(
                     )
                 # File missing or invalid — fall through to re-fetch
 
-    queries = _search_queries(clean, imo)
-    if not queries:
-        logger.info("[commons] skip ambiguous name %r (no safe queries)", clean)
-        return None
-
     chosen = None
     used_query = ""
-    for query in queries:
+    if pinned:
         try:
-            logger.info("[commons] search %r", query)
-            hit = _search_commons(query, name=clean, imo=str(imo or ""))
+            logger.info("[commons] vessel pin %r → %s", clean, pinned)
+            chosen = _fetch_commons_file(pinned)
+            used_query = f"pin:{pinned}"
         except requests.RequestException as exc:
-            logger.warning("[commons] search failed: %s", exc)
-            continue
-        if hit:
-            chosen = hit
-            used_query = query
-            break
+            logger.warning("[commons] pin fetch failed: %s", exc)
+            chosen = None
+
+    if not chosen:
+        queries = _search_queries(clean, imo)
+        if not queries and not pinned:
+            logger.info("[commons] skip ambiguous name %r (no safe queries)", clean)
+            return None
+        for query in queries:
+            try:
+                logger.info("[commons] search %r", query)
+                hit = _search_commons(query, name=clean, imo=str(imo or ""))
+            except requests.RequestException as exc:
+                logger.warning("[commons] search failed: %s", exc)
+                continue
+            if hit:
+                chosen = hit
+                used_query = query
+                break
 
     if not chosen:
         with _lock:
