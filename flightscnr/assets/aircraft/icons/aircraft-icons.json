@@ -66,17 +66,22 @@
     "balloon": {
       "file": "balloon.png",
       "description": "Hot-air / gas balloons",
-      "examples": []
+      "examples": ["BALL","L29","Q8","DJI"]
+    },
+    "airship": {
+      "file": "airship.png",
+      "description": "Airships / blimps / dirigibles",
+      "examples": ["SHIP","L29","Q8","DJI"]
     },
     "drone": {
       "file": "drone.png",
-      "description": "Drones / UAVs",
-      "examples": ["JAS4"]
+      "description": "Non-military Drones / UAVs",
+      "examples": ["JAS4","Q8","DJI"]
     },
     "military-drone": {
       "file": "military-drone.png",
       "description": "Military drones / UAVs",
-      "examples": []
+      "examples": ["Q9","BTB2","DRON"]
     },
     "fighter": {
       "file": "fighter.png",
@@ -86,7 +91,7 @@
     "glider": {
       "file": "glider.png",
       "description": "Gliders / sailplanes",
-      "examples": []
+      "examples": ["ULAC","SF25","GLIM","GLID","DIMO","AS16"]
     },
     "unknown": {
       "file": "unknown.png",
@@ -164,10 +169,11 @@
              "B762F", "B763F", "A332F",
              "AN12", "AN22", "AN124", "AN225", "IL76"],
 
-    "balloon": [],
+    "balloon": ["BALL"],
+    "airship": ["SHIP"],
     "drone": ["JAS4"],
-    "military-drone": ["Q9"],
+    "military-drone": ["Q9","BTB2","DRON"],
     "fighter": [],
-    "glider": []
+    "glider": ["ULAC","SF25","GLIM","GLID","DIMO","AS16"]
   }
 }

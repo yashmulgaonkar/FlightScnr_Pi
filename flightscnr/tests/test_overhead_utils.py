@@ -167,6 +167,7 @@ class TestHelicopterDetection:
         assert "A320" not in HELICOPTER_TYPES  # Airbus A320
         assert "C172" not in HELICOPTER_TYPES  # Cessna 172
         assert "B77W" not in HELICOPTER_TYPES  # Boeing 777
+        assert "BALL" not in HELICOPTER_TYPES  # Balloon (not a helicopter)
 
     def test_helicopter_sets_heli_icao(self):
         """When aircraft_type is a helicopter, owner_icao should be 'HELI'."""

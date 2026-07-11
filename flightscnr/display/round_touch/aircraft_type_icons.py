@@ -36,6 +36,9 @@ _CATEGORY_SIZE_SCALE = {
     "helicopter": 1.85,
     "drone": 0.5,
     "military-drone": 0.5,
+    "balloon": 0.5,
+    "airship": 0.5,
+    "glider": 0.5,
 }
 
 _type_to_category: dict[str, str] | None = None
@@ -130,14 +133,14 @@ def icon_category(flight: dict | None) -> str:
     flight = flight or {}
     plane_type = flight.get("plane") or ""
 
-    if _is_helicopter_type(plane_type):
-        return "helicopter"
-
     mapped = _category_for_type(plane_type)
-    # Explicit ICAO mapping wins (e.g. TEX2 → small-prop-single) even when
-    # dbFlags marks the track military; only unmapped types use the heuristic.
+    # Explicit ICAO mapping wins (e.g. BALL → balloon, TEX2 → small-prop-single)
+    # over helicopter / military heuristics.
     if mapped:
         return mapped
+
+    if _is_helicopter_type(plane_type):
+        return "helicopter"
 
     try:
         from utilities import aircraft_alert

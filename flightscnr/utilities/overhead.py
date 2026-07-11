@@ -89,7 +89,7 @@ HELICOPTER_TYPES = {
     "B06", "B407", "B429", "R44", "R66", "R22",
     "AS50", "AS55", "AS65", "H60", "BK17", "MD52", "MD50",
     "S92", "AW13", "AW16", "AW10", "B212", "B412",
-    "EC45", "EC75", "S61", "S70", "H500", "BALL",
+    "EC45", "EC75", "S61", "S70", "H500",
 }
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
