@@ -103,6 +103,12 @@ install_aircraft_icons() {
     log_step "Aircraft radar icons"
     mkdir -p "$dest"
 
+    # Prefer icons shipped in the repo (or already customized locally).
+    if [ -f "$dest/medium-jet.png" ] && [ -f "$dest/aircraft-icons.json" ]; then
+        log_ok "Aircraft icons already present ($dest)"
+        return 0
+    fi
+
     if [ -f "$stamp" ] && [ -f "$dest/medium-jet.png" ] && [ -f "$dest/aircraft-icons.json" ]; then
         log_ok "Aircraft icons already present ($dest)"
         return 0

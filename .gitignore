@@ -48,7 +48,10 @@ logo/
 logo2/
 combined_logos/
 logo-diff/
-icons/
+# Root-level extracted icons only — keep flightscnr/assets/aircraft/icons/ in git
+/icons/
 flightscnr/icons
+# Installer stamp (icons themselves are tracked)
+flightscnr/assets/aircraft/icons/.installed
 # Local Pi settings persisted at runtime
 round_touch_settings.json
