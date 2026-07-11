@@ -65,6 +65,18 @@ The UI is designed for a **4in round LCD with touch** (default layout: **720x720
 
 Pick any callsign in the web portal. The display shows origin → destination, aircraft type, a **progress bar** with a moving plane icon, and live stats (time remaining, distance, vertical speed). Flights not yet airborne can use **AirLabs** schedule data when configured.
 
+#### Aircraft photos and marine AIS
+
+Flight detail can show a photo of the aircraft when one is available. Lookups use the public [planespotters.net](https://www.planespotters.net/) API (by ICAO hex / registration), with Wikimedia Commons as a type-based fallback. Photographer credit is shown on screen when the source provides it.
+
+![Aircraft photos from planespotters.net](docs/images/airplane_images.jpg)
+
+Marine traffic uses live AIS from [aisstream.io](https://aisstream.io/) when enabled (portal → Radar → traffic mode, plus an API key). Vessels appear on the same radar as aircraft. Vessel detail photos are fetched from [Wikimedia Commons](https://commons.wikimedia.org/) by ship name / IMO when possible.
+
+![Marine AIS traffic on radar](docs/images/marine_traffic.png)
+
+![Marine vessel photo](docs/images/marine_images1.png) · ![Marine vessel photo](docs/images/marine_images2.png)
+
 ---
 
 
@@ -114,6 +126,9 @@ Portal preferences are stored on the Pi in `/var/lib/flightscnr/` and apply with
 | ---------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **[FR24 API](https://fr24api.flightradar24.com/docs/getting-started)** | Yes (full app)           | Routes, airlines, flight details, tracked flights, enriched radar                                                                                 |
 | **[adsb.fi](https://adsb.fi)**                                         | Optional (on by default) | Free live positions over the internet — merges with FR24 or fills the radar when FR24 is off (`ADSB_ENABLED=True`). **Not** a USB ADS-B receiver. |
+| **[aisstream.io](https://aisstream.io/)**                              | Optional                 | Live marine AIS vessel positions on the radar (set traffic mode to marine or both)                                                                  |
+| **[planespotters.net](https://www.planespotters.net/)**                | Optional (automatic)     | Aircraft photos on flight detail (by hex / registration)                                                                                            |
+| **[Wikimedia Commons](https://commons.wikimedia.org/)**                | Optional (automatic)     | Vessel photos on marine detail; aircraft type photo fallback                                                                                        |
 | **[Tomorrow.io](https://app.tomorrow.io/signup)**                      | Yes (weather)            | Clock temperature and multi-day forecast                                                                                                          |
 | **[AirLabs](https://airlabs.co/signup)**                               | Optional                 | Scheduled departure info when a tracked flight is not yet airborne                                                                                |
 
@@ -254,6 +269,8 @@ If the Pi was installed from a **git clone**, open **Updates** in the portal →
 
 - Parts of this repo are based on code by [c0wsaysmoo](https://github.com/c0wsaysmoo), used with their prior written permission. Thank you!
 - AIS WebSocket client design adapted from [capsule-radar-ais](https://github.com/socquique/capsule-radar-ais) (MIT).
+- Aircraft photos courtesy of [planespotters.net](https://www.planespotters.net/) contributors (when credited on screen).
+- Vessel photos from [Wikimedia Commons](https://commons.wikimedia.org/) contributors under their respective licenses.
 
 
 
