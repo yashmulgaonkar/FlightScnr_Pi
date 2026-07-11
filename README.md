@@ -30,7 +30,7 @@ The UI is designed for a **4in round LCD with touch** (default layout: **720x720
 | **Weather Forecast**          | Swipe right from clock                      | Multi-day forecast (Tomorrow.io)                                                                        |
 | **Clock settings**            | Swipe left from clock                       | Clock format and related options on-device                                                              |
 | **About / details**           | Swipe up from radar                         | Version, network, API status, portal URL                                                                |
-| **Settings**                  | Swipe left from radar                       | Brightness, timeouts, color theme, display options (multi-page)                                         |
+| **Settings**                  | Swipe left from radar                       | Brightness, timeouts, color theme, facing direction, display options (multi-page)                       |
 
 
 **Gestures and controls**
@@ -53,11 +53,30 @@ The UI is designed for a **4in round LCD with touch** (default layout: **720x720
 
 - Animated radar sweep with configurable accent **color themes** (Red, Yellow, Orange, Green, White)
 - Optional **compass rose** and **sweep line** (toggle in portal)
+- **Facing direction** — rotate the radar so “up” on the screen matches how the Pi is physically mounted (see below)
 - **Map tile background** (CARTO dark or OpenStreetMap) with cached tiles in `/var/lib/flightscnr/maps/`
 - **Aircraft-type icons** (jet, turboprop, helicopter, military, etc.) with altitude/speed tags
 - **Minimum altitude floor** to hide low aircraft (e.g. pattern traffic)
 - **Alert mode**: highlight military aircraft, emergency squawks (7700/7600/7500), or a custom watch list; optionally hide non-alerted traffic
 - Distance units: **km**, **statute miles**, or **nautical miles**
+
+#### Compass facing / orientation
+
+By default the radar is **north-up**. If the display is mounted on a wall or desk so the top of the screen does not face north, set a **facing direction** so aircraft and the compass rose match the real world.
+
+**Facing** is the real-world direction at the **top** of the screen: `0` = north, `90` = east, `180` = south, `270` = west (any 0–359° value is allowed).
+
+**On the device**
+
+1. Swipe left → **Settings** → **Display** → tap **Facing**
+2. Traffic drawing and ADS-B refresh pause; drag around the screen to rotate the rose, crosshairs, and map
+3. **Tap center** to save, or **tap the rim** to cancel
+
+**On the web portal**
+
+- **Radar** → **Facing direction (degrees)** → enter `0`–`359` → **Save radar settings**
+
+The setting is stored in `/var/lib/flightscnr/round_touch_settings.json` and survives updates.
 
 
 
@@ -90,7 +109,7 @@ Open from any device on your LAN:
 
 | Section               | Purpose                                                                                                  |
 | --------------------- | -------------------------------------------------------------------------------------------------------- |
-| **Radar**             | Set radar center (lat/lon), range, distance units, min altitude, color theme, compass, sweep, AIS enable |
+| **Radar**             | Set radar center (lat/lon), range, distance units, min altitude, color theme, compass, **facing direction**, sweep, AIS enable |
 | **Display & screens** | Brightness, flight-detail and clock timeouts, auto-return to clock when empty                            |
 | **Off-hours**         | Night schedule - dim, turn off display, or show clock                                                    |
 | **Weather**           | °C / °F for clock and forecast                                                                           |
