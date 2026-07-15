@@ -73,22 +73,20 @@ install_apt_packages() {
 }
 
 install_boot_splash() {
-    # Custom Plymouth splash + hide firmware rainbow splash on Raspberry Pi OS.
+    # Custom Plymouth splash + desktop wallpaper + hide firmware rainbow splash.
     local src="$APP_DIR/assets/boot/splash.png"
     local pix_dir="/usr/share/plymouth/themes/pix"
     local pix_splash="$pix_dir/splash.png"
+    local wall_dir="/usr/share/rpd-wallpaper"
+    local wall_splash="$wall_dir/flightscnr.png"
     local config=""
     local cmdline=""
+    local tmp_splash=""
 
-    log_step "Boot splash (FlightScnr)"
+    log_step "Boot splash & wallpaper (FlightScnr)"
 
     if [ ! -f "$src" ]; then
-        log_warn "Missing $src — skipped boot splash install"
-        return 0
-    fi
-
-    if [ ! -d "$pix_dir" ]; then
-        log_warn "Plymouth pix theme not found — skipped boot splash install"
+        log_warn "Missing $src — skipped boot splash / wallpaper install"
         return 0
     fi
 
@@ -101,21 +99,82 @@ install_boot_splash() {
         cmdline="/boot/cmdline.txt"
     fi
 
-    # Backup stock splash once, then install ours.
-    if [ -f "$pix_splash" ] && [ ! -f "$pix_dir/splash.png.stock" ]; then
-        cp -a "$pix_splash" "$pix_dir/splash.png.stock"
+    # Pi panel is usually rotated vs the art (DISPLAY_ROTATION); Plymouth / the
+    # desktop greeter have no FlightScnr rotation, so bake a 90° CW copy once.
+    tmp_splash="$(mktemp /tmp/flightscnr-plymouth-splash.XXXXXX.png)"
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$src" "$tmp_splash" <<'PYROT'
+import sys
+from pathlib import Path
+try:
+    from PIL import Image
+except ImportError:
+    Path(sys.argv[2]).write_bytes(Path(sys.argv[1]).read_bytes())
+else:
+    Image.open(sys.argv[1]).rotate(-90, expand=False).save(sys.argv[2], optimize=True)
+PYROT
+    else
+        cp -f "$src" "$tmp_splash"
     fi
-    install -m 0644 "$src" "$pix_splash"
-    log_ok "Installed Plymouth splash from assets/boot/splash.png"
 
-    # Ensure pix theme is selected (default on Pi OS desktop images).
-    if command -v plymouth-set-default-theme >/dev/null 2>&1; then
-        plymouth-set-default-theme pix >/dev/null 2>&1 || true
-        if command -v update-initramfs >/dev/null 2>&1; then
-            update-initramfs -u >/dev/null 2>&1 || log_warn "update-initramfs failed (splash may need a reboot once)"
+    if [ -d "$pix_dir" ]; then
+        if [ -f "$pix_splash" ] && [ ! -f "$pix_dir/splash.png.stock" ]; then
+            cp -a "$pix_splash" "$pix_dir/splash.png.stock"
         fi
-        log_ok "Plymouth theme set to pix"
+        install -m 0644 "$tmp_splash" "$pix_splash"
+        log_ok "Installed Plymouth splash from assets/boot/splash.png (rotated 90° CW for panel)"
+
+        if command -v plymouth-set-default-theme >/dev/null 2>&1; then
+            plymouth-set-default-theme pix >/dev/null 2>&1 || true
+            if command -v update-initramfs >/dev/null 2>&1; then
+                update-initramfs -u >/dev/null 2>&1 || log_warn "update-initramfs failed (splash may need a reboot once)"
+            fi
+            log_ok "Plymouth theme set to pix"
+        fi
+    else
+        log_warn "Plymouth pix theme not found — skipped boot splash install"
     fi
+
+    # Desktop wallpaper — same image as Plymouth.
+    if [ -d "$wall_dir" ] || mkdir -p "$wall_dir" 2>/dev/null; then
+        install -m 0644 "$tmp_splash" "$wall_splash"
+        local conf
+        for conf in \
+            /etc/xdg/pcmanfm/LXDE-pi/desktop-items-0.conf \
+            /home/pi/.config/pcmanfm/LXDE-pi/desktop-items-0.conf
+        do
+            mkdir -p "$(dirname "$conf")"
+            if [ -f "$conf" ]; then
+                if grep -qE '^\s*wallpaper=' "$conf"; then
+                    sed -i "s|^[[:space:]]*wallpaper=.*|wallpaper=$wall_splash|" "$conf"
+                else
+                    printf 'wallpaper=%s\n' "$wall_splash" >> "$conf"
+                fi
+                if ! grep -qE '^\s*wallpaper_mode=' "$conf"; then
+                    printf 'wallpaper_mode=crop\n' >> "$conf"
+                fi
+            else
+                printf '[*]\nwallpaper_mode=crop\nwallpaper_common=1\nwallpaper=%s\n' "$wall_splash" > "$conf"
+            fi
+            if [[ "$conf" == /home/pi/* ]]; then
+                chown -R pi:pi "$(dirname "$conf")" 2>/dev/null || true
+            fi
+        done
+        # Refresh live desktop if a session is up (best-effort).
+        if id pi >/dev/null 2>&1; then
+            local pi_uid
+            pi_uid="$(id -u pi)"
+            sudo -u pi env DISPLAY="${DISPLAY:-:0}" \
+                XDG_RUNTIME_DIR="/run/user/$pi_uid" \
+                pcmanfm --set-wallpaper="$wall_splash" --wallpaper-mode=crop \
+                >/dev/null 2>&1 || true
+        fi
+        log_ok "Desktop wallpaper set to FlightScnr splash ($wall_splash)"
+    else
+        log_warn "Could not create $wall_dir — skipped wallpaper install"
+    fi
+
+    rm -f "$tmp_splash"
 
     if [ -n "$config" ]; then
         if grep -qE '^\s*disable_splash=' "$config"; then

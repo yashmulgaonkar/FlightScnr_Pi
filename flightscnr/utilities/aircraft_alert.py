@@ -417,8 +417,11 @@ def attention_active() -> bool:
 
 
 def rim_flash_color():
+    """Solid alert rim while pulse is on; None = off (no ring drawn)."""
     from display.round_touch import theme
 
+    if not pulse_phase():
+        return None
     if _rim_flash_military:
-        return theme.ALERT_FLASH if pulse_phase() else theme.ALERT_MILITARY
-    return theme.ALERT_FLASH_OTHER if pulse_phase() else theme.ALERT_OTHER
+        return theme.ALERT_MILITARY
+    return theme.ALERT_OTHER

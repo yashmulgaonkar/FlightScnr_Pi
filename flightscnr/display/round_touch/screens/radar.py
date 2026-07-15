@@ -410,6 +410,8 @@ def draw_radar(
 def _draw_alert_rim_flash(surface):
     """Pulse the visible rim so a new mil/squawk/watch alert is hard to miss."""
     color = aircraft_alert.rim_flash_color()
+    if color is None:
+        return
     width = max(6, theme.s(7))
     # Match timeout-ring placement so the bezel does not clip the stroke.
     r = theme.VISIBLE_RADIUS - width // 2 - theme.s(1)
