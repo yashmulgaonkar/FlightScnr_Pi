@@ -363,6 +363,16 @@ setup_config_h() {
 setup_env_file() {
     if [ -f "$ENV_DEST" ]; then
         log_ok "$ENV_DEST already exists — keeping current configuration"
+        # Bookworm labwc/Xwayland pointer-emulates touch (MOUSE* only). An old
+        # TOUCH_USE_FINGER_EVENTS=True install silently drops every tap (#14).
+        if grep -qE '^[[:space:]]*TOUCH_USE_FINGER_EVENTS=(True|true|1|yes|on)[[:space:]]*$' "$ENV_DEST"; then
+            if [ "${XDG_SESSION_TYPE:-}" = "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+                sed -i 's/^[[:space:]]*TOUCH_USE_FINGER_EVENTS=.*/TOUCH_USE_FINGER_EVENTS=False/' "$ENV_DEST"
+                log_ok "Set TOUCH_USE_FINGER_EVENTS=False for Wayland/Xwayland touch (issue #14)"
+            else
+                log_warn "TOUCH_USE_FINGER_EVENTS is True — if taps do nothing under Xwayland, set it False in $ENV_DEST"
+            fi
+        fi
     else
         log_step "Creating $ENV_DEST"
         if [ -f "$REPO_ROOT/.env" ]; then
