@@ -469,6 +469,8 @@ class RoundTouchDisplay:
             rainviewer_overlay.request_overlay()
         elif action == "compass":
             settings.toggle_compass_rose()
+        elif action == "range_rings":
+            settings.toggle_range_rings()
         elif action == "facing":
             self._begin_facing_calibrate()
         elif action == "recenter":

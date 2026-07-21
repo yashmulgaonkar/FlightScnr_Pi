@@ -39,6 +39,7 @@ DISPLAY_ACTIONS = (
     "units",
     "range",
     "compass",
+    "range_rings",
     "facing",
     "recenter",
     "brightness",
@@ -332,6 +333,7 @@ def display_action_at(page: int, row: int) -> str | None:
 def _display_row_labels() -> list[str]:
     units = settings.distance_units()
     rose = "on" if settings.show_compass_rose() else "off"
+    rings = "on" if settings.show_range_rings() else "off"
     facing = settings.facing_label()
     # Brightness is drawn as a slider; placeholder keeps row count aligned.
     return [
@@ -339,6 +341,7 @@ def _display_row_labels() -> list[str]:
         f"Units: {units}",
         f"Range: {settings.scale_label()}",
         f"Compass Rose: {rose}",
+        f"Range rings: {rings}",
         f"Facing: {facing}",
         "Recenter map",
         "",  # brightness slider

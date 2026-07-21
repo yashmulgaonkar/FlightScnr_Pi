@@ -120,6 +120,10 @@
                 <label for="show_compass">Show compass rose</label>
                 <span class="switch"><input id="show_compass" type="checkbox"><span class="track"></span></span>
             </div>
+            <div class="chk">
+                <label for="show_range_rings">Show range rings</label>
+                <span class="switch"><input id="show_range_rings" type="checkbox"><span class="track"></span></span>
+            </div>
             <label for="facing_deg">Facing direction (degrees)</label>
             <input id="facing_deg" type="number" min="0" max="359" step="1" value="0">
             <p class="hint">Real-world direction at the top of the screen (0 = north, 90 = east, 180 = south, 270 = west). You can also set this on the device under Settings → Display → Facing.</p>
@@ -558,6 +562,7 @@ async function loadAll() {
         $("radar_theme").value = String(r.theme_index || 0);
         if ($("map_style")) $("map_style").value = r.map_style || "dark";
         $("show_compass").checked = !!r.show_compass_rose;
+        if ($("show_range_rings")) $("show_range_rings").checked = r.show_range_rings !== false;
         $("facing_deg").value = String(Math.round(Number(r.facing_deg) || 0) % 360);
         $("show_sweep").checked = !!r.show_sweep_line;
         $("show_precip").checked = r.show_precipitation !== false;
@@ -639,6 +644,7 @@ async function saveRadar() {
                 min_height_ft: Number($("min_height").value),
                 theme_index: Number($("radar_theme").value),
                 show_compass_rose: $("show_compass").checked,
+                show_range_rings: $("show_range_rings") ? $("show_range_rings").checked : true,
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,
                 show_precipitation: $("show_precip").checked,
@@ -684,6 +690,7 @@ async function saveAndReloadSettings() {
                 min_height_ft: Number($("min_height").value),
                 theme_index: Number($("radar_theme").value),
                 show_compass_rose: $("show_compass").checked,
+                show_range_rings: $("show_range_rings") ? $("show_range_rings").checked : true,
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,
                 show_precipitation: $("show_precip").checked,

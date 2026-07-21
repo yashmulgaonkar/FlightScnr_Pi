@@ -52,7 +52,7 @@ CARTO_TILE_WORKERS = 4
 OSM_TILE_WORKERS = 2
 VFR_TILE_WORKERS = 4
 CACHE_TTL_S = 7 * 24 * 3600
-CACHE_STYLE_VERSION = 13  # bump when map tint/placement/styles change
+CACHE_STYLE_VERSION = 14  # bump when map tint/placement/styles change
 
 _lock = threading.Lock()
 _surfaces: dict[tuple, pygame.Surface] = {}
@@ -314,13 +314,12 @@ def _style_vfr(surface: pygame.Surface) -> pygame.Surface:
     if Image is not None:
         tobytes = getattr(pygame.image, "tobytes", pygame.image.tostring)
         img = Image.frombytes("RGB", surface.get_size(), tobytes(surface, "RGB"))
-        # Pull saturation down — chart yellows/magentas fight aircraft labels.
-        img = ImageEnhance.Color(img).enhance(0.55)
-        img = ImageEnhance.Contrast(img).enhance(0.85)
-        img = ImageEnhance.Brightness(img).enhance(1.12)
-        # Pale wash toward near-white (not theme.BG green — that muddies the chart).
-        wash = Image.new("RGB", img.size, (236, 238, 232))
-        img = Image.blend(img, wash, alpha=0.38)
+        # Strong desat + pale wash — chart yellows/magentas fight aircraft labels.
+        img = ImageEnhance.Color(img).enhance(0.35)
+        img = ImageEnhance.Contrast(img).enhance(0.72)
+        img = ImageEnhance.Brightness(img).enhance(1.18)
+        wash = Image.new("RGB", img.size, (242, 244, 238))
+        img = Image.blend(img, wash, alpha=0.55)
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
@@ -329,7 +328,7 @@ def _style_vfr(surface: pygame.Surface) -> pygame.Surface:
     # Fallback without PIL: multiply toward white.
     pale = surface.copy().convert()
     shade = pygame.Surface(pale.get_size())
-    shade.fill((220, 222, 216))
+    shade.fill((200, 202, 196))
     pale.blit(shade, (0, 0), special_flags=pygame.BLEND_RGB_ADD)
     return pale
 

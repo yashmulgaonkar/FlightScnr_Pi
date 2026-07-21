@@ -30,6 +30,7 @@ _defaults = {
     "brightness_percent": 100,
     "distance_units": "km",
     "show_compass_rose": True,
+    "show_range_rings": True,
     # Real-world direction at the top of the screen (0=north-up).
     "facing_deg": 0.0,
     "show_sweep": True,
@@ -204,6 +205,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("theme_custom"),
         tuple(color_presets.normalize_rgb(state.get("custom_theme_rgb"))),
         state.get("show_compass_rose"),
+        state.get("show_range_rings"),
         _normalize_facing(state.get("facing_deg", 0)),
         state.get("show_sweep"),
         state.get("show_precipitation"),
@@ -495,6 +497,20 @@ def toggle_compass_rose():
 
 def set_show_compass_rose(enabled: bool):
     _state["show_compass_rose"] = bool(enabled)
+    _save(_state)
+
+
+def show_range_rings() -> bool:
+    return bool(_state.get("show_range_rings", True))
+
+
+def toggle_range_rings():
+    _state["show_range_rings"] = not show_range_rings()
+    _save(_state)
+
+
+def set_show_range_rings(enabled: bool):
+    _state["show_range_rings"] = bool(enabled)
     _save(_state)
 
 

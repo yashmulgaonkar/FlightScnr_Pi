@@ -53,6 +53,7 @@ def _backdrop_cache_key(*, pan_mode: bool, calibrate: bool):
         id(bg) if bg is not None else 0,
         id(overlay) if overlay is not None else 0,
         settings.show_compass_rose(),
+        settings.show_range_rings(),
         settings.theme_index(),
         settings.theme_custom(),
         settings.theme_rgb(),
@@ -134,25 +135,27 @@ def _draw_grid(surface, *, calibrate: bool = False):
     center = (theme.CENTER_X, theme.CENTER_Y)
     line_w = max(1, theme.s(2))
     facing = settings.effective_facing_deg()
-    for ring in range(1, theme.RING_COUNT + 1):
-        r = theme.GRID_OUTER_RADIUS * ring // theme.RING_COUNT
-        draw.draw_dashed_circle(surface, center, r, theme.GRID, width=line_w)
+    if settings.show_range_rings():
+        for ring in range(1, theme.RING_COUNT + 1):
+            r = theme.GRID_OUTER_RADIUS * ring // theme.RING_COUNT
+            draw.draw_dashed_circle(surface, center, r, theme.GRID, width=line_w)
+
+        cx, cy = theme.CENTER_X, theme.CENTER_Y
+        r = theme.GRID_OUTER_RADIUS
+        # Crosshairs follow true N/S and E/W (rotate with facing).
+        for bearing in (0, 90):
+            rad = math.radians(bearing - facing - 90)
+            dx = r * math.cos(rad)
+            dy = r * math.sin(rad)
+            draw.draw_dashed_line(
+                surface,
+                (cx - dx, cy - dy),
+                (cx + dx, cy + dy),
+                theme.CROSSHAIR,
+                width=line_w,
+            )
 
     cx, cy = theme.CENTER_X, theme.CENTER_Y
-    r = theme.GRID_OUTER_RADIUS
-    # Crosshairs follow true N/S and E/W (rotate with facing).
-    for bearing in (0, 90):
-        rad = math.radians(bearing - facing - 90)
-        dx = r * math.cos(rad)
-        dy = r * math.sin(rad)
-        draw.draw_dashed_line(
-            surface,
-            (cx - dx, cy - dy),
-            (cx + dx, cy + dy),
-            theme.CROSSHAIR,
-            width=line_w,
-        )
-
     if settings.show_compass_rose():
         font = draw.load_font(theme.FONT_CARDINAL, bold=True)
         # Place cardinals on the visible rim so they track true north.
@@ -175,7 +178,7 @@ def _draw_grid(surface, *, calibrate: bool = False):
             surface.blit(rendered, rect)
 
     # Range tags collide with calibrate help text — omit them in that mode.
-    if calibrate:
+    if calibrate or not settings.show_range_rings():
         return
 
     use_units = settings.distance_units()

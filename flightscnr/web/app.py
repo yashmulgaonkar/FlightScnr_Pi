@@ -520,6 +520,7 @@ def radar_json():
             "theme_index": settings.theme_index(),
             "theme_options": list(color_presets.THEME_NAMES),
             "show_compass_rose": settings.show_compass_rose(),
+            "show_range_rings": settings.show_range_rings(),
             "facing_deg": settings.facing_deg(),
             "show_sweep_line": settings.show_sweep_line(),
             "show_precipitation": settings.show_precipitation(),
@@ -563,6 +564,8 @@ def radar_save():
         settings.set_theme_index(int(data.get("theme_index")))
     if "show_compass_rose" in data:
         settings.set_show_compass_rose(bool(data.get("show_compass_rose")))
+    if "show_range_rings" in data:
+        settings.set_show_range_rings(bool(data.get("show_range_rings")))
     if "facing_deg" in data:
         settings.set_facing_deg(data.get("facing_deg"))
     if "show_sweep_line" in data:
