@@ -35,21 +35,21 @@ FOOTER_BUTTONS = ("prev", "next", "radar")
 # Display + Options were one tall page; split so both fit the round viewport.
 # Brightness is last and drawn as a drag slider (not a tap-cycle row).
 DISPLAY_ACTIONS = (
-    "traffic",
-    "units",
-    "range",
-    "compass",
-    "range_rings",
     "facing",
     "recenter",
+    "compass",
+    "range_rings",
+    "sweep",
+    "units",
+    "range",
     "brightness",
 )
 OPTIONS_ACTIONS = (
+    "traffic",
     "min_height",
-    "sweep",
-    "precipitation",
     "map_style",
     "vfr_opacity",
+    "precipitation",
     "idle_clock",
 )
 
@@ -398,29 +398,29 @@ def _display_row_labels() -> list[str]:
     rose = "on" if settings.show_compass_rose() else "off"
     rings = "on" if settings.show_range_rings() else "off"
     facing = settings.facing_label()
+    sweep = "on" if settings.show_sweep_line() else "off"
     # Brightness is drawn as a slider; placeholder keeps row count aligned.
     return [
-        f"Traffic: {settings.traffic_mode_label()}",
-        f"Units: {units}",
-        f"Range: {settings.scale_label()}",
-        f"Compass Rose: {rose}",
-        f"Range rings: {rings}",
         f"Facing: {facing}",
         "Recenter map",
+        f"Compass Rose: {rose}",
+        f"Range rings: {rings}",
+        f"Sweep line: {sweep}",
+        f"Units: {units}",
+        f"Range: {settings.scale_label()}",
         "",  # brightness slider
     ]
 
 
 def _options_row_labels() -> list[str]:
-    sweep = "on" if settings.show_sweep_line() else "off"
     precip = "on" if settings.show_precipitation() else "off"
     idle = "on" if settings.auto_idle_clock_enabled() else "off"
     return [
+        f"Traffic: {settings.traffic_mode_label()}",
         f"Min height: {settings.min_height_ft()} ft",
-        f"Sweep line: {sweep}",
-        f"Precipitation: {precip}",
         f"Map: {settings.map_style_label()}",
         "",  # VFR opacity slider
+        f"Precipitation: {precip}",
         f"Idle clock: {idle}",
     ]
 
@@ -579,11 +579,10 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
         lines = [
             f"IP: {_local_ip()}",
             f"Host: {_hostname()}.local",
+            f"Web: {web_portal_url(_hostname())}",
             *sys_lines,
             f"Lat: {LOCATION_HOME[0]:.5f}",
             f"Lon: {LOCATION_HOME[1]:.5f}",
-            f"Min height: {settings.min_height_ft()} ft",
-            f"Web: {web_portal_url(_hostname())}",
             _route_api_line("FR24", FR24_API_KEY),
             _route_api_line("AirLabs", AIRLABS_API_KEY),
             _route_api_line("AIS", AISSTREAM_API_KEY),
