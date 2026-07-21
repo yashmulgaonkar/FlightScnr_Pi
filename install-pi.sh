@@ -561,9 +561,12 @@ EOF
 }
 
 # --- main ---
+# Default to install when argv is empty (README: `sudo bash install-pi.sh`).
+# Do not bare-`shift` with zero args: under `set -euo pipefail` that exits 1
+# before cmd_install runs (GitHub issues #8 / #9).
 case "${1:-install}" in
     install)
-        shift
+        [ $# -gt 0 ] && shift
         cmd_install "$@"
         ;;
     update)
