@@ -1,12 +1,22 @@
 """Touch swipe and tap detection (FlightScnr navigation).
 
 FROZEN — see gesture_handler.py and tests/test_gesture_handler.py.
-Swipes/taps use MOUSE events only (_USE_FINGER_EVENTS=False).
+
+Default path: MOUSEBUTTON* / MOUSEMOTION (works under Bookworm labwc/Xwayland,
+which pointer-emulates touch and never sends FINGER*).
+
+Optional TOUCH_USE_FINGER_EVENTS=True prefers FINGER* when the stack actually
+delivers them (some capacitive DSI + SDL paths). Until a FINGER event is seen,
+mouse events are still accepted so Xwayland installs are not dead (issue #14).
 """
 
+import logging
 import math
+import os
 
 import pygame
+
+logger = logging.getLogger("flightscnr.display")
 
 SWIPE_NONE = 0
 SWIPE_UP = 1
@@ -14,19 +24,53 @@ SWIPE_DOWN = 2
 SWIPE_LEFT = 3
 SWIPE_RIGHT = 4
 
-# Capacitive panels (Waveshare DSI) emit FINGER events; resistive panels use mouse.
-def _use_finger_events() -> bool:
-    import os
 
+def _env_prefer_finger_events() -> bool:
     raw = os.environ.get("TOUCH_USE_FINGER_EVENTS", "false").strip().lower()
     return raw in ("1", "true", "yes", "on")
 
 
-_USE_FINGER_EVENTS = _use_finger_events()
+# Configured preference from env (True = prefer FINGER* when available).
+_USE_FINGER_EVENTS = _env_prefer_finger_events()
+# Latched once any FINGER* event arrives this process.
+_finger_events_seen = False
+_logged_mouse_fallback = False
+
+
+def prefer_finger_events() -> bool:
+    """True when env asks for FINGER*-based single-touch handling."""
+    return _USE_FINGER_EVENTS
 
 
 def use_finger_events() -> bool:
-    return _USE_FINGER_EVENTS
+    """True when single-touch should use the FINGER* path right now.
+
+    Stays False until a FINGER event is observed, even if env prefers fingers,
+    so Bookworm + Xwayland (mouse-only) keeps working with a True env value.
+    """
+    return _USE_FINGER_EVENTS and _finger_events_seen
+
+
+def _note_finger_event() -> None:
+    global _finger_events_seen
+    if not _finger_events_seen:
+        _finger_events_seen = True
+        if _USE_FINGER_EVENTS:
+            logger.info(
+                "Touch: FINGER events detected — using finger path for taps/swipes"
+            )
+
+
+def _note_mouse_fallback() -> None:
+    global _logged_mouse_fallback
+    if _logged_mouse_fallback or not _USE_FINGER_EVENTS or _finger_events_seen:
+        return
+    _logged_mouse_fallback = True
+    logger.info(
+        "Touch: mouse events without FINGER* (typical under Xwayland) — "
+        "using mouse path; set TOUCH_USE_FINGER_EVENTS=False in /etc/flightscnr.env "
+        "to silence this (GitHub issue #14)"
+    )
 
 
 def _gesture_threshold_px() -> int:
@@ -149,13 +193,18 @@ class TouchInput:
         self._clear_pending()
 
     def handle_event(self, event: pygame.event.Event):
-        if _USE_FINGER_EVENTS and event.type in (
+        if event.type in (pygame.FINGERDOWN, pygame.FINGERMOTION, pygame.FINGERUP):
+            _note_finger_event()
+
+        # Drop redundant mouse down/motion only after FINGER* has proven available.
+        # Under Xwayland, FINGER* never arrives — keep mouse so taps are not dead.
+        if use_finger_events() and event.type in (
             pygame.MOUSEBUTTONDOWN,
             pygame.MOUSEMOTION,
         ):
             return
 
-        if _USE_FINGER_EVENTS and event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+        if use_finger_events() and event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             # Waveshare DSI reports both FINGER* and MOUSE*; release is often mouse-only.
             if self._start is not None:
                 sx, sy = self._start
@@ -166,7 +215,7 @@ class TouchInput:
                 self._finish_pointer(sx, sy, ex, ey)
             return
 
-        if event.type in (pygame.FINGERDOWN, pygame.FINGERUP) and not _USE_FINGER_EVENTS:
+        if event.type in (pygame.FINGERDOWN, pygame.FINGERUP) and not prefer_finger_events():
             return
 
         if event.type == pygame.FINGERDOWN:
@@ -206,6 +255,7 @@ class TouchInput:
             return
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            _note_mouse_fallback()
             self._clear_pending()
             self._start = _logical_pos(event.pos)
             self._drag_end = self._start

@@ -257,6 +257,16 @@ This installs system packages, creates `flightscnr-venv/`, downloads UI assets (
 | Logs                   | `sudo journalctl -u flightscnr -f`                             |
 
 
+**Touch works in `evtest` / `i2cdetect` but taps do nothing in the app?** On Raspberry Pi OS Bookworm with labwc/Wayland, Xwayland usually delivers **mouse** events for the panel, not SDL `FINGER*` events. If `/etc/flightscnr.env` has `TOUCH_USE_FINGER_EVENTS=True`, taps are dropped:
+
+```bash
+sudo sed -i 's/^TOUCH_USE_FINGER_EVENTS=.*/TOUCH_USE_FINGER_EVENTS=False/' /etc/flightscnr.env
+sudo systemctl restart flightscnr
+```
+
+Current builds also fall back to the mouse path automatically when no `FINGER*` events arrive (see [issue #14](https://github.com/yashmulgaonkar/FlightScnr_Pi/issues/14)).
+
+
 
 
 #### 6. Configure

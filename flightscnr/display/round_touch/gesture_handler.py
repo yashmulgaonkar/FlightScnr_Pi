@@ -11,9 +11,12 @@ Validated behaviour (Jul 2026):
   - Phantom 2nd contacts during swipe must NOT zoom or eat taps
 
 Architecture:
-  Swipes/taps use MOUSEBUTTON* + MOUSEMOTION (_USE_FINGER_EVENTS=False).
+  Swipes/taps default to MOUSEBUTTON* + MOUSEMOTION (Xwayland-safe).
+  TOUCH_USE_FINGER_EVENTS=True prefers FINGER* once a FINGER event is seen;
+  until then mouse events are still accepted (Bookworm labwc/Xwayland, issue #14).
   Pinch uses FINGERDOWN / FINGERMOTION / FINGERUP on the radar screen only.
-  The mouse button is the source of truth for single-finger gestures:
+  The mouse button is the source of truth for single-finger gestures when
+  use_finger_events() is False:
     - sync_pointer_down() on MOUSEBUTTONDOWN clears stale finger contacts
     - sync_pointer_up() on MOUSEBUTTONUP resets all finger tracking
   Event order per frame: pointer sync → input.handle_event → pinch.handle_event
@@ -38,7 +41,7 @@ def _debug_enabled() -> bool:
     return os.environ.get("TOUCH_DEBUG", "").strip().lower() in ("1", "true", "yes")
 
 # Bump when the frozen contract intentionally changes (see module docstring).
-GESTURE_LOGIC_VERSION = 1
+GESTURE_LOGIC_VERSION = 2
 
 
 class RadarGestureHandler:

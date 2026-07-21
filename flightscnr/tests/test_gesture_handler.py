@@ -244,11 +244,16 @@ class TestRadarGestureHandler(unittest.TestCase):
 
 
 class TestFingerEventMode(unittest.TestCase):
+    def setUp(self):
+        input_handler._finger_events_seen = False
+        input_handler._logged_mouse_fallback = False
+
     def test_finger_swipe_with_mouse_release_fallback(self):
         touch = TouchInput()
         surface = _surface()
         with _coord_patches(surface), patch.object(input_handler, "_USE_FINGER_EVENTS", True):
             touch.handle_event(_finger_event(pygame.FINGERDOWN, fid=3, x=100 / 720, y=100 / 720))
+            self.assertTrue(input_handler.use_finger_events())
             touch.handle_event(
                 _finger_event(pygame.FINGERMOTION, fid=3, x=200 / 720, y=100 / 720)
             )
@@ -256,6 +261,30 @@ class TestFingerEventMode(unittest.TestCase):
             gesture = touch.consume_gesture()
         self.assertEqual(gesture[0], "swipe")
         self.assertEqual(gesture[1], SWIPE_RIGHT)
+
+    def test_xwayland_mouse_works_when_finger_env_true(self):
+        """Issue #14: env True but stack only delivers mouse — taps must still work."""
+        touch = TouchInput()
+        surface = _surface()
+        with _coord_patches(surface), patch.object(input_handler, "_USE_FINGER_EVENTS", True):
+            self.assertFalse(input_handler.use_finger_events())
+            touch.handle_event(_mouse_down(100, 100))
+            touch.handle_event(_mouse_up(110, 110))
+            gesture = touch.consume_gesture()
+        self.assertEqual(gesture[0], "tap")
+        self.assertEqual(gesture[1], (110, 110))
+        self.assertFalse(input_handler.use_finger_events())
+
+    def test_finger_mode_ignores_mouse_down_after_finger_seen(self):
+        touch = TouchInput()
+        surface = _surface()
+        with _coord_patches(surface), patch.object(input_handler, "_USE_FINGER_EVENTS", True):
+            touch.handle_event(_finger_event(pygame.FINGERDOWN, fid=1, x=100 / 720, y=100 / 720))
+            touch.handle_event(_mouse_down(200, 200))  # must not relocate / second-start
+            touch.handle_event(_finger_event(pygame.FINGERUP, fid=1, x=100 / 720, y=100 / 720))
+            gesture = touch.consume_gesture()
+        self.assertEqual(gesture[0], "tap")
+        self.assertEqual(gesture[1], (100, 100))
 
     def test_finger_mode_pinch_after_second_finger(self):
         handler = RadarGestureHandler(TouchInput(), PinchZoom())
