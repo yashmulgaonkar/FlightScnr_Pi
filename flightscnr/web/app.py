@@ -530,6 +530,7 @@ def radar_json():
             "ais_enabled": settings.ais_enabled(),
             "map_style": settings.map_style(),
             "map_style_options": list(settings.MAP_STYLES),
+            "vfr_map_opacity": settings.vfr_map_opacity(),
         }
     )
 
@@ -579,6 +580,11 @@ def radar_save():
             rainviewer_overlay.request_overlay()
     if "map_style" in data:
         settings.set_map_style(str(data.get("map_style") or ""))
+    if "vfr_map_opacity" in data:
+        try:
+            settings.set_vfr_map_opacity(int(data.get("vfr_map_opacity")))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "message": "vfr_map_opacity must be a number"}), 400
     if "traffic_mode" in data:
         settings.set_traffic_mode(str(data.get("traffic_mode") or ""))
     elif "ais_enabled" in data:

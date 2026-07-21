@@ -21,10 +21,17 @@ MAP_STYLES = ("dark", "light", "vfr")
 # Waveshare DSI panels stay lit near ~3% (raw ~8/255); 10% was needlessly bright at night.
 BRIGHTNESS_MIN_PERCENT = 3
 BRIGHTNESS_MAX_PERCENT = 100
+# VFR chart opacity on the radar (lower = more washed / pale).
+VFR_OPACITY_MIN_PERCENT = 15
+VFR_OPACITY_MAX_PERCENT = 100
 
 
 def clamp_brightness_percent(value: int) -> int:
     return max(BRIGHTNESS_MIN_PERCENT, min(BRIGHTNESS_MAX_PERCENT, int(value)))
+
+
+def clamp_vfr_opacity_percent(value: int) -> int:
+    return max(VFR_OPACITY_MIN_PERCENT, min(VFR_OPACITY_MAX_PERCENT, int(value)))
 
 _defaults = {
     "brightness_percent": 100,
@@ -52,6 +59,7 @@ _defaults = {
     "ais_enabled": False,
     # dark | light | vfr — radar basemap (see map_bg)
     "map_style": "dark",
+    "vfr_map_opacity": 45,
 }
 
 # Live preview while calibrating facing (not persisted until save).
@@ -182,6 +190,17 @@ def _load():
     else:
         raw = str(state.get("map_style") or "dark").strip().lower()
         state["map_style"] = raw if raw in MAP_STYLES else "dark"
+    try:
+        if "vfr_map_opacity" not in data:
+            state["vfr_map_opacity"] = 45
+            migrated = True
+        else:
+            state["vfr_map_opacity"] = clamp_vfr_opacity_percent(
+                int(state.get("vfr_map_opacity", 45))
+            )
+    except (TypeError, ValueError):
+        state["vfr_map_opacity"] = 45
+        migrated = True
     if color_presets.migrate_theme_index(state):
         migrated = True
     if migrated:
@@ -219,6 +238,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("traffic_mode"),
         state.get("ais_enabled"),
         state.get("map_style"),
+        state.get("vfr_map_opacity"),
     )
 
 
@@ -253,8 +273,8 @@ def reload() -> bool:
     """Reload settings from disk if file changed externally."""
     global _state, _settings_mtime, _disk_synced
     force = _consume_reload_request()
-    # Do not clobber in-memory slider edits (brightness / theme RGB) that have
-    # not been flushed to disk yet — otherwise values flicker every poll.
+    # Do not clobber in-memory slider edits (brightness / VFR opacity / theme RGB)
+    # that have not been flushed to disk yet — otherwise values flicker every poll.
     if not force and not _disk_synced:
         return False
     try:
@@ -418,6 +438,32 @@ def cycle_map_style() -> str:
     cur = map_style()
     idx = MAP_STYLES.index(cur) if cur in MAP_STYLES else 0
     return set_map_style(MAP_STYLES[(idx + 1) % len(MAP_STYLES)])
+
+
+def vfr_map_opacity() -> int:
+    try:
+        return clamp_vfr_opacity_percent(int(_state.get("vfr_map_opacity", 45)))
+    except (TypeError, ValueError):
+        return 45
+
+
+def set_vfr_map_opacity(value: int, *, persist: bool = True) -> int:
+    """Set VFR chart opacity (draw-time blend — does not rebuild map tiles)."""
+    global _disk_synced
+    pct = clamp_vfr_opacity_percent(value)
+    _state["vfr_map_opacity"] = pct
+    if persist:
+        _save(_state)
+    else:
+        _disk_synced = False
+    # Drop draw-time opacity cache so the next frame picks up the new value.
+    try:
+        from display.round_touch import map_bg
+
+        map_bg.clear_vfr_opacity_blit_cache()
+    except Exception:
+        pass
+    return pct
 
 
 def traffic_mode() -> str:

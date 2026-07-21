@@ -58,6 +58,8 @@ def _backdrop_cache_key(*, pan_mode: bool, calibrate: bool):
         settings.theme_custom(),
         settings.theme_rgb(),
         settings.distance_units(),
+        settings.map_style(),
+        settings.vfr_map_opacity() if settings.map_style() == "vfr" else 0,
     )
 
 
@@ -355,31 +357,66 @@ def _is_tracked(flight) -> bool:
 
 
 def _light_basemap() -> bool:
-    """Pale street / VFR charts need darker aircraft icons for contrast."""
+    """Pale street / VFR charts need a dedicated high-contrast overlay palette."""
     try:
         return settings.map_style() in ("light", "vfr")
     except Exception:
         return False
 
 
+# Curated colors for busy pale charts (VFR / light CARTO) — not just darkened neon.
+_LIGHT_MAP_ICON = (15, 23, 42)          # near-black slate (silhouette)
+_LIGHT_MAP_TRACKED = (21, 128, 61)      # deep green
+_LIGHT_MAP_CALLSIGN = (15, 23, 42)      # near-black
+_LIGHT_MAP_TYPE = (30, 64, 175)         # indigo
+_LIGHT_MAP_ALT_UP = (14, 116, 144)      # deep teal
+_LIGHT_MAP_ALT_DOWN = (126, 34, 206)    # deep purple
+_LIGHT_MAP_VESSEL_PARKED = (71, 85, 105)
+_LIGHT_MAP_ALERT_MIL = (185, 28, 28)    # keep alerts punchy
+_LIGHT_MAP_ALERT_OTHER = (29, 78, 216)
+_LIGHT_MAP_HALO = (255, 255, 255)
+
+
 def _overlay_color_for_basemap(color: tuple) -> tuple:
-    """Darken bright overlay colors on light/VFR maps for contrast."""
+    """Map dark-radar accents to legible colors on light/VFR basemaps."""
     r, g, b = int(color[0]), int(color[1]), int(color[2])
     if not _light_basemap():
         return (r, g, b)
-    lum = 0.299 * r + 0.587 * g + 0.114 * b
-    if lum < 90:
-        # Already-dark greens (callsign GRID): push a bit darker still.
-        return (
-            max(8, int(r * 0.65)),
-            max(8, int(g * 0.65)),
-            max(8, int(b * 0.65)),
-        )
+    key = (r, g, b)
+    mapping = {
+        tuple(theme.AIRCRAFT[:3]): _LIGHT_MAP_ICON,
+        tuple(theme.VESSEL_MOVING[:3]): _LIGHT_MAP_ICON,
+        tuple(theme.SWEEP[:3]): _LIGHT_MAP_TRACKED,
+        tuple(theme.GRID[:3]): _LIGHT_MAP_CALLSIGN,
+        tuple(theme.TAG_TYPE[:3]): _LIGHT_MAP_TYPE,
+        tuple(theme.TAG_ALT_ASCEND[:3]): _LIGHT_MAP_ALT_UP,
+        tuple(theme.TAG_ALT_DESCEND[:3]): _LIGHT_MAP_ALT_DOWN,
+        tuple(theme.VESSEL_PARKED[:3]): _LIGHT_MAP_VESSEL_PARKED,
+        tuple(theme.ALERT_MILITARY[:3]): _LIGHT_MAP_ALERT_MIL,
+        tuple(theme.ALERT_OTHER[:3]): _LIGHT_MAP_ALERT_OTHER,
+        tuple(theme.ALERT_FLASH[:3]): _LIGHT_MAP_ALERT_MIL,
+        tuple(theme.ALERT_FLASH_OTHER[:3]): _LIGHT_MAP_ALERT_OTHER,
+        tuple(theme.HINT[:3]): _LIGHT_MAP_VESSEL_PARKED,
+    }
+    if key in mapping:
+        return mapping[key]
+    # Unknown accent: pull toward near-black while keeping a hint of hue.
     return (
-        max(12, int(r * 0.38)),
-        max(12, int(g * 0.38)),
-        max(12, int(b * 0.38)),
+        max(12, int(r * 0.28)),
+        max(12, int(g * 0.28)),
+        max(12, int(b * 0.28)),
     )
+
+
+def _draw_light_map_icon_halo(surface, x: int, y: int, *, compact: bool) -> None:
+    """White soft disc behind icons so slate silhouettes read on busy charts."""
+    if not _light_basemap():
+        return
+    r = theme.s(11) if compact else theme.s(15)
+    halo = pygame.Surface((r * 2 + 2, r * 2 + 2), pygame.SRCALPHA)
+    pygame.draw.circle(halo, (*_LIGHT_MAP_HALO, 210), (r + 1, r + 1), r)
+    pygame.draw.circle(halo, (*_LIGHT_MAP_HALO, 90), (r + 1, r + 1), r + 1)
+    surface.blit(halo, (int(x) - r - 1, int(y) - r - 1))
 
 
 def _flight_icon_color(flight, *, compact: bool):
@@ -427,6 +464,7 @@ def _draw_flights(surface, flights):
     inner_items.sort(key=_draw_order)
 
     for _, flight, (x, y) in rim_items:
+        _draw_light_map_icon_halo(surface, x, y, compact=True)
         aircraft.draw_plane_icon(
             surface,
             x,
@@ -440,6 +478,7 @@ def _draw_flights(surface, flights):
     for _, flight, (x, y) in inner_items:
         heading = geo.screen_heading(flight.get("heading") or 0)
         color = _flight_icon_color(flight, compact=False)
+        _draw_light_map_icon_halo(surface, x, y, compact=False)
         aircraft.draw_plane_icon(surface, x, y, heading, color, flight=flight)
         _draw_aircraft_tag(surface, x, y, flight)
 

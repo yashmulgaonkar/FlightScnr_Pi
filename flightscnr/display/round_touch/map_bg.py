@@ -52,7 +52,8 @@ CARTO_TILE_WORKERS = 4
 OSM_TILE_WORKERS = 2
 VFR_TILE_WORKERS = 4
 CACHE_TTL_S = 7 * 24 * 3600
-CACHE_STYLE_VERSION = 14  # bump when map tint/placement/styles change
+CACHE_STYLE_VERSION = 16  # bump when map tint/placement/styles change
+
 
 _lock = threading.Lock()
 _surfaces: dict[tuple, pygame.Surface] = {}
@@ -141,7 +142,7 @@ def _cache_key_for_scale(scale_index: int) -> tuple | None:
 
 
 def _cache_path_for_key(key: tuple) -> str:
-    lat, lon, scale_idx, style = key
+    lat, lon, scale_idx, style = key[0], key[1], key[2], key[3]
     return os.path.join(CACHE_DIR, f"bg_{style}_{lat}_{lon}_{scale_idx}.png")
 
 
@@ -305,7 +306,7 @@ def _style_light(surface: pygame.Surface) -> pygame.Surface:
 
 
 def _style_vfr(surface: pygame.Surface) -> pygame.Surface:
-    """Wash out FAA sectionals so callsigns/radar chrome stay readable."""
+    """Light readability pass on FAA sectionals (opacity is applied at draw time)."""
     try:
         from PIL import Image, ImageEnhance
     except ImportError:
@@ -314,23 +315,55 @@ def _style_vfr(surface: pygame.Surface) -> pygame.Surface:
     if Image is not None:
         tobytes = getattr(pygame.image, "tobytes", pygame.image.tostring)
         img = Image.frombytes("RGB", surface.get_size(), tobytes(surface, "RGB"))
-        # Strong desat + pale wash — chart yellows/magentas fight aircraft labels.
-        img = ImageEnhance.Color(img).enhance(0.35)
-        img = ImageEnhance.Contrast(img).enhance(0.72)
-        img = ImageEnhance.Brightness(img).enhance(1.18)
+        # Keep chart mostly intact — dial pale/strong with vfr_map_opacity at blit.
+        img = ImageEnhance.Color(img).enhance(0.92)
+        img = ImageEnhance.Contrast(img).enhance(0.95)
+        img = ImageEnhance.Brightness(img).enhance(1.02)
         wash = Image.new("RGB", img.size, (242, 244, 238))
-        img = Image.blend(img, wash, alpha=0.55)
+        img = Image.blend(img, wash, alpha=0.08)
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
         return pygame.image.load(buf).convert()
 
-    # Fallback without PIL: multiply toward white.
-    pale = surface.copy().convert()
-    shade = pygame.Surface(pale.get_size())
-    shade.fill((200, 202, 196))
-    pale.blit(shade, (0, 0), special_flags=pygame.BLEND_RGB_ADD)
-    return pale
+    return surface.convert()
+
+
+_vfr_opacity_blit_cache: tuple | None = None  # (id(bg), pct, surface)
+
+
+def _vfr_with_draw_opacity(bg: pygame.Surface) -> pygame.Surface:
+    """Fade VFR chart toward parchment by settings opacity (preserves circle alpha).
+
+    Applied at draw time so changing the slider never clears/rebuilds the tile cache
+    (which previously left the dark radar BG showing — looked like a black map).
+    """
+    global _vfr_opacity_blit_cache
+    try:
+        from display.round_touch import settings
+
+        pct = int(settings.vfr_map_opacity())
+    except Exception:
+        pct = 45
+    pct = max(0, min(100, pct))
+    if pct >= 100:
+        return bg
+
+    cached = _vfr_opacity_blit_cache
+    if cached is not None and cached[0] == id(bg) and cached[1] == pct:
+        return cached[2]
+
+    t = pct / 100.0
+    inv = 1.0 - t
+    out = bg.copy()
+    # Blend RGB toward parchment; leave the circle mask alpha untouched.
+    rgb = pygame.surfarray.pixels3d(out)
+    rgb[:, :, 0] = (rgb[:, :, 0].astype("float32") * t + 242.0 * inv).astype("uint8")
+    rgb[:, :, 1] = (rgb[:, :, 1].astype("float32") * t + 244.0 * inv).astype("uint8")
+    rgb[:, :, 2] = (rgb[:, :, 2].astype("float32") * t + 238.0 * inv).astype("uint8")
+    del rgb
+    _vfr_opacity_blit_cache = (id(bg), pct, out)
+    return out
 
 
 def _style_osm(surface: pygame.Surface) -> pygame.Surface:
@@ -630,11 +663,18 @@ def prewarm_all_scales():
     ).start()
 
 
+def clear_vfr_opacity_blit_cache():
+    """Drop draw-time VFR opacity surface (call when the slider changes)."""
+    global _vfr_opacity_blit_cache
+    _vfr_opacity_blit_cache = None
+
+
 def invalidate():
     """Drop in-memory backgrounds so the next request rebuilds or reloads."""
     with _lock:
         _surfaces.clear()
         _fetch_threads.clear()
+    clear_vfr_opacity_blit_cache()
 
 
 def get_background() -> pygame.Surface | None:
@@ -651,6 +691,8 @@ def draw_background(surface: pygame.Surface, pan_offset: tuple[int, int] | None 
     bg = get_background()
     if bg is None:
         return
+    if _resolved_style() == "vfr":
+        bg = _vfr_with_draw_opacity(bg)
     facing = 0.0
     try:
         from display.round_touch import settings

@@ -49,6 +49,7 @@ OPTIONS_ACTIONS = (
     "sweep",
     "precipitation",
     "map_style",
+    "vfr_opacity",
     "idle_clock",
 )
 
@@ -245,7 +246,7 @@ def display_row_at(x: int, y: int, page: int, scroll_offset: int = 0) -> int | N
     bottom = nav.content_bottom_y()
     actions = _row_actions(page)
     for i in range(count):
-        if actions[i] == "brightness":
+        if actions[i] in ("brightness", "vfr_opacity"):
             continue
         ry = row_y + i * row_h
         if ry + body_font.get_height() < top or ry > bottom:
@@ -323,6 +324,68 @@ def brightness_slider_value_at(x: int, scroll_offset: int = 0) -> int | None:
     return max(lo, min(hi, int(round(lo + t * span))))
 
 
+def _vfr_opacity_slider_metrics() -> tuple[int, int, int, int]:
+    """track_w, row_h, label_w, value_w for the Options VFR opacity slider."""
+    body_font = _display_font()
+    label_w = body_font.size("VFR opacity")[0]
+    value_w = body_font.size("100%")[0]
+    track_w = theme.s(100)
+    row_h = body_font.get_height() + theme.s(8)
+    return track_w, row_h, label_w, value_w
+
+
+def vfr_opacity_row_index() -> int:
+    try:
+        return OPTIONS_ACTIONS.index("vfr_opacity")
+    except ValueError:
+        return -1
+
+
+def _vfr_opacity_slider_geometry(scroll_offset: int = 0) -> tuple[pygame.Rect, int, int] | None:
+    """(hit_rect, track_x, track_w) for the Options VFR opacity slider."""
+    if "vfr_opacity" not in OPTIONS_ACTIONS:
+        return None
+    row_y, row_h, _ = _display_layout(PAGE_OPTIONS, scroll_offset)
+    track_w, slider_h, label_w, value_w = _vfr_opacity_slider_metrics()
+    gap = theme.s(8)
+    idx = vfr_opacity_row_index()
+    if idx < 0:
+        return None
+    ry = row_y + idx * row_h
+    block_w = label_w + gap + track_w + gap + value_w
+    left_x = theme.CENTER_X - block_w // 2
+    track_x = left_x + label_w + gap
+    hit_pad = theme.s(8)
+    hit = pygame.Rect(
+        track_x - hit_pad,
+        int(ry - theme.s(2)),
+        track_w + 2 * hit_pad,
+        max(row_h, slider_h) + theme.s(4),
+    )
+    return hit, track_x, track_w
+
+
+def vfr_opacity_slider_at(x: int, y: int, scroll_offset: int = 0) -> bool:
+    geom = _vfr_opacity_slider_geometry(scroll_offset)
+    if geom is None:
+        return False
+    hit, _, _ = geom
+    return hit.collidepoint(x, y)
+
+
+def vfr_opacity_slider_value_at(x: int, scroll_offset: int = 0) -> int | None:
+    """Map screen x on the VFR opacity track to VFR_OPACITY_MIN–100."""
+    geom = _vfr_opacity_slider_geometry(scroll_offset)
+    if geom is None:
+        return None
+    _, track_x, track_w = geom
+    lo = settings.VFR_OPACITY_MIN_PERCENT
+    hi = settings.VFR_OPACITY_MAX_PERCENT
+    t = (x - track_x) / max(1, track_w)
+    span = hi - lo
+    return max(lo, min(hi, int(round(lo + t * span))))
+
+
 def display_action_at(page: int, row: int) -> str | None:
     actions = _row_actions(page)
     if 0 <= row < len(actions):
@@ -357,6 +420,7 @@ def _options_row_labels() -> list[str]:
         f"Sweep line: {sweep}",
         f"Precipitation: {precip}",
         f"Map: {settings.map_style_label()}",
+        "",  # VFR opacity slider
         f"Idle clock: {idle}",
     ]
 
@@ -370,6 +434,7 @@ def _draw_settings_rows(
     bottom: int,
     *,
     draw_brightness_slider: bool = False,
+    draw_vfr_opacity_slider: bool = False,
 ) -> int:
     body_font = _display_font()
     row_y = top + theme.s(4) - scroll_offset
@@ -377,12 +442,16 @@ def _draw_settings_rows(
     total_h = theme.s(4) + len(rows) * row_h
     max_scroll = max(0, total_h - (bottom - top))
     brightness_idx = brightness_row_index() if draw_brightness_slider else -1
+    vfr_idx = vfr_opacity_row_index() if draw_vfr_opacity_slider else -1
     for i, line in enumerate(rows):
         ry = row_y + i * row_h
         if ry + body_font.get_height() < top or ry > bottom:
             continue
         if draw_brightness_slider and i == brightness_idx:
             _draw_brightness_slider_row(surface, int(ry), display_focus == i)
+            continue
+        if draw_vfr_opacity_slider and i == vfr_idx:
+            _draw_vfr_opacity_slider_row(surface, int(ry), display_focus == i)
             continue
         text_w, text_h = body_font.size(line)
         pad_x = theme.s(10)
@@ -422,6 +491,51 @@ def _draw_brightness_slider_row(surface, ry: int, focused: bool) -> None:
         )
         pygame.draw.rect(surface, theme.GRID, focus, max(1, theme.s(1)))
     label = body_font.render("Brightness", True, theme.MUTED)
+    surface.blit(label, (left_x, int(ry + (row_h - text_h) // 2)))
+    track_cy = int(ry + row_h // 2)
+    track_rect = pygame.Rect(track_x, track_cy - max(2, theme.s(2)), track_w, max(4, theme.s(4)))
+    pygame.draw.rect(surface, theme.HINT, track_rect, border_radius=theme.s(2))
+    t = (pct - lo) / max(1, hi - lo)
+    fill_w = int(round(t * track_w))
+    if fill_w > 0:
+        fill_rect = pygame.Rect(track_x, track_rect.y, fill_w, track_rect.height)
+        pygame.draw.rect(surface, theme.SWEEP, fill_rect, border_radius=theme.s(2))
+    knob_x = track_x + fill_w
+    knob_r = max(5, theme.s(6))
+    pygame.draw.circle(surface, theme.SWEEP, (knob_x, track_cy), knob_r)
+    pygame.draw.circle(surface, theme.LABEL, (knob_x, track_cy), knob_r, max(1, theme.s(1)))
+    value = body_font.render(f"{pct}%", True, theme.MUTED)
+    surface.blit(
+        value,
+        (
+            track_x + track_w + gap,
+            int(ry + (row_h - text_h) // 2),
+        ),
+    )
+
+
+def _draw_vfr_opacity_slider_row(surface, ry: int, focused: bool) -> None:
+    body_font = _display_font()
+    track_w, slider_h, label_w, value_w = _vfr_opacity_slider_metrics()
+    gap = theme.s(8)
+    pct = settings.vfr_map_opacity()
+    lo = settings.VFR_OPACITY_MIN_PERCENT
+    hi = settings.VFR_OPACITY_MAX_PERCENT
+    block_w = label_w + gap + track_w + gap + value_w
+    left_x = theme.CENTER_X - block_w // 2
+    track_x = left_x + label_w + gap
+    text_h = body_font.get_height()
+    row_h = max(slider_h, text_h + theme.s(6))
+    if focused:
+        pad = theme.s(4)
+        focus = pygame.Rect(
+            left_x - pad,
+            ry - pad,
+            block_w + pad * 2,
+            row_h + pad,
+        )
+        pygame.draw.rect(surface, theme.GRID, focus, max(1, theme.s(1)))
+    label = body_font.render("VFR opacity", True, theme.MUTED)
     surface.blit(label, (left_x, int(ry + (row_h - text_h) // 2)))
     track_cy = int(ry + row_h // 2)
     track_rect = pygame.Rect(track_x, track_cy - max(2, theme.s(2)), track_w, max(4, theme.s(4)))
@@ -508,6 +622,7 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
             display_focus,
             top,
             bottom,
+            draw_vfr_opacity_slider=True,
         )
 
     else:

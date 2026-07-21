@@ -116,6 +116,9 @@
                 <option value="vfr">VFR sectional (FAA)</option>
             </select>
             <p class="hint">VFR sectionals are free public-domain FAA charts (US coverage). Outside the US, use dark or light.</p>
+            <label for="vfr_opacity">VFR map opacity <span id="vfr_opacity_label">45%</span></label>
+            <input id="vfr_opacity" type="range" min="15" max="100" step="1" value="45">
+            <p class="hint">How strong the VFR chart appears under traffic (lower = paler). Applies when map style is VFR.</p>
             <div class="chk">
                 <label for="show_compass">Show compass rose</label>
                 <span class="switch"><input id="show_compass" type="checkbox"><span class="track"></span></span>
@@ -568,6 +571,10 @@ async function loadAll() {
         });
         $("radar_theme").value = String(r.theme_index || 0);
         if ($("map_style")) $("map_style").value = r.map_style || "dark";
+        if ($("vfr_opacity")) {
+            $("vfr_opacity").value = String(r.vfr_map_opacity ?? 45);
+            syncVfrOpacityLabel();
+        }
         $("show_compass").checked = !!r.show_compass_rose;
         if ($("show_range_rings")) $("show_range_rings").checked = r.show_range_rings !== false;
         $("facing_deg").value = String(Math.round(Number(r.facing_deg) || 0) % 360);
@@ -637,6 +644,11 @@ function syncBrightLabel() {
     if (el) el.textContent = `${$("bright_pct").value}%`;
 }
 
+function syncVfrOpacityLabel() {
+    const el = $("vfr_opacity_label");
+    if (el && $("vfr_opacity")) el.textContent = `${$("vfr_opacity").value}%`;
+}
+
 async function saveRadar() {
     clearStatus("radar-status");
     try {
@@ -660,6 +672,7 @@ async function saveRadar() {
                 show_sweep_line: $("show_sweep").checked,
                 show_precipitation: $("show_precip").checked,
                 map_style: $("map_style").value,
+                vfr_map_opacity: Number($("vfr_opacity") ? $("vfr_opacity").value : 45),
                 traffic_mode: $("traffic_mode").value,
             }),
         });
@@ -706,6 +719,7 @@ async function saveAndReloadSettings() {
                 show_sweep_line: $("show_sweep").checked,
                 show_precipitation: $("show_precip").checked,
                 map_style: $("map_style").value,
+                vfr_map_opacity: Number($("vfr_opacity") ? $("vfr_opacity").value : 45),
                 traffic_mode: $("traffic_mode").value,
             }),
         });
@@ -980,6 +994,7 @@ $("night_mode").addEventListener("change", toggleDimRow);
 $("dist_units").addEventListener("change", refreshRangeInput);
 $("range_value").addEventListener("blur", snapRangeInputPreview);
 $("bright_pct").addEventListener("input", syncBrightLabel);
+if ($("vfr_opacity")) $("vfr_opacity").addEventListener("input", syncVfrOpacityLabel);
 
 document.addEventListener("DOMContentLoaded", () => {
     loadAll();

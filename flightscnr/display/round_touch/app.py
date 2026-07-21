@@ -150,6 +150,7 @@ class RoundTouchDisplay:
         self._pan_drag_start = None
         self._rgb_slider_channel: int | None = None
         self._brightness_slider_active = False
+        self._vfr_opacity_slider_active = False
 
         radar._init_sweep()
         map_bg.request_background()
@@ -409,6 +410,7 @@ class RoundTouchDisplay:
             settings.persist_theme_settings()
             self._rgb_slider_channel = None
         self._brightness_slider_active = False
+        self._vfr_opacity_slider_active = False
         if page != self.settings_page:
             self._scroll.reset()
             if page not in (info.PAGE_DISPLAY, info.PAGE_OPTIONS):
@@ -487,6 +489,9 @@ class RoundTouchDisplay:
             rainviewer_overlay.request_overlay()
         elif action == "map_style":
             settings.cycle_map_style()
+        elif action == "vfr_opacity":
+            # VFR opacity is a drag slider; taps are handled via vfr_opacity_slider_at.
+            return
         elif action == "idle_clock":
             settings.toggle_auto_idle_clock()
 
@@ -895,6 +900,15 @@ class RoundTouchDisplay:
                 if pos and info.brightness_slider_at(pos[0], pos[1], self._scroll.offset):
                     self.input.consume_scroll_drag()
                     return
+        if self.screen == SCREEN_SETTINGS and self.settings_page == info.PAGE_OPTIONS:
+            if self._vfr_opacity_slider_active:
+                self.input.consume_scroll_drag()
+                return
+            if self.input.is_dragging():
+                pos = self.input.drag_pos()
+                if pos and info.vfr_opacity_slider_at(pos[0], pos[1], self._scroll.offset):
+                    self.input.consume_scroll_drag()
+                    return
         dy = self.input.consume_scroll_drag()
         if not dy:
             return
@@ -979,6 +993,41 @@ class RoundTouchDisplay:
         self.input.consume_scroll_drag()
         return changed
 
+    def _apply_vfr_opacity_slider(self, x: int, *, persist: bool = True) -> bool:
+        value = info.vfr_opacity_slider_value_at(x, self._scroll.offset)
+        if value is None:
+            return False
+        if value == settings.vfr_map_opacity():
+            self._display_focus = info.vfr_opacity_row_index()
+            return False
+        settings.set_vfr_map_opacity(value, persist=persist)
+        self._display_focus = info.vfr_opacity_row_index()
+        return True
+
+    def _update_vfr_opacity_slider_drag(self) -> bool:
+        """Horizontal drag on Options VFR opacity slider; suppresses page scroll while active."""
+        if self.screen != SCREEN_SETTINGS or self.settings_page != info.PAGE_OPTIONS:
+            self._vfr_opacity_slider_active = False
+            return False
+        if not self.input.is_dragging():
+            if self._vfr_opacity_slider_active:
+                self._vfr_opacity_slider_active = False
+                settings.set_vfr_map_opacity(settings.vfr_map_opacity(), persist=True)
+                self.input.consume_scroll_drag()
+                return True
+            return False
+        pos = self.input.drag_pos()
+        if pos is None:
+            return False
+        x, y = pos
+        if not self._vfr_opacity_slider_active:
+            if not info.vfr_opacity_slider_at(x, y, self._scroll.offset):
+                return False
+            self._vfr_opacity_slider_active = True
+        changed = self._apply_vfr_opacity_slider(x, persist=False)
+        self.input.consume_scroll_drag()
+        return changed
+
     def _handle_settings_tap(self, x: int | None = None, y: int | None = None):
         if (
             self.settings_page in (info.PAGE_DISPLAY, info.PAGE_OPTIONS)
@@ -989,6 +1038,11 @@ class RoundTouchDisplay:
                 x, y, self._scroll.offset
             ):
                 self._apply_brightness_slider(x, persist=True)
+                return
+            if self.settings_page == info.PAGE_OPTIONS and info.vfr_opacity_slider_at(
+                x, y, self._scroll.offset
+            ):
+                self._apply_vfr_opacity_slider(x, persist=True)
                 return
             row = info.display_row_at(x, y, self.settings_page, self._scroll.offset)
             if row is not None:
@@ -1472,7 +1526,13 @@ class RoundTouchDisplay:
                                 self._apply_scale_step(scale_delta)
                         self._handle_navigation()
 
-                if self._update_facing_drag() or self._update_map_pan_drag() or self._update_theme_rgb_drag() or self._update_brightness_slider_drag():
+                if (
+                    self._update_facing_drag()
+                    or self._update_map_pan_drag()
+                    or self._update_theme_rgb_drag()
+                    or self._update_brightness_slider_drag()
+                    or self._update_vfr_opacity_slider_drag()
+                ):
                     self._safe_draw()
                     self._last_radar_draw = time.time()
 
