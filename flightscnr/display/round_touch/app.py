@@ -737,10 +737,14 @@ class RoundTouchDisplay:
         # Display-off mode: temporary wake after touch keeps daytime brightness.
         if pct == 0 and time.time() < self._off_hours_wake_until:
             pct = day_pct
-        # Off-hours clock mode: while the user is on radar (or other non-clock
-        # screens), restore their normal daytime brightness so traffic is readable.
+        # Legacy off-hours "clock" mode is always full daytime brightness (even
+        # on the clock screen itself). While on radar (or other non-clock
+        # screens) in that mode, restore daytime brightness so traffic is
+        # readable. Dim mode already has its own configured dim_percent that
+        # should apply uniformly across all screens, radar included.
         elif (
             off_hours.in_off_hours()
+            and off_hours.prefs().get("mode") == "clock"
             and self.screen
             not in (SCREEN_CLOCK, SCREEN_CLOCK_SETTINGS, SCREEN_FORECAST)
         ):
