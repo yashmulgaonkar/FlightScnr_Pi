@@ -560,6 +560,8 @@ class RoundTouchDisplay:
             self._begin_map_pan()
         elif action == "min_height":
             settings.cycle_min_height()
+        elif action == "max_height":
+            settings.cycle_max_height()
         elif action == "sweep":
             settings.toggle_sweep_line()
         elif action == "precipitation":

@@ -305,14 +305,19 @@ NIGHT_START = os.environ.get("NIGHT_START", "22:00")
 NIGHT_END = os.environ.get("NIGHT_END", "06:00")
 
 # --- Flight filtering (altitude in feet) ---
-MAX_ALTITUDE_FT = 100000
+#MAX_ALTITUDE_FT = 100000
+_raw_max_alt = os.environ.get("MAX_HEIGHT", os.environ.get("MAX_ALTITUDE", "50000"))
+MAX_ALTITUDE_FT = int(_raw_max_alt)
+MAX_HEIGHT = MAX_ALTITUDE_FT  # alias used in .env / UI wording
+
+
 _raw_min_alt = os.environ.get("MIN_HEIGHT", os.environ.get("MIN_ALTITUDE", "0"))
 MIN_ALTITUDE = int(_raw_min_alt)
 MIN_HEIGHT = MIN_ALTITUDE  # alias used in .env / UI wording
 
 
 def passes_altitude_filter(alt_ft) -> bool:
-    """True if aircraft altitude is at or above MIN_HEIGHT and within max."""
+    """True if aircraft altitude is at or above MIN_HEIGHT and below MAX_HEIGHT."""
     if alt_ft is None:
         return MIN_ALTITUDE <= 0
     try:
@@ -320,6 +325,7 @@ def passes_altitude_filter(alt_ft) -> bool:
     except (TypeError, ValueError):
         return MIN_ALTITUDE <= 0
     return MIN_ALTITUDE <= alt < MAX_ALTITUDE_FT
+
 JOURNEY_CODE_SELECTED = _require("JOURNEY_CODE_SELECTED")
 STATS_LOG_DAYS = int(os.environ.get("STATS_LOG_DAYS", "0"))
 _raw_filler = os.environ.get("JOURNEY_BLANK_FILLER", "").strip()

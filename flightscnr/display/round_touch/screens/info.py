@@ -47,6 +47,7 @@ DISPLAY_ACTIONS = (
 OPTIONS_ACTIONS = (
     "traffic",
     "min_height",
+    "max_height",
     "map_style",
     "vfr_opacity",
     "precipitation",
@@ -418,6 +419,7 @@ def _options_row_labels() -> list[str]:
     return [
         f"Traffic: {settings.traffic_mode_label()}",
         f"Min height: {settings.min_height_ft()} ft",
+        f"Max height: {settings.max_height_ft()} ft",
         f"Map: {settings.map_style_label()}",
         "",  # VFR opacity slider
         f"Precipitation: {precip}",

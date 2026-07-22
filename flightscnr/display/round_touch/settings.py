@@ -14,7 +14,8 @@ _settings_mtime: float | None = None
 # True when _state matches disk. Slider drags set this False until persist.
 _disk_synced = True
 
-MIN_HEIGHT_OPTIONS = (0, 500, 1000, 1500)
+MIN_HEIGHT_OPTIONS = (0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000)
+MAX_HEIGHT_OPTIONS = (1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000, 9000, 10000, 12000, 14000, 16000, 18000, 20000, 25000, 30000, 35000, 40000, 45000, 50000, 100000)
 TRAFFIC_MODES = ("aircraft", "marine", "both")
 MAP_STYLES = ("dark", "light", "vfr")
 
@@ -50,6 +51,7 @@ _defaults = {
     "clock_12hr": True,
     "auto_timezone": True,
     "min_height_ft": 1000,
+    "max_height_ft": 50000,
     "auto_idle_clock": True,
     "flight_detail_timeout_s": 20,
     "clock_timeout_s": 10,
@@ -94,15 +96,34 @@ def _env_min_height() -> int:
         return 1000
 
 
+def _snap_max_height(value) -> int:
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return 50000
+    if v in MAX_HEIGHT_OPTIONS:
+        return v
+    return min(MAX_HEIGHT_OPTIONS, key=lambda opt: abs(opt - v))
+
+
+def _env_max_height() -> int:
+    try:
+        from config import MAX_HEIGHT
+        return _snap_max_height(MAX_HEIGHT)
+    except ImportError:
+        return 50000
+
+
 def _seed_from_env(state: dict) -> None:
     """First-run defaults from /etc/flightscnr.env (not applied after settings are saved)."""
     try:
-        from config import DISTANCE_UNITS, MIN_HEIGHT, SEARCH_RADIUS_NM
+        from config import DISTANCE_UNITS, MIN_HEIGHT, MAX_HEIGHT, SEARCH_RADIUS_NM
         from display.round_touch import map_bg, scale
 
         state["distance_units"] = "mi" if DISTANCE_UNITS.strip().lower() == "imperial" else "km"
         state["scale_index"] = scale.index_for_radius_nm(SEARCH_RADIUS_NM)
         state["min_height_ft"] = _snap_min_height(MIN_HEIGHT)
+        state["max_height_ft"] = _snap_max_height(MAX_HEIGHT)
         env_style = map_bg.normalize_map_style(os.environ.get("RADAR_MAP_PROVIDER", "dark"))
         # UI only cycles dark/light/vfr; map legacy osm to dark for first-run seed.
         state["map_style"] = env_style if env_style in MAP_STYLES else "dark"
@@ -153,6 +174,11 @@ def _load():
         migrated = True
     else:
         state["min_height_ft"] = _snap_min_height(state["min_height_ft"])
+    if "max_height_ft" not in data:
+        state["max_height_ft"] = _env_max_height()
+        migrated = True
+    else:
+        state["max_height_ft"] = _snap_max_height(state["max_height_ft"])
     if "distance_miles" in data and "distance_units" not in data:
         state["distance_units"] = "mi" if data.get("distance_miles") else "km"
         migrated = True
@@ -229,6 +255,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("show_sweep"),
         state.get("show_precipitation"),
         state.get("min_height_ft"),
+        state.get("max_height_ft"),
         state.get("brightness_percent"),
         state.get("auto_idle_clock"),
         state.get("flight_detail_timeout_s"),
@@ -298,6 +325,7 @@ def reload() -> bool:
         _settings_mtime = None
     _disk_synced = True
     _sync_config_min_height()
+    _sync_config_max_height()
     # Re-apply runtime palette when theme changes are saved externally
     # (e.g. from the web portal process).
     apply_theme_colors()
@@ -334,6 +362,38 @@ def set_min_height_ft(value: int):
 
 
 _sync_config_min_height()
+
+
+def _sync_config_max_height():
+    try:
+        import config
+        h = max_height_ft()
+        config.MAX_ALTITUDE_FT = h
+        config.MAX_HEIGHT = h
+    except ImportError:
+        pass
+
+
+def max_height_ft() -> int:
+    return _snap_max_height(_state.get("max_height_ft", 50000))
+
+
+def cycle_max_height():
+    opts = MAX_HEIGHT_OPTIONS
+    current = max_height_ft()
+    idx = opts.index(current) if current in opts else 0
+    _state["max_height_ft"] = opts[(idx + 1) % len(opts)]
+    _sync_config_max_height()
+    _save(_state)
+
+
+def set_max_height_ft(value: int):
+    _state["max_height_ft"] = _snap_max_height(value)
+    _sync_config_max_height()
+    _save(_state)
+
+
+_sync_config_max_height()
 
 
 def brightness_percent():

@@ -106,6 +106,42 @@
                 <option value="500">500</option>
                 <option value="1000">1000</option>
                 <option value="1500">1500</option>
+                <option value="2000">2000</option>
+                <option value="2500">2500</option>
+                <option value="3000">3000</option>
+                <option value="3500">3500</option>
+                <option value="4000">4000</option>
+                <option value="4500">4500</option>
+                <option value="5000">5000</option>
+            </select>
+            <label for="max_height">Max altitude ceiling (ft)</label>
+            <select id="max_height">
+                <option value="1000">1000</option>
+                <option value="1500">1500</option>
+                <option value="2000">2000</option>
+                <option value="2500">2500</option>
+                <option value="3000">3000</option>                
+                <option value="3500">3500</option>
+                <option value="4000">4000</option>                
+                <option value="4500">4500</option>                
+                <option value="5000">5000</option>                
+                <option value="6000">6000</option>                
+                <option value="7000">7000</option>                
+                <option value="8000">8000</option>                
+                <option value="9000">9000</option>                
+                <option value="10000">10000</option>                
+                <option value="12000">12000</option>                  
+                <option value="14000">14000</option>                  
+                <option value="16000">16000</option>                  
+                <option value="18000">18000</option>                
+                <option value="20000">20000</option>                
+                <option value="25000">25000</option>                
+                <option value="30000">30000</option>                
+                <option value="35000">35000</option>                
+                <option value="40000">40000</option>                
+                <option value="45000">45000</option>                
+                <option value="50000">50000</option>                
+                <option value="100000">100000</option>                
             </select>
             <label for="radar_theme">Color theme</label>
             <select id="radar_theme"></select>
@@ -562,6 +598,7 @@ async function loadAll() {
         updateRangeHint(r.range_presets_mi);
         refreshRangeInput();
         $("min_height").value = String(r.min_height_ft ?? 1000);
+        $("max_height").value = String(r.max_height_ft ?? 50000);
         const theme = $("radar_theme");
         theme.innerHTML = "";
         (r.theme_options || []).forEach((name, idx) => {
@@ -666,6 +703,7 @@ async function saveRadar() {
                 distance_units: $("dist_units").value,
                 range_value: $("range_value").value.trim(),
                 min_height_ft: Number($("min_height").value),
+                max_height_ft: Number($("max_height").value),                
                 theme_index: Number($("radar_theme").value),
                 show_compass_rose: $("show_compass").checked,
                 show_range_rings: $("show_range_rings") ? $("show_range_rings").checked : true,
@@ -713,6 +751,7 @@ async function saveAndReloadSettings() {
                 distance_units: $("dist_units").value,
                 range_value: $("range_value").value.trim(),
                 min_height_ft: Number($("min_height").value),
+                max_height_ft: Number($("max_height").value),
                 theme_index: Number($("radar_theme").value),
                 show_compass_rose: $("show_compass").checked,
                 show_range_rings: $("show_range_rings") ? $("show_range_rings").checked : true,
