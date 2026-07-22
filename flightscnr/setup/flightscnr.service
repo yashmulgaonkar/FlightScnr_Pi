@@ -25,7 +25,7 @@ ExecStart=__REPO_DIR__/flightscnr-venv/bin/python3 __REPO_DIR__/flightscnr/fligh
 Restart=always
 RestartSec=10
 TimeoutStopSec=15
-KillMode=mixed
+KillMode=process
 User=root
 Group=root
 
