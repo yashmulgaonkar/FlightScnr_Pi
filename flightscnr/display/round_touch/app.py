@@ -148,6 +148,9 @@ class RoundTouchDisplay:
         self._vessel_photo_redraw = False
         self._last_settings_reload = 0.0
         self._off_hours_wake_until = 0.0
+        # Tracks whether force-clock off-hours was already active last tick
+        # (edge-detect so we don't fight deliberate navigation to radar).
+        self._off_hours_force_clock_active = False
         self._calibrating_facing = False
         self._facing_before_calibrate = 0.0
         self._facing_drag_angle = None
@@ -729,9 +732,19 @@ class RoundTouchDisplay:
     def _apply_brightness(self):
         from display.round_touch import backlight, off_hours
 
-        pct = off_hours.effective_brightness_percent(settings.brightness_percent())
+        day_pct = settings.brightness_percent()
+        pct = off_hours.effective_brightness_percent(day_pct)
+        # Display-off mode: temporary wake after touch keeps daytime brightness.
         if pct == 0 and time.time() < self._off_hours_wake_until:
-            pct = settings.brightness_percent()
+            pct = day_pct
+        # Off-hours clock mode: while the user is on radar (or other non-clock
+        # screens), restore their normal daytime brightness so traffic is readable.
+        elif (
+            off_hours.in_off_hours()
+            and self.screen
+            not in (SCREEN_CLOCK, SCREEN_CLOCK_SETTINGS, SCREEN_FORECAST)
+        ):
+            pct = day_pct
         backlight.apply_percent(pct)
 
     def _wake_for_off_hours_touch(self):
@@ -1443,7 +1456,15 @@ class RoundTouchDisplay:
 
         if time.time() < self._boot_until:
             return
-        if not off_hours.in_off_hours() or not off_hours.force_clock_enabled():
+        force_now = off_hours.in_off_hours() and off_hours.force_clock_enabled()
+        was_force = self._off_hours_force_clock_active
+        self._off_hours_force_clock_active = force_now
+        if not force_now:
+            return
+        # Only snap to clock when force-clock off-hours *begins*. Running this
+        # every frame made radar unreachable after a deliberate swipe to radar
+        # (https://github.com/yashmulgaonkar/FlightScnr_Pi/issues/18).
+        if was_force:
             return
         if self.screen not in (SCREEN_CLOCK, SCREEN_CLOCK_SETTINGS, SCREEN_FORECAST):
             self._open_screen(SCREEN_CLOCK)

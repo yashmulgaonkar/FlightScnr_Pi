@@ -1045,14 +1045,33 @@ class Overhead:
                     if getattr(lf, "registration", None) and not flight_dict.get("registration"):
                         flight_dict["registration"] = lf.registration
                     stats["feed_enriched"] += 1
-                    stats["flight_details"].append({
-                        "callsign": flight_dict.get("callsign", "?"),
-                        "plane": flight_dict.get("plane", "?"),
-                        "origin": flight_dict.get("origin", ""),
-                        "destination": flight_dict.get("destination", ""),
-                        "distance": flight_dict.get("distance", 0),
-                        "data_source": "fr24_feed+adsb",
-                    })
+                    # Update an existing stats row when this airframe was already listed
+                    # (avoids N3XS showing twice as fr24_grpc + fr24_feed+).
+                    cs = (flight_dict.get("callsign") or "").strip().upper()
+                    updated = False
+                    if cs:
+                        for row in stats.get("flight_details") or []:
+                            if (row.get("callsign") or "").strip().upper() == cs:
+                                row["plane"] = flight_dict.get("plane", row.get("plane", "?"))
+                                row["origin"] = flight_dict.get("origin", row.get("origin", ""))
+                                row["destination"] = flight_dict.get(
+                                    "destination", row.get("destination", "")
+                                )
+                                row["distance"] = flight_dict.get(
+                                    "distance", row.get("distance", 0)
+                                )
+                                row["data_source"] = "fr24_feed+adsb"
+                                updated = True
+                                break
+                    if not updated:
+                        stats["flight_details"].append({
+                            "callsign": flight_dict.get("callsign", "?"),
+                            "plane": flight_dict.get("plane", "?"),
+                            "origin": flight_dict.get("origin", ""),
+                            "destination": flight_dict.get("destination", ""),
+                            "distance": flight_dict.get("distance", 0),
+                            "data_source": "fr24_feed+adsb",
+                        })
 
                 by_callsign.clear()
                 by_hex: dict[str, dict] = {}

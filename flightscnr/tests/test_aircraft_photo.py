@@ -165,6 +165,33 @@ class TestAircraftPhoto(unittest.TestCase):
             aircraft_photo._TYPE_PINNED.get("H47"),
         )
 
+    def test_xa_vsl_airframe_is_pinned(self):
+        pin = aircraft_photo._resolve_airframe_pin("0D0E03", "XA-VSL")
+        self.assertIsNotNone(pin)
+        self.assertIn("1257912", pin["page_url"])
+        self.assertIn("volaris", pin["page_url"])
+        self.assertEqual(
+            aircraft_photo._resolve_airframe_pin("", "XA-VSL")["page_url"],
+            pin["page_url"],
+        )
+        # Stale Commons type fallback must not stick once the pin exists.
+        self.assertFalse(
+            aircraft_photo._cache_entry_usable(
+                {
+                    "hex": "0d0e03",
+                    "match": "type",
+                    "type_code": "A21N",
+                    "page_url": (
+                        "https://commons.wikimedia.org/wiki/File:"
+                        "München,_Flughafen,_D-AINT_auf_Rollbahn,_1.jpeg"
+                    ),
+                    "logic_version": aircraft_photo.PHOTO_LOGIC_VERSION,
+                },
+                type_code="A21N",
+                hex_id="0d0e03",
+            )
+        )
+
     def test_rejects_gulfstream_photo_for_chinook(self):
         photo = {
             "link": (

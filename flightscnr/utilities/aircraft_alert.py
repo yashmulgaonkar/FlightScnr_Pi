@@ -178,6 +178,10 @@ def merge_live_fields(target: dict, source: dict, fields: tuple[str, ...]) -> No
         value = source[field]
         if field in ("squawk", "callsign", "registration", "icao_hex", "plane") and not value:
             continue
+        # Keep an existing ICAO type. ADS-B `t` is often blank or wrong for GA
+        # (e.g. N3XS RV-8 overwritten by WAIX from adsb.fi).
+        if field == "plane" and (target.get("plane") or "").strip():
+            continue
         target[field] = value
 
 

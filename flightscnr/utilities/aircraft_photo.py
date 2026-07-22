@@ -85,6 +85,32 @@ _TYPE_PINNED: dict[str, str] = {
     ),
 }
 
+# Prefer a specific planespotters photo for an airframe (hex and/or registration).
+# Used when the pub API has no hex/reg hit (e.g. XA-VSL photos still indexed
+# under the delivery reg D-AZXO, while D-AZXO API now returns a different MSN).
+_AIRFRAME_PINNED: dict[str, dict[str, str]] = {
+    "0d0e03": {
+        "page_url": (
+            "https://www.planespotters.net/photo/1257912/"
+            "d-azxo-volaris-airbus-a321-271nx"
+        ),
+        "thumb_url": (
+            "https://cdn.plnspttrs.net/35833/"
+            "d-azxo-volaris-airbus-a321-271nx_PlanespottersNet_1257912_bf9e7f1256_o.jpg"
+        ),
+    },
+    "XA-VSL": {
+        "page_url": (
+            "https://www.planespotters.net/photo/1257912/"
+            "d-azxo-volaris-airbus-a321-271nx"
+        ),
+        "thumb_url": (
+            "https://cdn.plnspttrs.net/35833/"
+            "d-azxo-volaris-airbus-a321-271nx_PlanespottersNet_1257912_bf9e7f1256_o.jpg"
+        ),
+    },
+}
+
 # ICAO types that must not show a fixed-wing photo (heli / tandem-rotor / attack).
 _HELI_TYPE_CODES = frozenset({
     "H47", "CH47", "H60", "UH1", "UH60", "MH60", "AH1", "AH64", "H64",
@@ -213,9 +239,31 @@ def _pick_image_url(photo: dict) -> str:
     return ""
 
 
-def _cache_entry_usable(entry: dict, *, type_code: str = "") -> bool:
+def _normalize_page_url(url: str) -> str:
+    return (url or "").split("?", 1)[0].rstrip("/")
+
+
+def _resolve_airframe_pin(hex_id: str, registration: str = "") -> dict[str, str] | None:
+    hid = normalize_icao_hex(hex_id)
+    if hid and hid in _AIRFRAME_PINNED:
+        return _AIRFRAME_PINNED[hid]
+    reg = normalize_registration(registration)
+    if reg and reg in _AIRFRAME_PINNED:
+        return _AIRFRAME_PINNED[reg]
+    return None
+
+
+def _cache_entry_usable(entry: dict, *, type_code: str = "", hex_id: str = "") -> bool:
     if int(entry.get("logic_version") or 0) < PHOTO_LOGIC_VERSION:
         return False
+    # Airframe pins: drop cached photos that aren't the pinned planespotters page.
+    hid = normalize_icao_hex(hex_id or entry.get("hex") or "")
+    airframe_pin = _resolve_airframe_pin(hid) if hid else None
+    if airframe_pin:
+        want = _normalize_page_url(airframe_pin.get("page_url") or "")
+        got = _normalize_page_url(entry.get("page_url") or "")
+        if want and got != want:
+            return False
     # Type pins: drop cached type photos that aren't the pinned file.
     if entry.get("match") == "type":
         code = normalize_type_code(entry.get("type_code") or type_code or "")
@@ -231,6 +279,38 @@ def _cache_entry_usable(entry: dict, *, type_code: str = "") -> bool:
         if not _planespotters_matches_expected_type(fake, type_code):
             return False
     return True
+
+
+def _apply_airframe_pin(hex_id: str, pin: dict[str, str], now: float) -> dict | None:
+    """Download and cache a pinned planespotters photo for this hex."""
+    page_url = (pin.get("page_url") or "").strip()
+    thumb_url = (pin.get("thumb_url") or "").strip()
+    if not page_url or not thumb_url:
+        return None
+    _ensure_cache_dir()
+    dest = os.path.join(_CACHE_DIR, f"{hex_id}.jpg")
+    logger.info("[photo] airframe pin %s → %s", hex_id, page_url)
+    if not _download_planespotters_image(thumb_url, dest):
+        logger.warning("[photo] airframe pin download failed for %s", hex_id)
+        return None
+    result = {
+        "miss": False,
+        "ts": now,
+        "hex": hex_id,
+        "path": dest,
+        "photographer": (pin.get("photographer") or "").strip(),
+        "page_url": page_url,
+        "thumb_url": thumb_url,
+        "source": "planespotters",
+        "match": "airframe",
+        "logic_version": PHOTO_LOGIC_VERSION,
+        "cached": False,
+    }
+    meta = _load_meta()
+    with _lock:
+        meta[hex_id] = {k: v for k, v in result.items() if k != "cached"}
+        _save_meta()
+    return result
 
 
 def _planespotters_photo_text(photo: dict) -> str:
@@ -699,7 +779,7 @@ def lookup_aircraft_photo(
     """
     Fetch/cache a photo for an ICAO hex.
 
-    Order: planespotters hex → planespotters reg → Commons by ICAO type.
+    Order: airframe pin → planespotters hex → planespotters reg → Commons type.
     Returns dict with path, photographer, page_url, source — or None on miss.
     """
     hex_id = normalize_icao_hex(icao_hex)
@@ -711,16 +791,17 @@ def lookup_aircraft_photo(
 
     meta = _load_meta()
     now = time.time()
+    pin = _resolve_airframe_pin(hex_id, reg)
     with _lock:
         entry = meta.get(hex_id)
         if entry and not force:
             if now - float(entry.get("ts") or 0) < META_TTL_S and _cache_entry_usable(
-                entry, type_code=type_code
+                entry, type_code=type_code, hex_id=hex_id
             ):
                 if entry.get("miss"):
-                    # Misses cached before a type pin was added would stick forever;
-                    # retry when we now have a pin for this type.
-                    if not (type_code and type_code in _TYPE_PINNED):
+                    # Misses cached before a type/airframe pin was added would stick;
+                    # retry when we now have a pin for this type or airframe.
+                    if not pin and not (type_code and type_code in _TYPE_PINNED):
                         return None
                 else:
                     path = entry.get("path") or ""
@@ -728,6 +809,12 @@ def lookup_aircraft_photo(
                         out = dict(entry)
                         out["cached"] = True
                         return out
+
+    # 0) Explicit airframe pin (before empty API / wrong type fallback)
+    if pin:
+        pinned = _apply_airframe_pin(hex_id, pin, now)
+        if pinned:
+            return pinned
 
     # 1) Planespotters by hex
     logger.info("[photo] planespotters lookup %s", hex_id)

@@ -31,15 +31,28 @@ _HELICOPTER_PREFIXES = ("EC", "AS", "AW", "R4", "R6", "MI", "KA", "BK", "MD5")
 
 _DEFAULT_CATEGORY = "large-jet-2"
 
-# Helicopter artwork has more padding in the source PNG; boost draw size only.
+# Size relative to the base draw size after alpha-crop (1.0 = theme size).
 _CATEGORY_SIZE_SCALE = {
-    "helicopter": 1.85,
-    "military-helicopter": 1.85,
+    "large-jet-4": 0.75,
+    "large-jet-2": 0.75,
+    "medium-jet": 0.75,
+    "regional-jet": 0.5,
+    "business-jet": 0.5,
+    "turboprop": 0.75,
+    "small-prop-single": 0.5,
+    "small-prop-twin": 0.75,
+    "cargo": 0.75,
+    "helicopter": 0.75,
+    "military-helicopter": 0.75,
+    "military-fighter": 0.75,
+    "military-transport": 0.75,
+    "fighter": 0.75,
     "drone": 0.5,
     "military-drone": 0.5,
     "balloon": 0.5,
-    "airship": 0.5,
-    "glider": 0.5,
+    "airship": 0.75,
+    "glider": 0.75,
+    "unknown": 1.0,
 }
 
 _type_to_category: dict[str, str] | None = None
@@ -177,20 +190,63 @@ def _icon_path(category: str) -> str | None:
     return None
 
 
+def _crop_to_alpha(image: pygame.Surface, *, pad: int = 2) -> pygame.Surface:
+    """Trim empty transparent padding so the silhouette fills the draw size."""
+    mask = pygame.mask.from_surface(image)
+    rects = mask.get_bounding_rects()
+    if not rects:
+        return image
+
+    # Artwork can be disconnected (fuselage + wings); use the union bounds.
+    left = min(r.left for r in rects)
+    top = min(r.top for r in rects)
+    right = max(r.right for r in rects)
+    bottom = max(r.bottom for r in rects)
+    w, h = image.get_size()
+    left = max(0, left - pad)
+    top = max(0, top - pad)
+    right = min(w, right + pad)
+    bottom = min(h, bottom + pad)
+    if right <= left or bottom <= top:
+        return image
+    if left == 0 and top == 0 and right == w and bottom == h:
+        return image
+    return image.subsurface((left, top, right - left, bottom - top)).copy()
+
+
+def _fit_to_side(image: pygame.Surface, side: int) -> pygame.Surface:
+    """Scale preserving aspect ratio; center on a transparent side×side canvas."""
+    w, h = image.get_size()
+    if w <= 0 or h <= 0:
+        return pygame.Surface((side, side), pygame.SRCALPHA)
+
+    scale = side / max(w, h)
+    new_w = max(1, int(round(w * scale)))
+    new_h = max(1, int(round(h * scale)))
+    if new_w != w or new_h != h:
+        image = pygame.transform.smoothscale(image, (new_w, new_h))
+
+    if new_w == side and new_h == side:
+        return image
+
+    canvas = pygame.Surface((side, side), pygame.SRCALPHA)
+    canvas.blit(image, ((side - new_w) // 2, (side - new_h) // 2))
+    return canvas
+
+
 def _colorize(icon: pygame.Surface, color: tuple) -> pygame.Surface:
-    """Recolor a black silhouette icon to the radar theme color."""
+    """Recolor a black silhouette icon to the radar theme color (keep PNG alpha)."""
     tinted = pygame.Surface(icon.get_size(), pygame.SRCALPHA)
-    r, g, b = color[:3]
-    for x in range(icon.get_width()):
-        for y in range(icon.get_height()):
-            _, _, _, alpha = icon.get_at((x, y))
-            if alpha:
-                tinted.set_at((x, y), (r, g, b, alpha))
+    tinted.fill((*color[:3], 255))
+    src_a = pygame.surfarray.pixels_alpha(icon)
+    dst_a = pygame.surfarray.pixels_alpha(tinted)
+    dst_a[:] = src_a
+    del src_a, dst_a
     return tinted
 
 
 def get_icon_surface(category: str, size: int, color: tuple) -> pygame.Surface | None:
-    """Load, scale, and tint an icon (nose points up / north)."""
+    """Load, crop padding, scale, and tint an icon (nose points up / north)."""
     scale = _CATEGORY_SIZE_SCALE.get(category, 1.0)
     side = max(12, int(round(size * scale)))
     key = (category, side, color[:3])
@@ -207,9 +263,8 @@ def get_icon_surface(category: str, size: int, color: tuple) -> pygame.Surface |
         logger.warning("Could not load aircraft icon %s: %s", path, exc)
         return None
 
-    if image.get_width() != side or image.get_height() != side:
-        image = pygame.transform.smoothscale(image, (side, side))
-
+    image = _crop_to_alpha(image)
+    image = _fit_to_side(image, side)
     tinted = _colorize(image, color)
     _surface_cache[key] = tinted
     return tinted

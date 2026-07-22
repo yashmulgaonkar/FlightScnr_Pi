@@ -573,7 +573,7 @@ def _draw_map_pan_overlay(surface, pan_offset: tuple[int, int] | None = None):
     )
     center_line = f"{preview_lat:.5f}, {preview_lon:.5f}"
     lines = [
-        ("Recenter map", title, theme.LABEL),
+        ("Set radar center", title, theme.LABEL),
         ("Drag map · tap center to save", font, theme.HINT),
         ("Tap rim to cancel", font, theme.MUTED),
         (center_line, font, theme.MUTED),

@@ -81,6 +81,56 @@ class TestFlightDedupe(unittest.TestCase):
             out = aircraft_alert.dedupe_flights([a, b])
         self.assertEqual(len(out), 2)
 
+    def test_merge_preserves_existing_aircraft_type(self):
+        """ADS-B must not clobber a known FR24 type (N3XS RV8 vs WAIX)."""
+        from utilities.aircraft_alert import merge_live_fields
+
+        target = {"plane": "RV8", "altitude": 3500}
+        source = {"plane": "WAIX", "altitude": 3600, "heading": 90}
+        merge_live_fields(
+            target,
+            source,
+            ("altitude", "heading", "plane"),
+        )
+        self.assertEqual(target["plane"], "RV8")
+        self.assertEqual(target["altitude"], 3600)
+        self.assertEqual(target["heading"], 90)
+
+    def test_merge_fills_blank_aircraft_type(self):
+        from utilities.aircraft_alert import merge_live_fields
+
+        target = {"plane": "", "altitude": 3500}
+        source = {"plane": "RV8", "altitude": 3600}
+        merge_live_fields(target, source, ("altitude", "plane"))
+        self.assertEqual(target["plane"], "RV8")
+
+    def test_dedupe_preserves_fr24_type_over_adsb(self):
+        from utilities import aircraft_alert
+
+        fr24 = {
+            "callsign": "N3XS",
+            "registration": "N3XS",
+            "plane": "RV8",
+            "plane_latitude": 37.80,
+            "plane_longitude": -122.30,
+            "altitude": 3500,
+            "data_source": "fr24_grpc",
+            "origin": "SQL",
+        }
+        adsb = {
+            "callsign": "N3XS",
+            "plane": "WAIX",
+            "plane_latitude": 37.801,
+            "plane_longitude": -122.301,
+            "altitude": 3480,
+            "data_source": "adsb_fi",
+            "icao_hex": "A00001",
+        }
+        with mock.patch.object(aircraft_alert.geo, "distance_km", return_value=0.2):
+            out = aircraft_alert.dedupe_flights([fr24, adsb])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["plane"], "RV8")
+
 
 if __name__ == "__main__":
     unittest.main()

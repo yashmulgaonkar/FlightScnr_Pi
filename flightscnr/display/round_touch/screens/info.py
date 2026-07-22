@@ -402,7 +402,7 @@ def _display_row_labels() -> list[str]:
     # Brightness is drawn as a slider; placeholder keeps row count aligned.
     return [
         f"Facing: {facing}",
-        "Recenter map",
+        "Set radar center",
         f"Compass Rose: {rose}",
         f"Range rings: {rings}",
         f"Sweep line: {sweep}",
