@@ -30,6 +30,7 @@ MANAGED_KEYS = (
     "AIRLABS_API_KEY",
     "AISSTREAM_API_KEY",
     "FLIGHTAWARE_API_KEY",
+    "FIRMS_MAP_KEY",
     "HOME_LAT",
     "HOME_LON",
 )
@@ -295,6 +296,7 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         "airlabs_api_key": "AIRLABS_API_KEY",
         "aisstream_api_key": "AISSTREAM_API_KEY",
         "flightaware_api_key": "FLIGHTAWARE_API_KEY",
+        "firms_map_key": "FIRMS_MAP_KEY",
     }
     for form_key, env_key in field_map.items():
         if form_key not in payload:

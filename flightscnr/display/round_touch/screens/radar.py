@@ -5,7 +5,7 @@ import time
 
 import pygame
 
-from display.round_touch import aircraft, draw, geo, map_bg, rainviewer_overlay, scale, settings, theme
+from display.round_touch import aircraft, draw, firms_overlay, geo, map_bg, rainviewer_overlay, scale, settings, theme
 from display.round_touch import alert_prefs
 from display.round_touch import vessel_declutter
 from utilities import aircraft_alert
@@ -109,15 +109,17 @@ def draw_radar(
         rainviewer_overlay.draw_overlay(surface, pan_offset=offset)
         _draw_grid(surface, calibrate=calibrate or pan_mode)
 
-    # Keep async map/precip fetch warm even when using the cached backdrop.
+    # Keep async map/precip/fire fetch warm even when using the cached backdrop.
     map_bg.request_background()
     rainviewer_overlay.request_overlay()
+    firms_overlay.request_refresh()
 
     if pan_mode:
         _draw_map_pan_overlay(surface, pan_offset=offset)
     elif calibrate:
         _draw_facing_calibrate_overlay(surface)
     else:
+        firms_overlay.draw_fires(surface, pan_offset=offset)
         _draw_flights(surface, flights)
         if settings.show_sweep_line():
             sweep = (_sweep_angle - settings.effective_facing_deg()) % 360.0
@@ -664,6 +666,9 @@ def _draw_map_attribution(surface):
     precip_text = rainviewer_overlay.attribution_text()
     if precip_text:
         parts.append(precip_text)
+    firms_text = firms_overlay.attribution_text()
+    if firms_text:
+        parts.append(firms_text)
     if not parts:
         return
     text = " · ".join(parts)

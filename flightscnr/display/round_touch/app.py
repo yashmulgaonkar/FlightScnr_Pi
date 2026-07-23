@@ -17,6 +17,7 @@ from utilities.route_enrichment import (
 )
 from display.round_touch import (
     draw,
+    firms_overlay,
     ghost_touch_filter,
     gesture_handler,
     input_handler,
@@ -116,6 +117,7 @@ class RoundTouchDisplay:
         self._ais_vessels: list = []
         self._position_smoother = position_smooth.PositionSmoother()
         self._last_ais_poll = 0.0
+        self._last_firms_poll = 0.0
         self.flight_index = 0
         # Stable identity for the open detail page (index alone drifts as traffic changes).
         self._selected_flight_id: str | None = None
@@ -183,6 +185,7 @@ class RoundTouchDisplay:
             map_bg.request_background()
             map_bg.prewarm_all_scales()
             rainviewer_overlay.request_overlay()
+            firms_overlay.request_refresh(force=True)
         self._apply_brightness()
         if settings.auto_timezone_enabled():
             try:
@@ -222,6 +225,7 @@ class RoundTouchDisplay:
         map_bg.request_background()
         map_bg.prewarm_all_scales()
         rainviewer_overlay.request_overlay()
+        firms_overlay.request_refresh(force=True)
         self._open_screen(SCREEN_RADAR)
 
     def _tick_wifi_setup(self) -> None:
@@ -550,6 +554,8 @@ class RoundTouchDisplay:
             scale.select(settings.scale_index())
             map_bg.request_background()
             rainviewer_overlay.request_overlay()
+            firms_overlay.invalidate()
+            firms_overlay.request_refresh(force=True)
         elif action == "rotate":
             settings.cycle_display_rotation()
         elif action == "compass":
@@ -572,6 +578,11 @@ class RoundTouchDisplay:
             settings.toggle_show_precipitation()
             rainviewer_overlay.invalidate()
             rainviewer_overlay.request_overlay()
+        elif action == "wildfires":
+            settings.toggle_show_wildfires()
+            firms_overlay.invalidate()
+            if settings.show_wildfires():
+                firms_overlay.request_refresh(force=True)
         elif action == "map_style":
             settings.cycle_map_style()
         elif action == "vfr_opacity":
@@ -644,6 +655,8 @@ class RoundTouchDisplay:
         map_bg.prewarm_all_scales()
         rainviewer_overlay.invalidate()
         rainviewer_overlay.request_overlay()
+        firms_overlay.invalidate()
+        firms_overlay.request_refresh(force=True)
         self._position_smoother.reset()
         self._panning_map = False
         self._pan_offset = (0, 0)
@@ -789,6 +802,8 @@ class RoundTouchDisplay:
         scale.select(new_idx)
         map_bg.request_background()
         rainviewer_overlay.request_overlay()
+        firms_overlay.invalidate()
+        firms_overlay.request_refresh(force=True)
         self._safe_draw()
 
     def _flights_for_detail(self):
@@ -1485,6 +1500,7 @@ class RoundTouchDisplay:
         map_bg.request_background()
         map_bg.prewarm_all_scales()
         rainviewer_overlay.request_overlay()
+        firms_overlay.request_refresh(force=True)
         self._apply_brightness()
         try:
             from utilities.ais_client import sync_ais_client
@@ -1492,6 +1508,7 @@ class RoundTouchDisplay:
             sync_ais_client()
             # Force an AIS snapshot soon after enable/disable or range changes.
             self._last_ais_poll = 0.0
+            self._last_firms_poll = 0.0
         except Exception:
             logger.debug("AIS sync after settings reload failed", exc_info=True)
         self._safe_draw()
@@ -1505,6 +1522,10 @@ class RoundTouchDisplay:
                 return
             map_bg.invalidate()
             map_bg.prewarm_all_scales()
+            rainviewer_overlay.invalidate()
+            rainviewer_overlay.request_overlay()
+            firms_overlay.invalidate()
+            firms_overlay.request_refresh(force=True)
             self._position_smoother.reset()
             self.overhead.grab_data()
             lat, lon = float(LOCATION_HOME[0]), float(LOCATION_HOME[1])
@@ -1541,6 +1562,11 @@ class RoundTouchDisplay:
                     self._safe_draw()
         except Exception:
             logger.exception("Flight data poll failed")
+
+    def _tick_firms(self):
+        if self.screen == SCREEN_WIFI_SETUP or self._radar_modal_active():
+            return
+        firms_overlay.request_refresh()
 
     def _tick_ais(self):
         if self._radar_modal_active():
@@ -1679,6 +1705,14 @@ class RoundTouchDisplay:
                 ):
                     self._tick_ais()
                     self._last_ais_poll = now
+
+                if (
+                    self.screen != SCREEN_WIFI_SETUP
+                    and not self._radar_modal_active()
+                    and now - self._last_firms_poll >= firms_overlay.POLL_TTL_S
+                ):
+                    self._tick_firms()
+                    self._last_firms_poll = now
 
                 grab_seq = self.overhead.grab_seq
                 if grab_seq != self._last_grab_seq:

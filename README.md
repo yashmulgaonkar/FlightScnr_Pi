@@ -103,6 +103,8 @@ Marine traffic uses live AIS from [aisstream.io](https://aisstream.io/) when ena
 
 ![Marine vessel photo](docs/images/marine_images1.png) · ![Marine vessel photo](docs/images/marine_images2.png)
 
+Optional **wildfire** dots use [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/api/area/) (VIIRS NRT). Add a free [MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/map_key/) under portal → API Keys, then enable **Show wildfires** (Radar card or Settings → Options). Detections refresh every 15 minutes and immediately after recenter or boot.
+
 ---
 
 
@@ -122,7 +124,7 @@ Open from any device on your LAN:
 | **Weather**           | °C / °F for clock and forecast                                                                           |
 | **Alerts**            | Military, emergency squawk, watch list, hide non-alerted aircraft                                        |
 | **Tracking**          | Track a callsign; **route search** (origin + destination) for live flights                               |
-| **API keys**          | FR24, Tomorrow.io, AirLabs, FlightAware (route fallback), aisstream.io - save or save & restart                                        |
+| **API keys**          | FR24, Tomorrow.io, AirLabs, FlightAware (route fallback), aisstream.io, NASA FIRMS (wildfires) - save or save & restart                                        |
 | **Updates**           | Check GitHub for new releases; **Update Now** runs `git pull` and re-syncs (git checkout required)       |
 | **System**            | **Reboot** or **Shutdown** the Pi remotely                                                               |
 

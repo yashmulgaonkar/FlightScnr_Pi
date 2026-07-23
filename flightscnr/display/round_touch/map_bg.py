@@ -745,6 +745,55 @@ def draw_background(surface: pygame.Surface, pan_offset: tuple[int, int] | None 
     surface.blit(rotated, rect)
 
 
+def lat_lon_to_basemap_screen(lat: float, lon: float) -> tuple[int, int] | None:
+    """Map WGS84 → radar pixels using the same Mercator math as the basemap.
+
+    Aircraft still use flat-earth ``geo.lat_lon_to_screen``; overlays that must
+    sit on roads/coastline (e.g. FIRMS) should use this so they do not drift
+    from the tile imagery away from the radar center.
+    """
+    try:
+        from config import LOCATION_HOME, location_configured
+        from display.round_touch import scale, settings
+    except ImportError:
+        return None
+    if not location_configured():
+        return None
+    try:
+        home_lat = float(LOCATION_HOME[0])
+        home_lon = float(LOCATION_HOME[1])
+        lat_f = float(lat)
+        lon_f = float(lon)
+    except (TypeError, ValueError):
+        return None
+    idx = scale.active_index()
+    if idx < 0 or idx >= len(scale.SCALE_BANDS):
+        return None
+    outer_km = scale.SCALE_BANDS[idx]["label_km"]
+    px_per_km = theme.GRID_OUTER_RADIUS / outer_km
+    provider = _resolved_style()
+    zoom = _zoom_for_scale(home_lat, px_per_km, provider)
+    home_px, home_py = _mercator_pixel(home_lat, home_lon, zoom)
+    mx, my = _mercator_pixel(lat_f, lon_f, zoom)
+    # Image coords: +x east, +y south (Mercator tile space), matching _build_background.
+    vx = mx - home_px
+    vy = my - home_py
+    try:
+        facing = float(settings.effective_facing_deg() or 0.0)
+    except Exception:
+        facing = 0.0
+    if abs(facing) >= 0.05:
+        rad = math.radians(facing)
+        cos_a = math.cos(rad)
+        sin_a = math.sin(rad)
+        # Same CCW rotation pygame applies to the basemap surface.
+        vx, vy = vx * cos_a - vy * sin_a, vx * sin_a + vy * cos_a
+    return (
+        theme.CENTER_X + int(round(vx)),
+        theme.CENTER_Y + int(round(vy)),
+    )
+
+
 def attribution_text() -> str | None:
     if not _enabled() or get_background() is None:
         return None

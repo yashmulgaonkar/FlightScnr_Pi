@@ -111,6 +111,9 @@ FLIGHTAWARE_API_KEY = os.environ.get("FLIGHTAWARE_API_KEY", "")
 FLIGHTAWARE_MONTHLY_LIMIT = float(os.environ.get("FLIGHTAWARE_MONTHLY_LIMIT", "4.50"))
 # Conservative per-call cost estimate for /flights/{ident} enrichment.
 FLIGHTAWARE_COST_PER_CALL = float(os.environ.get("FLIGHTAWARE_COST_PER_CALL", "0.02"))
+# NASA FIRMS free MAP_KEY for wildfire detections on the radar.
+# https://firms.modaps.eosdis.nasa.gov/api/map_key/
+FIRMS_MAP_KEY = os.environ.get("FIRMS_MAP_KEY", "")
 DATA_REFRESH_SECONDS = float(os.environ.get("DATA_REFRESH_SECONDS", "2"))
 # How often to merge AIS vessels into the radar (WebSocket still pushes continuously)
 AIS_REFRESH_SECONDS = float(os.environ.get("AIS_REFRESH_SECONDS", "5"))

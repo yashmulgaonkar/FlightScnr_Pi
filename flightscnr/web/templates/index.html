@@ -176,6 +176,11 @@
                 <span class="switch"><input id="show_precip" type="checkbox"><span class="track"></span></span>
             </div>
             <p class="hint">Live rain/snow radar overlay via <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a> (free personal API, updates ~ every 5–10 min).</p>
+            <div class="chk">
+                <label for="show_wildfires">Show wildfires (NASA FIRMS)</label>
+                <span class="switch"><input id="show_wildfires" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">Satellite fire detections in the radar area via <a href="https://firms.modaps.eosdis.nasa.gov/api/area/" target="_blank" rel="noopener">NASA FIRMS</a>. Requires a free <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener">MAP_KEY</a> in API Keys. Refreshes every 15 minutes and on recenter.</p>
             <label for="traffic_mode">Radar traffic</label>
             <select id="traffic_mode">
                 <option value="aircraft">Aircraft only</option>
@@ -338,7 +343,7 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#128273;</span>API Keys<span class="sum">FR24, Tomorrow.io, AirLabs, AIS, FlightAware</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#128273;</span>API Keys<span class="sum">FR24, Tomorrow.io, AirLabs, AIS, FlightAware, FIRMS</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <div class="chk">
                 <label for="use-fr24-api">Use FR24 API</label>
@@ -378,6 +383,10 @@
             <input type="password" id="aisstream-key" placeholder="API key" autocomplete="off">
             <p class="hint" id="aisstream-hint"></p>
             <p class="hint">Get a free key at <a href="https://aisstream.io" target="_blank" rel="noopener">aisstream.io</a> (non-commercial).</p>
+            <label for="firms-key">NASA FIRMS MAP_KEY (wildfires)</label>
+            <input type="password" id="firms-key" placeholder="MAP_KEY" autocomplete="off">
+            <p class="hint" id="firms-hint"></p>
+            <p class="hint">Free key from <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener">FIRMS map key</a>. Used for wildfire dots on the radar (VIIRS NRT).</p>
             <div class="track-row" style="margin-top:.6rem">
                 <button class="btn btn-primary" id="btn-keys-save" type="button">Save keys</button>
                 <button class="btn" id="btn-keys-restart" type="button">Save &amp; restart</button>
@@ -460,6 +469,7 @@ function applyKeyHints(keys) {
         AIRLABS_API_KEY: "airlabs-hint",
         AISSTREAM_API_KEY: "aisstream-hint",
         FLIGHTAWARE_API_KEY: "flightaware-hint",
+        FIRMS_MAP_KEY: "firms-hint",
     };
     Object.entries(map).forEach(([key, id]) => {
         const info = keys[key] || {};
@@ -640,6 +650,7 @@ async function loadAll() {
         $("facing_deg").value = String(Math.round(Number(r.facing_deg) || 0) % 360);
         $("show_sweep").checked = !!r.show_sweep_line;
         $("show_precip").checked = r.show_precipitation !== false;
+        if ($("show_wildfires")) $("show_wildfires").checked = !!r.show_wildfires;
         $("traffic_mode").value = r.traffic_mode || (r.ais_enabled ? "both" : "aircraft");
     } catch (_) {}
 
@@ -753,6 +764,7 @@ async function saveRadar() {
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,
                 show_precipitation: $("show_precip").checked,
+                show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
                 map_style: $("map_style").value,
                 vfr_map_opacity: Number($("vfr_opacity") ? $("vfr_opacity").value : 45),
                 traffic_mode: $("traffic_mode").value,
@@ -821,6 +833,7 @@ async function saveAndReloadSettings() {
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,
                 show_precipitation: $("show_precip").checked,
+                show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
                 map_style: $("map_style").value,
                 vfr_map_opacity: Number($("vfr_opacity") ? $("vfr_opacity").value : 45),
                 traffic_mode: $("traffic_mode").value,
@@ -923,6 +936,7 @@ async function saveApiKeys(restart) {
                 airlabs_api_key: $("airlabs-key").value,
                 aisstream_api_key: $("aisstream-key").value,
                 flightaware_api_key: $("flightaware-key") ? $("flightaware-key").value : "",
+                firms_map_key: $("firms-key") ? $("firms-key").value : "",
                 use_fr24_api: $("use-fr24-api").checked,
                 use_tomorrow_weather: $("use-tomorrow-weather").checked,
                 use_airlabs_api: $("use-airlabs-api").checked,
@@ -936,6 +950,7 @@ async function saveApiKeys(restart) {
         $("airlabs-key").value = "";
         $("aisstream-key").value = "";
         if ($("flightaware-key")) $("flightaware-key").value = "";
+        if ($("firms-key")) $("firms-key").value = "";
         if (data.keys) applyKeyHints(data.keys);
         showStatus("api-keys-status", data.message || "API keys saved.");
     } catch (e) {

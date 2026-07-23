@@ -53,6 +53,7 @@ _defaults = {
     "facing_deg": 0.0,
     "show_sweep": True,
     "show_precipitation": True,
+    "show_wildfires": False,
     "scale_index": 1,
     "theme_index": color_presets.DEFAULT_THEME_INDEX,
     "theme_custom": False,
@@ -180,8 +181,10 @@ def _seed_from_env(state: dict) -> None:
         # UI only cycles dark/light/vfr; map legacy osm to dark for first-run seed.
         state["map_style"] = env_style if env_style in MAP_STYLES else "dark"
         state["display_rotation"] = _env_display_rotation()
+        state["show_wildfires"] = bool(os.environ.get("FIRMS_MAP_KEY", "").strip())
     except ImportError:
         state["display_rotation"] = _env_display_rotation()
+        state["show_wildfires"] = bool(os.environ.get("FIRMS_MAP_KEY", "").strip())
 
 
 def _save(data):
@@ -289,6 +292,11 @@ def _load():
         state["display_rotation"] = _normalize_display_rotation(
             state.get("display_rotation", 90)
         )
+    if "show_wildfires" not in data:
+        state["show_wildfires"] = bool(os.environ.get("FIRMS_MAP_KEY", "").strip())
+        migrated = True
+    else:
+        state["show_wildfires"] = bool(state.get("show_wildfires"))
     if color_presets.migrate_theme_index(state):
         migrated = True
     if migrated:
@@ -317,6 +325,7 @@ def _settings_snapshot(state: dict) -> tuple:
         _normalize_facing(state.get("facing_deg", 0)),
         state.get("show_sweep"),
         state.get("show_precipitation"),
+        state.get("show_wildfires"),
         state.get("min_height_ft"),
         state.get("max_height_ft"),
         state.get("brightness_percent"),
@@ -533,6 +542,20 @@ def toggle_show_precipitation():
 
 def set_show_precipitation(enabled: bool):
     _state["show_precipitation"] = bool(enabled)
+    _save(_state)
+
+
+def show_wildfires() -> bool:
+    return bool(_state.get("show_wildfires", False))
+
+
+def toggle_show_wildfires():
+    _state["show_wildfires"] = not show_wildfires()
+    _save(_state)
+
+
+def set_show_wildfires(enabled: bool):
+    _state["show_wildfires"] = bool(enabled)
     _save(_state)
 
 
