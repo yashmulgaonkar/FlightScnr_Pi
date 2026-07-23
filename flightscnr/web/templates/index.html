@@ -78,7 +78,7 @@
 <body>
 <div class="wrap">
     <div class="app-head"><div class="logo"></div><h1>FlightScnrPi</h1></div>
-    <p class="subtitle">Portal settings for radar, display, alerts, tracking, and API keys.</p>
+    <p class="subtitle">Portal settings for radar, local ADS-B, display, alerts, tracking, and API keys.</p>
 
     <details class="card" open>
         <summary><span class="ico">&#9678;</span>Radar<span class="sum">center, range, units</span><span class="chev">&#9656;</span></summary>
@@ -183,15 +183,23 @@
                 <option value="both">Aircraft + marine</option>
             </select>
             <p class="hint">Marine needs an aisstream.io API key below. Free for non-commercial use.</p>
+            <button class="btn btn-primary" id="btn-radar" style="margin-top:.7rem" type="button">Save radar settings</button>
+            <div id="radar-status" class="status"></div>
+        </div>
+    </details>
+
+    <details class="card" open>
+        <summary><span class="ico">&#128225;</span>Local ADS-B<span class="sum">dump1090 / readsb</span><span class="chev">&#9656;</span></summary>
+        <div class="body">
             <div class="chk">
                 <label for="dump1090_enabled">Use local dump1090 / readsb</label>
                 <span class="switch"><input id="dump1090_enabled" type="checkbox"><span class="track"></span></span>
             </div>
-            <label for="dump1090_url">dump1090 aircraft.json URL</label>
+            <label for="dump1090_url">aircraft.json URL</label>
             <input id="dump1090_url" type="text" autocomplete="off" placeholder="http://127.0.0.1:8080/data/aircraft.json">
-            <p class="hint">Local ADS-B receiver feed (dump1090-fa, readsb, or tar1090). Merges with FR24/adsb.fi; local positions win on overlap. Leave off if you have no receiver.</p>
-            <button class="btn btn-primary" id="btn-radar" style="margin-top:.7rem" type="button">Save radar settings</button>
-            <div id="radar-status" class="status"></div>
+            <p class="hint">Local receiver feed (dump1090-fa, readsb, or tar1090). Merges with FR24/adsb.fi; local positions win on overlap. Leave off if nothing is listening — connection refused will spam the logs.</p>
+            <button class="btn btn-primary" id="btn-dump1090" style="margin-top:.7rem" type="button">Save local ADS-B</button>
+            <div id="dump1090-status" class="status"></div>
         </div>
     </details>
 
@@ -637,12 +645,6 @@ async function loadAll() {
         $("show_sweep").checked = !!r.show_sweep_line;
         $("show_precip").checked = r.show_precipitation !== false;
         $("traffic_mode").value = r.traffic_mode || (r.ais_enabled ? "both" : "aircraft");
-        const d1090 = r.dump1090 || {};
-        if ($("dump1090_enabled")) $("dump1090_enabled").checked = !!d1090.DUMP1090_ENABLED;
-        if ($("dump1090_url")) {
-            $("dump1090_url").value = d1090.DUMP1090_URL
-                || "http://127.0.0.1:8080/data/aircraft.json";
-        }
     } catch (_) {}
 
     try {
@@ -702,6 +704,12 @@ async function loadAll() {
             $("flightaware-usage").textContent =
                 `FlightAware this month: $${Number(faUsage.spend_usd || 0).toFixed(2)} / $${Number(faUsage.monthly_limit_usd || 4.5).toFixed(2)} (${faUsage.calls || 0} calls)`;
         }
+        const d1090 = keys.dump1090 || {};
+        if ($("dump1090_enabled")) $("dump1090_enabled").checked = !!d1090.DUMP1090_ENABLED;
+        if ($("dump1090_url")) {
+            $("dump1090_url").value = d1090.DUMP1090_URL
+                || "http://127.0.0.1:8080/data/aircraft.json";
+        }
     } catch (_) {}
 }
 
@@ -745,14 +753,30 @@ async function saveRadar() {
                 map_style: $("map_style").value,
                 vfr_map_opacity: Number($("vfr_opacity") ? $("vfr_opacity").value : 45),
                 traffic_mode: $("traffic_mode").value,
-                dump1090_enabled: $("dump1090_enabled") ? $("dump1090_enabled").checked : false,
-                dump1090_url: $("dump1090_url") ? $("dump1090_url").value.trim() : "",
             }),
         });
         showStatus("radar-status", "Radar settings saved.");
         await loadAll();
     } catch (e) {
         showStatus("radar-status", e.message, true);
+    }
+}
+
+async function saveDump1090() {
+    clearStatus("dump1090-status");
+    try {
+        await jsonFetch("/api-keys", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dump1090_enabled: $("dump1090_enabled") ? $("dump1090_enabled").checked : false,
+                dump1090_url: $("dump1090_url") ? $("dump1090_url").value.trim() : "",
+            }),
+        });
+        showStatus("dump1090-status", "Local ADS-B settings saved.");
+        await loadAll();
+    } catch (e) {
+        showStatus("dump1090-status", e.message, true);
     }
 }
 
@@ -795,8 +819,6 @@ async function saveAndReloadSettings() {
                 map_style: $("map_style").value,
                 vfr_map_opacity: Number($("vfr_opacity") ? $("vfr_opacity").value : 45),
                 traffic_mode: $("traffic_mode").value,
-                dump1090_enabled: $("dump1090_enabled") ? $("dump1090_enabled").checked : false,
-                dump1090_url: $("dump1090_url") ? $("dump1090_url").value.trim() : "",
             }),
         });
         await jsonFetch("/display", {
@@ -1057,6 +1079,7 @@ $("btn-restart-app").addEventListener("click", requestAppRestart);
 $("btn-reboot").addEventListener("click", () => requestSystemAction("reboot"));
 $("btn-shutdown").addEventListener("click", () => requestSystemAction("shutdown"));
 $("btn-radar").addEventListener("click", saveRadar);
+$("btn-dump1090").addEventListener("click", saveDump1090);
 $("btn-display").addEventListener("click", saveDisplay);
 $("btn-save-reload").addEventListener("click", saveAndReloadSettings);
 $("btn-offhours").addEventListener("click", saveOffHours);
