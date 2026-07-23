@@ -635,8 +635,15 @@ def radar_json():
             "map_style": settings.map_style(),
             "map_style_options": list(settings.MAP_STYLES),
             "vfr_map_opacity": settings.vfr_map_opacity(),
+            "dump1090": dump1090_portal_status(),
         }
     )
+
+
+def dump1090_portal_status() -> dict:
+    from secrets_store import dump1090_settings
+
+    return dump1090_settings()
 
 
 @app.post("/radar")
@@ -697,6 +704,15 @@ def radar_save():
         settings.set_traffic_mode(str(data.get("traffic_mode") or ""))
     elif "ais_enabled" in data:
         settings.set_ais_enabled(bool(data.get("ais_enabled")))
+    if "dump1090_enabled" in data or "dump1090_url" in data:
+        from secrets_store import save_secrets_from_portal
+
+        save_secrets_from_portal(
+            {
+                "dump1090_enabled": bool(data.get("dump1090_enabled")),
+                "dump1090_url": str(data.get("dump1090_url") or "").strip(),
+            }
+        )
     settings.request_reload()
     return jsonify({"ok": True, "message": "Radar settings saved."})
 

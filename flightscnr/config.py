@@ -100,6 +100,17 @@ AISSTREAM_API_KEY = os.environ.get("AISSTREAM_API_KEY", "")
 LOCATION_HOME, ZONE_HOME, LOCATION_SOURCE = _resolve_location()
 SEARCH_RADIUS_NM = float(os.environ.get("SEARCH_RADIUS_NM", "15"))
 ADSB_ENABLED = _bool(os.environ.get("ADSB_ENABLED", "True"))
+# Local dump1090-fa / readsb / tar1090 JSON feed (empty URL disables even if ENABLED).
+DUMP1090_ENABLED = _bool(os.environ.get("DUMP1090_ENABLED", "False"))
+DUMP1090_URL = os.environ.get(
+    "DUMP1090_URL",
+    "http://127.0.0.1:8080/data/aircraft.json",
+).strip()
+FLIGHTAWARE_API_KEY = os.environ.get("FLIGHTAWARE_API_KEY", "")
+# Soft monthly spend ceiling in USD (AeroAPI free credit is typically ~$5).
+FLIGHTAWARE_MONTHLY_LIMIT = float(os.environ.get("FLIGHTAWARE_MONTHLY_LIMIT", "4.50"))
+# Conservative per-call cost estimate for /flights/{ident} enrichment.
+FLIGHTAWARE_COST_PER_CALL = float(os.environ.get("FLIGHTAWARE_COST_PER_CALL", "0.02"))
 DATA_REFRESH_SECONDS = float(os.environ.get("DATA_REFRESH_SECONDS", "2"))
 # How often to merge AIS vessels into the radar (WebSocket still pushes continuously)
 AIS_REFRESH_SECONDS = float(os.environ.get("AIS_REFRESH_SECONDS", "5"))

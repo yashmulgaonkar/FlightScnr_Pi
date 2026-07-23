@@ -49,13 +49,14 @@ except (ImportError, ModuleNotFoundError, NameError):
 try:
     from config import (
         ZONE_HOME, LOCATION_HOME, location_configured,
-        SEARCH_RADIUS_NM, ADSB_ENABLED, zone_from_radius_nm,
+        SEARCH_RADIUS_NM, ADSB_ENABLED, DUMP1090_ENABLED, zone_from_radius_nm,
     )
     ZONE_DEFAULT = ZONE_HOME
     LOCATION_DEFAULT = LOCATION_HOME
 except (ImportError, ModuleNotFoundError, NameError):
     SEARCH_RADIUS_NM = 15
     ADSB_ENABLED = True
+    DUMP1090_ENABLED = False
     ZONE_DEFAULT = {"tl_y": 0.0, "tl_x": 0.0, "br_y": 0.0, "br_x": 0.0}
     LOCATION_DEFAULT = [0.0, 0.0]
 
@@ -697,6 +698,8 @@ class Overhead:
             f"│ adsbdb GA lookups:     {stats.get('adsbdb_lookups', 0)}",
             f"│ adsb.fi aircraft:      {stats.get('adsb_added', 0)}",
             f"│ adsb.fi refreshed:     {stats.get('adsb_updated', 0)}",
+            f"│ dump1090 aircraft:     {stats.get('dump1090_added', 0)}",
+            f"│ dump1090 refreshed:    {stats.get('dump1090_updated', 0)}",
             f"│ FR24 feed enriched:    {stats.get('feed_enriched', 0)}",
             f"│ Below min height:     {stats.get('altitude_dropped', 0)}",
             f"│ Helicopter detected:   {stats.get('helicopters', 0)}",
@@ -764,6 +767,9 @@ class Overhead:
             "adsbdb_lookups": 0,
             "adsb_added": 0,
             "adsb_updated": 0,
+            "dump1090_added": 0,
+            "dump1090_updated": 0,
+            "dump1090_raw": 0,
             "feed_enriched": 0,
             "helicopters": 0,
             "tracked_status": "",
@@ -1009,20 +1015,48 @@ class Overhead:
                         if retries == 0:
                             logger.warning(f"Failed to get details for {f.callsign}: {e}")
 
-            # --- STEP 1b: ADS-B live positions (adsb.fi — free, used by FlightScnr) ---
+            # --- STEP 1b: ADS-B live positions (adsb.fi + optional local dump1090) ---
             adsb_entries: list[dict] = []
             by_callsign: dict[str, dict] = {}
-            if ADSB_ENABLED and location_configured():
-                from utilities.adsb_client import fetch_aircraft_entries
+            try:
+                import config as _cfg
+
+                adsb_on = bool(getattr(_cfg, "ADSB_ENABLED", ADSB_ENABLED))
+                dump_on = bool(getattr(_cfg, "DUMP1090_ENABLED", DUMP1090_ENABLED))
+            except Exception:
+                adsb_on = ADSB_ENABLED
+                dump_on = DUMP1090_ENABLED
+            use_adsb_cloud = adsb_on and location_configured()
+            use_dump1090 = dump_on and location_configured()
+            if use_adsb_cloud or use_dump1090:
                 from display.round_touch import scale, settings
 
                 search_radius_nm = scale.search_radius_nm(settings.scale_index())
-                adsb_entries = fetch_aircraft_entries(
-                    LOCATION_DEFAULT[0],
-                    LOCATION_DEFAULT[1],
-                    search_radius_nm,
-                    MIN_ALTITUDE,
-                )
+                if use_adsb_cloud:
+                    from utilities.adsb_client import fetch_aircraft_entries
+
+                    adsb_entries.extend(
+                        fetch_aircraft_entries(
+                            LOCATION_DEFAULT[0],
+                            LOCATION_DEFAULT[1],
+                            search_radius_nm,
+                            MIN_ALTITUDE,
+                        )
+                    )
+                dump_entries: list[dict] = []
+                if use_dump1090:
+                    from utilities.dump1090_client import fetch_aircraft_entries as fetch_dump1090
+
+                    dump_entries = fetch_dump1090(
+                        LOCATION_DEFAULT[0],
+                        LOCATION_DEFAULT[1],
+                        search_radius_nm,
+                        MIN_ALTITUDE,
+                    )
+                    stats["dump1090_raw"] = len(dump_entries)
+                else:
+                    stats["dump1090_raw"] = 0
+
                 _LIVE_FIELDS = (
                     "plane_latitude", "plane_longitude", "altitude",
                     "heading", "ground_speed", "vertical_speed",
@@ -1081,83 +1115,114 @@ class Overhead:
                             "data_source": "fr24_feed+adsb",
                         })
 
-                by_callsign.clear()
+                def _rebuild_indexes() -> None:
+                    by_callsign.clear()
+                    by_hex.clear()
+                    by_identity.clear()
+                    for existing in overhead_data:
+                        hx = (existing.get("icao_hex") or "").strip().upper()
+                        if hx:
+                            by_hex[hx] = existing
+                        for key in callsign_match_keys(existing.get("callsign")):
+                            by_callsign[key] = existing
+                        for key in callsign_match_keys(existing.get("registration")):
+                            by_callsign[key] = existing
+                        for key in flight_identity_keys(existing):
+                            by_identity[key] = existing
+
+                def _merge_position_entries(entries: list[dict], *, stat_prefix: str) -> None:
+                    for entry in entries:
+                        keys = callsign_match_keys(entry.get("callsign"))
+                        hx = (entry.get("icao_hex") or "").strip().upper()
+                        target = by_hex.get(hx) if hx else None
+                        if target is None:
+                            for ik in flight_identity_keys(entry):
+                                target = by_identity.get(ik)
+                                if target is not None:
+                                    break
+                        if target is None:
+                            target = next(
+                                (by_callsign[k] for k in keys if k in by_callsign), None
+                            )
+                        if target is None:
+                            from display.round_touch import geo
+
+                            lat = entry.get("plane_latitude")
+                            lon = entry.get("plane_longitude")
+                            if lat is not None and lon is not None:
+                                best = None
+                                best_d = None
+                                for existing in overhead_data:
+                                    elat = existing.get("plane_latitude")
+                                    elon = existing.get("plane_longitude")
+                                    if elat is None or elon is None:
+                                        continue
+                                    d = geo.distance_km(lat, lon, elat, elon)
+                                    if d > 1.2:
+                                        continue
+                                    same_type = (
+                                        (entry.get("plane") or "").strip().upper()
+                                        and (entry.get("plane") or "").strip().upper()
+                                        == (existing.get("plane") or "").strip().upper()
+                                    )
+                                    if (
+                                        d <= 0.45
+                                        or same_type
+                                        or flights_share_identity(entry, existing)
+                                    ):
+                                        if best_d is None or d < best_d:
+                                            best_d = d
+                                            best = existing
+                                target = best
+                        if target is not None:
+                            merge_live_fields(target, entry, _LIVE_FIELDS)
+                            if not (target.get("callsign") or "").strip():
+                                target["callsign"] = entry.get("callsign") or target.get(
+                                    "callsign"
+                                )
+                            if not (target.get("registration") or "").strip():
+                                reg = (entry.get("registration") or "").strip().upper()
+                                if reg:
+                                    target["registration"] = reg
+                                else:
+                                    cs = (entry.get("callsign") or "").strip().upper()
+                                    if cs.startswith("N") and len(cs) > 1 and cs[1].isdigit():
+                                        target["registration"] = cs
+                            # Prefer local dump1090 tag when it refreshed kinematics.
+                            if entry.get("data_source") == "dump1090":
+                                src = (target.get("data_source") or "")
+                                if src.startswith("adsb") or src == "adsb_fi":
+                                    target["data_source"] = "dump1090"
+                                elif not src:
+                                    target["data_source"] = "dump1090"
+                            _maybe_feed_enrich(target)
+                            stats[f"{stat_prefix}_updated"] = (
+                                stats.get(f"{stat_prefix}_updated", 0) + 1
+                            )
+                            continue
+                        _maybe_feed_enrich(entry)
+                        overhead_data.append(entry)
+                        stats[f"{stat_prefix}_added"] = (
+                            stats.get(f"{stat_prefix}_added", 0) + 1
+                        )
+                        cs = "".join((entry.get("callsign") or "").upper().split())
+                        if cs:
+                            for key in keys:
+                                by_callsign[key] = entry
+                            if hx:
+                                by_hex[hx] = entry
+                            for key in flight_identity_keys(entry):
+                                by_identity[key] = entry
+                            log_flight_count(cs, entry)
+
                 by_hex: dict[str, dict] = {}
                 by_identity: dict[str, dict] = {}
-                for existing in overhead_data:
-                    hx = (existing.get("icao_hex") or "").strip().upper()
-                    if hx:
-                        by_hex[hx] = existing
-                    for key in callsign_match_keys(existing.get("callsign")):
-                        by_callsign[key] = existing
-                    for key in callsign_match_keys(existing.get("registration")):
-                        by_callsign[key] = existing
-                    for key in flight_identity_keys(existing):
-                        by_identity[key] = existing
+                _rebuild_indexes()
+                # Cloud first, then local dump1090 so local kinematics win on overlap.
+                _merge_position_entries(adsb_entries, stat_prefix="adsb")
+                _merge_position_entries(dump_entries, stat_prefix="dump1090")
 
-                for entry in adsb_entries:
-                    keys = callsign_match_keys(entry.get("callsign"))
-                    hx = (entry.get("icao_hex") or "").strip().upper()
-                    target = by_hex.get(hx) if hx else None
-                    if target is None:
-                        for ik in flight_identity_keys(entry):
-                            target = by_identity.get(ik)
-                            if target is not None:
-                                break
-                    if target is None:
-                        target = next((by_callsign[k] for k in keys if k in by_callsign), None)
-                    if target is None:
-                        from display.round_touch import geo
-
-                        lat = entry.get("plane_latitude")
-                        lon = entry.get("plane_longitude")
-                        if lat is not None and lon is not None:
-                            best = None
-                            best_d = None
-                            for existing in overhead_data:
-                                elat = existing.get("plane_latitude")
-                                elon = existing.get("plane_longitude")
-                                if elat is None or elon is None:
-                                    continue
-                                d = geo.distance_km(lat, lon, elat, elon)
-                                if d > 1.2:
-                                    continue
-                                same_type = (
-                                    (entry.get("plane") or "").strip().upper()
-                                    and (entry.get("plane") or "").strip().upper()
-                                    == (existing.get("plane") or "").strip().upper()
-                                )
-                                if d <= 0.45 or same_type or flights_share_identity(entry, existing):
-                                    if best_d is None or d < best_d:
-                                        best_d = d
-                                        best = existing
-                            target = best
-                    if target is not None:
-                        merge_live_fields(target, entry, _LIVE_FIELDS)
-                        if not (target.get("callsign") or "").strip():
-                            target["callsign"] = entry.get("callsign") or target.get("callsign")
-                        if not (target.get("registration") or "").strip():
-                            # ADS-B N-number callsigns double as registration.
-                            cs = (entry.get("callsign") or "").strip().upper()
-                            if cs.startswith("N") and len(cs) > 1 and cs[1].isdigit():
-                                target["registration"] = cs
-                        _maybe_feed_enrich(target)
-                        stats["adsb_updated"] += 1
-                        continue
-                    _maybe_feed_enrich(entry)
-                    overhead_data.append(entry)
-                    stats["adsb_added"] += 1
-                    cs = "".join((entry.get("callsign") or "").upper().split())
-                    if cs:
-                        for key in keys:
-                            by_callsign[key] = entry
-                        if hx:
-                            by_hex[hx] = entry
-                        for key in flight_identity_keys(entry):
-                            by_identity[key] = entry
-                        log_flight_count(cs, entry)
-
-                apply_adsb_alert_fields(overhead_data, adsb_entries)
+                apply_adsb_alert_fields(overhead_data, adsb_entries + dump_entries)
                 overhead_data = dedupe_flights(overhead_data)
 
             # --- STEP 2: Tracked flight (always check; display shows it when clock is up) ---

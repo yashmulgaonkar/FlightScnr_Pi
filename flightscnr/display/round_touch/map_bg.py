@@ -25,6 +25,21 @@ from display.round_touch import scale, theme
 
 logger = logging.getLogger("flightscnr.display")
 
+
+def _as_display_surface(surface: pygame.Surface, *, alpha: bool = False) -> pygame.Surface:
+    """Convert pixel format only when a display exists.
+
+    Map builds run on a worker thread where pygame.display is often not
+    initialized yet; bare .convert()/.convert_alpha() raises there.
+    """
+    try:
+        if not pygame.display.get_init():
+            return surface
+        return surface.convert_alpha() if alpha else surface.convert()
+    except pygame.error:
+        return surface
+
+
 DATA_DIR = os.environ.get("FLIGHTSCNR_DATA_DIR", "/var/lib/flightscnr")
 CACHE_DIR = os.path.join(DATA_DIR, "maps", "radar_bg")
 MANIFEST_PATH = os.path.join(CACHE_DIR, "manifest.json")
@@ -287,9 +302,9 @@ def _style_carto(surface: pygame.Surface) -> pygame.Surface:
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
-        return pygame.image.load(buf).convert()
+        return _as_display_surface(pygame.image.load(buf))
 
-    return surface.convert()
+    return _as_display_surface(surface)
 
 
 def _style_light(surface: pygame.Surface) -> pygame.Surface:
@@ -307,9 +322,9 @@ def _style_light(surface: pygame.Surface) -> pygame.Surface:
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
-        return pygame.image.load(buf).convert()
+        return _as_display_surface(pygame.image.load(buf))
 
-    return surface.convert()
+    return _as_display_surface(surface)
 
 
 def _style_vfr(surface: pygame.Surface) -> pygame.Surface:
@@ -331,9 +346,9 @@ def _style_vfr(surface: pygame.Surface) -> pygame.Surface:
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
-        return pygame.image.load(buf).convert()
+        return _as_display_surface(pygame.image.load(buf))
 
-    return surface.convert()
+    return _as_display_surface(surface)
 
 
 _vfr_opacity_blit_cache: tuple | None = None  # (id(bg), pct, surface)
@@ -405,9 +420,9 @@ def _style_osm(surface: pygame.Surface) -> pygame.Surface:
         buf = io.BytesIO()
         styled.save(buf, format="PNG")
         buf.seek(0)
-        return pygame.image.load(buf).convert()
+        return _as_display_surface(pygame.image.load(buf))
 
-    tinted = surface.copy().convert()
+    tinted = _as_display_surface(surface.copy())
     shade = pygame.Surface(tinted.get_size())
     shade.fill((40, 48, 38))
     tinted.blit(shade, (0, 0), special_flags=pygame.BLEND_MULT)
@@ -430,7 +445,7 @@ def _apply_circle_mask(surface: pygame.Surface) -> pygame.Surface:
     cx = cy = w // 2
     radius = min(cx, cy)
     masked = pygame.Surface((w, h), pygame.SRCALPHA)
-    masked.blit(surface.convert(), (0, 0))
+    masked.blit(_as_display_surface(surface), (0, 0))
     mask = pygame.Surface((w, h), pygame.SRCALPHA)
     pygame.draw.circle(mask, (255, 255, 255, 255), (cx, cy), radius)
     masked.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
@@ -565,7 +580,7 @@ def _load_cache(key: tuple) -> pygame.Surface | None:
     else:
         return None
     try:
-        return pygame.image.load(path).convert_alpha()
+        return _as_display_surface(pygame.image.load(path), alpha=True)
     except (OSError, pygame.error) as exc:
         logger.warning("Could not load cached radar map: %s", exc)
         return None
@@ -694,7 +709,14 @@ def get_background() -> pygame.Surface | None:
     if key is None:
         return None
     with _lock:
-        return _surfaces.get(key)
+        surface = _surfaces.get(key)
+        if surface is None:
+            return None
+        # Promote to display format on the main thread once display exists.
+        converted = _as_display_surface(surface, alpha=True)
+        if converted is not surface:
+            _surfaces[key] = converted
+        return converted
 
 
 def draw_background(surface: pygame.Surface, pan_offset: tuple[int, int] | None = None):

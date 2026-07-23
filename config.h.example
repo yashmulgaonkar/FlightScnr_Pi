@@ -21,6 +21,11 @@ TOMORROW_API_KEY =
 
 // Optional — schedule lookup when a flight is not airborne yet
 // AIRLABS_API_KEY =
+// Optional FlightAware AeroAPI key (route fallback only — not live radar)
+// FLIGHTAWARE_API_KEY =
+// Optional local dump1090/readsb aircraft.json feed
+// DUMP1090_ENABLED = False
+// DUMP1090_URL = http://127.0.0.1:8080/data/aircraft.json
 
 // Optional — aisstream.io AIS vessels (https://aisstream.io — free, non-commercial)
 // AISSTREAM_API_KEY =

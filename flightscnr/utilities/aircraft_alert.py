@@ -194,7 +194,13 @@ def dedupe_flights(flights: list[dict], *, threshold_km: float = 1.2) -> list[di
             score += 10
         if flight.get("airline"):
             score += 3
-        if flight.get("data_source") != "adsb_fi":
+        src = (flight.get("data_source") or "").strip()
+        # Prefer FR24 shells for metadata; among ADS-B feeds prefer local dump1090.
+        if src.startswith("fr24"):
+            score += 5
+        elif src == "dump1090":
+            score += 4
+        elif src and src != "adsb_fi":
             score += 5
         if flight.get("squawk"):
             score += 1

@@ -8,6 +8,7 @@ try:
     from config import (
         AIRLABS_API_KEY,
         AISSTREAM_API_KEY,
+        FLIGHTAWARE_API_KEY,
         FR24_API_KEY,
         LOCATION_HOME,
         web_portal_url,
@@ -16,6 +17,7 @@ except ImportError:
     FR24_API_KEY = ""
     AIRLABS_API_KEY = ""
     AISSTREAM_API_KEY = ""
+    FLIGHTAWARE_API_KEY = ""
     LOCATION_HOME = [0.0, 0.0]
 
     def web_portal_url(hostname: str) -> str:
@@ -590,6 +592,7 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
             f"Lon: {LOCATION_HOME[1]:.5f}",
             _route_api_line("FR24", FR24_API_KEY),
             _route_api_line("AirLabs", AIRLABS_API_KEY),
+            _route_api_line("FlightAware", FLIGHTAWARE_API_KEY),
             _route_api_line("AIS", AISSTREAM_API_KEY),
         ]
         detail_font = draw.load_font(theme.s(13))
