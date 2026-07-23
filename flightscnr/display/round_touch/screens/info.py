@@ -422,7 +422,7 @@ def _options_row_labels() -> list[str]:
     idle = "on" if settings.auto_idle_clock_enabled() else "off"
     return [
         f"Traffic: {settings.traffic_mode_label()}",
-        f"Aircraft info: {aircraft_tag}",
+        f"Traffic labels: {aircraft_tag}",
         f"Min height: {settings.min_height_ft()} ft",
         f"Max height: {settings.max_height_ft()} ft",
         f"Map: {settings.map_style_label()}",

@@ -291,47 +291,48 @@ def _draw_vessel_tag(surface, x, y, flight):
 
 
 def _draw_aircraft_tag(surface, x, y, flight):
+    if not settings.show_aircraft_tag():
+        return
     if flight.get("kind") == "vessel":
         if not vessel_declutter.should_label(flight):
             return
         _draw_vessel_tag(surface, x, y, flight)
         return
 
-    if settings.show_aircraft_tag():
-        block_h, offsets, main_font, sub_font = _tag_block_metrics()
-        try:
-            from utilities.airline_branding import display_flight_id_for_flight
-            callsign = display_flight_id_for_flight(flight)
-        except ImportError:
-            callsign = flight.get("callsign") or "—"
-        plane_type = flight.get("plane") or ""
-        alt = aircraft.format_altitude(flight.get("altitude"))
-        alt_color = aircraft.altitude_tag_color(flight.get("vertical_speed"))
+    block_h, offsets, main_font, sub_font = _tag_block_metrics()
+    try:
+        from utilities.airline_branding import display_flight_id_for_flight
+        callsign = display_flight_id_for_flight(flight)
+    except ImportError:
+        callsign = flight.get("callsign") or "—"
+    plane_type = flight.get("plane") or ""
+    alt = aircraft.format_altitude(flight.get("altitude"))
+    alt_color = aircraft.altitude_tag_color(flight.get("vertical_speed"))
 
-        ly = y - block_h // 2
-        tag_on_right = x < theme.CENTER_X
-        symbol_half = theme.AIRCRAFT_ICON_RADIUS
+    ly = y - block_h // 2
+    tag_on_right = x < theme.CENTER_X
+    symbol_half = theme.AIRCRAFT_ICON_RADIUS
 
-        if tag_on_right:
-            anchor_x = min(x + symbol_half + theme.AIRCRAFT_LABEL_GAP, theme.CENTER_X + theme.VISIBLE_RADIUS - theme.s(20))
-            align = "left"
+    if tag_on_right:
+        anchor_x = min(x + symbol_half + theme.AIRCRAFT_LABEL_GAP, theme.CENTER_X + theme.VISIBLE_RADIUS - theme.s(20))
+        align = "left"
+    else:
+        anchor_x = max(x - symbol_half - theme.AIRCRAFT_LABEL_GAP, theme.CENTER_X - theme.VISIBLE_RADIUS + theme.s(20))
+        align = "right"
+
+    lines = [
+        (callsign, _overlay_color_for_basemap(theme.GRID), main_font, offsets[0]),
+        (plane_type, _overlay_color_for_basemap(theme.TAG_TYPE), sub_font, offsets[1]),
+        (alt, _overlay_color_for_basemap(alt_color), sub_font, offsets[2]),
+    ]
+    for i, (text, color, font, row_y) in enumerate(lines):
+        if not text or text == "—" and i == 1:
+            continue
+        rendered = font.render(text, True, color)
+        if align == "left":
+            surface.blit(rendered, (anchor_x, ly + row_y))
         else:
-            anchor_x = max(x - symbol_half - theme.AIRCRAFT_LABEL_GAP, theme.CENTER_X - theme.VISIBLE_RADIUS + theme.s(20))
-            align = "right"
-
-        lines = [
-            (callsign, _overlay_color_for_basemap(theme.GRID), main_font, offsets[0]),
-            (plane_type, _overlay_color_for_basemap(theme.TAG_TYPE), sub_font, offsets[1]),
-            (alt, _overlay_color_for_basemap(alt_color), sub_font, offsets[2]),
-        ]
-        for i, (text, color, font, row_y) in enumerate(lines):
-            if not text or text == "—" and i == 1:
-                continue
-            rendered = font.render(text, True, color)
-            if align == "left":
-                surface.blit(rendered, (anchor_x, ly + row_y))
-            else:
-                surface.blit(rendered, rendered.get_rect(topright=(anchor_x, ly + row_y)))
+            surface.blit(rendered, rendered.get_rect(topright=(anchor_x, ly + row_y)))
 
 
 def _visible_flights(flights):
