@@ -85,21 +85,16 @@
         <div class="body">
             <label for="radar_center">Radar center (lat, lon)</label>
             <input id="radar_center" type="text" autocomplete="off" placeholder="37.620000, -122.370000">
-            <div class="row2">
-                <div>
-                    <label for="range_value">Range</label>
-                    <input id="range_value" type="text" inputmode="decimal" autocomplete="off" placeholder="30">
-                </div>
-                <div>
-                    <label for="dist_units">Distance units</label>
-                    <select id="dist_units">
-                        <option value="km">kilometers</option>
-                        <option value="mi">statute miles</option>
-                        <option value="nm">nautical miles</option>
-                    </select>
-                </div>
-            </div>
-            <p class="hint" id="range_hint"></p>
+            <label for="range_index">Range</label>
+            <select id="range_index"></select>
+            <p class="hint">Outer radar range shown as mi / km / nm.</p>
+            <label for="dist_units">Distance units (device labels)</label>
+            <select id="dist_units">
+                <option value="km">kilometers</option>
+                <option value="mi">statute miles</option>
+                <option value="nm">nautical miles</option>
+            </select>
+            <p class="hint">Unit used for range rings and distance text on the Pi display.</p>
             <label for="min_height">Min altitude floor (ft, 0 = off)</label>
             <select id="min_height">
                 <option value="0">0 (off)</option>
@@ -209,10 +204,18 @@
     </details>
 
     <details class="card" open>
-        <summary><span class="ico">&#9788;</span>Display &amp; screens<span class="sum">brightness, timeouts, clock</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9788;</span>Display &amp; screens<span class="sum">brightness, rotation, timeouts</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <label for="bright_pct">Screen brightness <span id="bright_pct_label">100%</span></label>
             <input id="bright_pct" type="range" min="3" max="100" step="1" value="100">
+            <label for="display_rotation">Screen rotation</label>
+            <select id="display_rotation">
+                <option value="0">0°</option>
+                <option value="90">90° clockwise</option>
+                <option value="180">180°</option>
+                <option value="270">270° clockwise</option>
+            </select>
+            <p class="hint">Rotate the entire UI and touch mapping for how the Pi/panel is mounted. Same as Settings → Display → Rotate on the device.</p>
             <div class="row2">
                 <div>
                     <label for="detail_timeout">Flight detail screen timeout</label>
@@ -464,32 +467,12 @@ function applyKeyHints(keys) {
     });
 }
 
-function rangeValueToKm(value, units) {
-    if (units === "mi") return value * STATUTE_MILE_KM;
-    if (units === "nm") return value * 1.852;
-    return value;
-}
-
 function rangeLabelKmForIndex(index) {
     const idx = Math.max(0, Math.min(index, rangePresetsMi.length - 1));
     return rangePresetsMi[idx] * STATUTE_MILE_KM;
 }
 
-function snapRangeIndex(value, units) {
-    const targetKm = rangeValueToKm(value, units);
-    let bestIdx = 0;
-    let bestDiff = Infinity;
-    for (let i = 0; i < rangePresetsMi.length; i += 1) {
-        const diff = Math.abs(rangeLabelKmForIndex(i) - targetKm);
-        if (diff < bestDiff) {
-            bestDiff = diff;
-            bestIdx = i;
-        }
-    }
-    return bestIdx;
-}
-
-function formatRangeDisplay(index, units) {
+function formatRangeUnit(index, units) {
     const labelKm = rangeLabelKmForIndex(index);
     let value;
     if (units === "mi") value = labelKm / STATUTE_MILE_KM;
@@ -502,24 +485,32 @@ function formatRangeDisplay(index, units) {
     return value.toFixed(1);
 }
 
-function updateRangeHint(presetsMi) {
+function formatRangeOptionLabel(index) {
+    return `${formatRangeUnit(index, "mi")}mi / ${formatRangeUnit(index, "km")}km / ${formatRangeUnit(index, "nm")}nm`;
+}
+
+function populateRangeSelect(presetsMi) {
     if (presetsMi && presetsMi.length) rangePresetsMi = presetsMi;
-    const list = rangePresetsMi.join(", ");
-    $("range_hint").textContent =
-        `Snaps to nearest preset when saved: ${list} mi (converted for km/nm).`;
+    const sel = $("range_index");
+    if (!sel) return;
+    const previous = currentScaleIndex;
+    sel.innerHTML = "";
+    for (let i = 0; i < rangePresetsMi.length; i += 1) {
+        const opt = document.createElement("option");
+        opt.value = String(i);
+        opt.textContent = formatRangeOptionLabel(i);
+        sel.appendChild(opt);
+    }
+    const maxIdx = Math.max(0, rangePresetsMi.length - 1);
+    currentScaleIndex = Math.max(0, Math.min(previous, maxIdx));
+    sel.value = String(currentScaleIndex);
 }
 
-function refreshRangeInput() {
-    $("range_value").value = formatRangeDisplay(currentScaleIndex, $("dist_units").value);
-}
-
-function snapRangeInputPreview() {
-    const raw = $("range_value").value.trim();
-    if (!raw) return;
-    const value = Number(raw);
-    if (!Number.isFinite(value) || value <= 0) return;
-    currentScaleIndex = snapRangeIndex(value, $("dist_units").value);
-    refreshRangeInput();
+function syncRangeSelect() {
+    const sel = $("range_index");
+    if (!sel) return;
+    const idx = Number(sel.value);
+    if (Number.isFinite(idx)) currentScaleIndex = idx;
 }
 
 let updatePollTimer = null;
@@ -626,8 +617,7 @@ async function loadAll() {
         const r = await jsonFetch("/radar/json");
         currentScaleIndex = Number(r.scale_index ?? 1);
         $("dist_units").value = r.distance_units || "km";
-        updateRangeHint(r.range_presets_mi);
-        refreshRangeInput();
+        populateRangeSelect(r.range_presets_mi);
         $("min_height").value = String(r.min_height_ft ?? 1000);
         $("max_height").value = String(r.max_height_ft ?? 100000);
         const theme = $("radar_theme");
@@ -657,6 +647,12 @@ async function loadAll() {
         const d = await jsonFetch("/display/json");
         $("bright_pct").value = String(d.brightness_percent || 100);
         syncBrightLabel();
+        if ($("display_rotation")) {
+            const rot = [0, 90, 180, 270].includes(Number(d.display_rotation))
+                ? String(d.display_rotation)
+                : "90";
+            $("display_rotation").value = rot;
+        }
         $("detail_timeout").value = String(d.flight_detail_timeout_s ?? 20);
         $("clock_timeout").value = String(d.clock_timeout_s ?? 10);
         $("idle_clock").checked = !!d.auto_idle_clock;
@@ -747,7 +743,7 @@ async function saveRadar() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 distance_units: $("dist_units").value,
-                range_value: $("range_value").value.trim(),
+                scale_index: Number($("range_index").value),
                 min_height_ft: Number($("min_height").value),
                 max_height_ft: Number($("max_height").value),
                 theme_index: Number($("radar_theme").value),
@@ -795,6 +791,7 @@ async function saveDisplay() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 brightness_percent: Number($("bright_pct").value),
+                display_rotation: Number($("display_rotation") ? $("display_rotation").value : 90),
                 flight_detail_timeout_s: Number($("detail_timeout").value),
                 clock_timeout_s: Number($("clock_timeout").value),
                 auto_idle_clock: $("idle_clock").checked,
@@ -814,7 +811,7 @@ async function saveAndReloadSettings() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 distance_units: $("dist_units").value,
-                range_value: $("range_value").value.trim(),
+                scale_index: Number($("range_index").value),
                 min_height_ft: Number($("min_height").value),
                 max_height_ft: Number($("max_height").value),
                 theme_index: Number($("radar_theme").value),
@@ -834,6 +831,7 @@ async function saveAndReloadSettings() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 brightness_percent: Number($("bright_pct").value),
+                display_rotation: Number($("display_rotation") ? $("display_rotation").value : 90),
                 flight_detail_timeout_s: Number($("detail_timeout").value),
                 clock_timeout_s: Number($("clock_timeout").value),
                 auto_idle_clock: $("idle_clock").checked,
@@ -1101,8 +1099,7 @@ $("btn-route").addEventListener("click", searchRoute);
 $("btn-keys-save").addEventListener("click", () => saveApiKeys(false));
 $("btn-keys-restart").addEventListener("click", () => saveApiKeys(true));
 $("night_mode").addEventListener("change", toggleDimRow);
-$("dist_units").addEventListener("change", refreshRangeInput);
-$("range_value").addEventListener("blur", snapRangeInputPreview);
+$("range_index").addEventListener("change", syncRangeSelect);
 $("bright_pct").addEventListener("input", syncBrightLabel);
 if ($("vfr_opacity")) $("vfr_opacity").addEventListener("input", syncVfrOpacityLabel);
 

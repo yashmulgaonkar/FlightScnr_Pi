@@ -550,6 +550,8 @@ class RoundTouchDisplay:
             scale.select(settings.scale_index())
             map_bg.request_background()
             rainviewer_overlay.request_overlay()
+        elif action == "rotate":
+            settings.cycle_display_rotation()
         elif action == "compass":
             settings.toggle_compass_rose()
         elif action == "range_rings":

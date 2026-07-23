@@ -13,6 +13,13 @@ def normalize_degrees(degrees: int) -> int:
 
 
 def rotation_degrees() -> int:
+    """Clockwise UI rotation (persisted settings, else DISPLAY_ROTATION env)."""
+    try:
+        from display.round_touch import settings
+
+        return normalize_degrees(settings.display_rotation())
+    except Exception:
+        pass
     try:
         from config import DISPLAY_ROTATION
     except ImportError:

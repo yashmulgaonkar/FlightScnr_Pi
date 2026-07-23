@@ -44,6 +44,7 @@ DISPLAY_ACTIONS = (
     "sweep",
     "units",
     "range",
+    "rotate",
     "brightness",
 )
 OPTIONS_ACTIONS = (
@@ -412,6 +413,7 @@ def _display_row_labels() -> list[str]:
         f"Sweep line: {sweep}",
         f"Units: {units}",
         f"Range: {settings.scale_label()}",
+        f"Rotate: {settings.display_rotation()}°",
         "",  # brightness slider
     ]
 
@@ -585,11 +587,9 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
             sys_lines = ["CPU: —", "RAM: —", "Temp: —"]
         lines = [
             f"IP: {_local_ip()}",
-            f"Host: {_hostname()}.local",
             f"Web: {web_portal_url(_hostname())}",
             *sys_lines,
-            f"Lat: {LOCATION_HOME[0]:.5f}",
-            f"Lon: {LOCATION_HOME[1]:.5f}",
+            f"Lat/Lon: {LOCATION_HOME[0]:.5f}, {LOCATION_HOME[1]:.5f}",
             _route_api_line("FR24", FR24_API_KEY),
             _route_api_line("AirLabs", AIRLABS_API_KEY),
             _route_api_line("FlightAware", FLIGHTAWARE_API_KEY),

@@ -72,6 +72,8 @@ _defaults = {
     # dark | light | vfr — radar basemap (see map_bg)
     "map_style": "dark",
     "vfr_map_opacity": 45,
+    # Clockwise UI + touch mapping: 0, 90, 180, 270 (physical panel mount).
+    "display_rotation": 90,
 }
 
 # Live preview while calibrating facing (not persisted until save).
@@ -86,6 +88,25 @@ def _normalize_facing(deg) -> float:
     if not (value == value):  # NaN
         return 0.0
     return value % 360.0
+
+
+def _normalize_display_rotation(deg) -> int:
+    try:
+        value = int(deg) % 360
+    except (TypeError, ValueError):
+        return 90
+    if value not in (0, 90, 180, 270):
+        value = round(value / 90) * 90 % 360
+    return value
+
+
+def _env_display_rotation() -> int:
+    try:
+        from config import DISPLAY_ROTATION
+
+        return _normalize_display_rotation(DISPLAY_ROTATION)
+    except ImportError:
+        return _normalize_display_rotation(os.environ.get("DISPLAY_ROTATION", "90"))
 
 
 def _snap_min_height(value) -> int:
@@ -158,8 +179,9 @@ def _seed_from_env(state: dict) -> None:
         env_style = map_bg.normalize_map_style(os.environ.get("RADAR_MAP_PROVIDER", "dark"))
         # UI only cycles dark/light/vfr; map legacy osm to dark for first-run seed.
         state["map_style"] = env_style if env_style in MAP_STYLES else "dark"
+        state["display_rotation"] = _env_display_rotation()
     except ImportError:
-        pass
+        state["display_rotation"] = _env_display_rotation()
 
 
 def _save(data):
@@ -260,6 +282,13 @@ def _load():
     except (TypeError, ValueError):
         state["vfr_map_opacity"] = 45
         migrated = True
+    if "display_rotation" not in data:
+        state["display_rotation"] = _env_display_rotation()
+        migrated = True
+    else:
+        state["display_rotation"] = _normalize_display_rotation(
+            state.get("display_rotation", 90)
+        )
     if color_presets.migrate_theme_index(state):
         migrated = True
     if migrated:
@@ -300,6 +329,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("ais_enabled"),
         state.get("map_style"),
         state.get("vfr_map_opacity"),
+        _normalize_display_rotation(state.get("display_rotation", 90)),
     )
 
 
@@ -744,6 +774,27 @@ def scale_label() -> str:
     from display.round_touch import scale
 
     return scale.format_band_tag(scale_index(), distance_units())
+
+
+def display_rotation() -> int:
+    return _normalize_display_rotation(_state.get("display_rotation", 90))
+
+
+def set_display_rotation(degrees) -> int:
+    value = _normalize_display_rotation(degrees)
+    _state["display_rotation"] = value
+    _save(_state)
+    return value
+
+
+def cycle_display_rotation() -> int:
+    options = (0, 90, 180, 270)
+    current = display_rotation()
+    try:
+        idx = options.index(current)
+    except ValueError:
+        idx = 0
+    return set_display_rotation(options[(idx + 1) % len(options)])
 
 
 def theme_index() -> int:

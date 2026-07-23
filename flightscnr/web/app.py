@@ -559,6 +559,7 @@ def display_json():
             "flight_detail_timeout_s": settings.flight_detail_timeout_s(),
             "clock_timeout_s": settings.clock_timeout_s(),
             "auto_idle_clock": settings.auto_idle_clock_enabled(),
+            "display_rotation": settings.display_rotation(),
         }
     )
 
@@ -579,6 +580,8 @@ def display_save():
         settings.set_flight_detail_timeout_s(data.get("flight_detail_timeout_s"))
     if "clock_timeout_s" in data:
         settings.set_clock_timeout_s(data.get("clock_timeout_s"))
+    if "display_rotation" in data:
+        settings.set_display_rotation(data.get("display_rotation"))
     return jsonify(
         {
             "ok": True,
@@ -586,6 +589,7 @@ def display_save():
             "flight_detail_timeout_s": settings.flight_detail_timeout_s(),
             "clock_timeout_s": settings.clock_timeout_s(),
             "auto_idle_clock": settings.auto_idle_clock_enabled(),
+            "display_rotation": settings.display_rotation(),
             "message": "Display settings saved.",
         }
     )
