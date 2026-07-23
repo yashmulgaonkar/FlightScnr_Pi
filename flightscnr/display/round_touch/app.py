@@ -1561,6 +1561,8 @@ class RoundTouchDisplay:
         running = True
         last_data_poll = 0
         last_location_check = 0
+        pinch_diag_deadline = time.time() + 25.0
+        pinch_diag_logged = False
         try:
             from config import AIS_REFRESH_SECONDS, DATA_REFRESH_SECONDS
         except ImportError:
@@ -1569,6 +1571,19 @@ class RoundTouchDisplay:
 
         try:
             while running:
+                if (
+                    not pinch_diag_logged
+                    and time.time() >= pinch_diag_deadline
+                ):
+                    pinch_diag_logged = True
+                    if not input_handler.finger_events_seen():
+                        logger.info(
+                            "Pinch-to-zoom unavailable: no SDL FINGER* events yet "
+                            "(common under Xwayland mouse emulation). "
+                            "Taps/swipes still use the mouse path. "
+                            "Change range via Settings → Options → Range, "
+                            "or see README / GitHub issue #21."
+                        )
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         # Touch drivers / compositors sometimes emit spurious QUIT.

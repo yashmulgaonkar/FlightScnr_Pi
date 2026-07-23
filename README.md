@@ -282,7 +282,7 @@ FlightScnr can bring up its own setup hotspot when the Pi has **no Ethernet** an
 | Logs                   | `sudo journalctl -u flightscnr -f`                             |
 
 
-**Touch works in `evtest` / `i2cdetect` but taps do nothing in the app?** On Raspberry Pi OS Bookworm with labwc/Wayland, Xwayland usually delivers **mouse** events for the panel, not SDL `FINGER*` events. If `/etc/flightscnr.env` has `TOUCH_USE_FINGER_EVENTS=True`, taps are dropped:
+**Touch works in `evtest` / `i2cdetect` but taps do nothing in the app?** On Raspberry Pi OS Bookworm with labwc/Wayland, Xwayland usually delivers **mouse** events for the panel, not SDL `FINGER*` events. If `/etc/flightscnr.env` has `TOUCH_USE_FINGER_EVENTS=True`, taps can be dropped on older builds:
 
 ```bash
 sudo sed -i 's/^TOUCH_USE_FINGER_EVENTS=.*/TOUCH_USE_FINGER_EVENTS=False/' /etc/flightscnr.env
@@ -290,6 +290,18 @@ sudo systemctl restart flightscnr
 ```
 
 Current builds also fall back to the mouse path automatically when no `FINGER*` events arrive (see [issue #14](https://github.com/yashmulgaonkar/FlightScnr_Pi/issues/14)).
+
+**Pinch-to-zoom does nothing ([issue #21](https://github.com/yashmulgaonkar/FlightScnr_Pi/issues/21))?** Pinch only works when SDL delivers multi-touch as `FINGERDOWN` / `FINGERMOTION` / `FINGERUP`. That is independent of `TOUCH_USE_FINGER_EVENTS` (which only chooses the tap/swipe path). Under Xwayland, touch is often pointer-emulated as a **single** mouse cursor — mouse events cannot represent two fingers, so pinch is impossible on that path. Check:
+
+```bash
+sudo journalctl -u flightscnr -b | grep -E 'Touch:|pinch:|FINGER'
+```
+
+- If you never see `FINGER events detected` / `pinch: session ARMED`, the display stack is not sending multi-touch to SDL.
+- Keep `TOUCH_USE_FINGER_EVENTS=False` for reliable taps under Xwayland; flipping it to `True` does **not** invent `FINGER*` events.
+- Change range without pinch: on-device **Settings → Options → Range** (or the portal radar range control).
+- Free finger-drag pan of the map is not a radar gesture (swipe changes screens). Use **Settings → Recenter** for map pan calibration.
+- Optional debug: set `TOUCH_DEBUG=1` in `/etc/flightscnr.env`, restart, pinch on radar, and inspect `journalctl -u flightscnr -f | grep touch`.
 
 
 

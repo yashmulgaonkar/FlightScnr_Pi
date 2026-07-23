@@ -42,6 +42,11 @@ def prefer_finger_events() -> bool:
     return _USE_FINGER_EVENTS
 
 
+def finger_events_seen() -> bool:
+    """True once any SDL FINGER* event has arrived this process."""
+    return _finger_events_seen
+
+
 def use_finger_events() -> bool:
     """True when single-touch should use the FINGER* path right now.
 
@@ -68,8 +73,11 @@ def _note_mouse_fallback() -> None:
     _logged_mouse_fallback = True
     logger.info(
         "Touch: mouse events without FINGER* (typical under Xwayland) — "
-        "using mouse path; set TOUCH_USE_FINGER_EVENTS=False in /etc/flightscnr.env "
-        "to silence this (GitHub issue #14)"
+        "using mouse path for taps/swipes. Pinch-to-zoom needs SDL FINGER* "
+        "multi-touch and will stay unavailable until those arrive "
+        "(see README / GitHub issue #21). "
+        "Set TOUCH_USE_FINGER_EVENTS=False in /etc/flightscnr.env to silence "
+        "this if env is True (GitHub issue #14)."
     )
 
 
