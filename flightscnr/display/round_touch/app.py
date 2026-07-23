@@ -558,6 +558,8 @@ class RoundTouchDisplay:
             self._begin_facing_calibrate()
         elif action == "recenter":
             self._begin_map_pan()
+        elif action == "aircraft_tag":
+            settings.toggle_show_aircraft_tag()
         elif action == "min_height":
             settings.cycle_min_height()
         elif action == "max_height":
