@@ -166,6 +166,61 @@ class TestFlightDedupe(unittest.TestCase):
         self.assertEqual(merged.get("plane_latitude"), 37.48)
         self.assertEqual(merged.get("icao_hex"), "06A123")
 
+    def test_dedupe_merges_glf5_reg_fr24_with_blank_adsb(self):
+        """Business jet: FR24 shows N-number; ADS-B often blank callsign + lagged FR24 pos."""
+        from utilities import aircraft_alert
+
+        fr24 = {
+            "callsign": "N284PH",
+            "registration": "N284PH",
+            "plane": "GLF5",
+            "plane_latitude": 26.32,
+            "plane_longitude": -80.96,
+            "altitude": 650,
+            "data_source": "fr24_grpc",
+        }
+        adsb = {
+            "callsign": "",
+            "plane": "GLF5",
+            "plane_latitude": 26.35,
+            "plane_longitude": -80.90,
+            "altitude": 1075,
+            "data_source": "adsb_fi",
+            "icao_hex": "A27ABC",
+        }
+        with mock.patch.object(aircraft_alert.geo, "distance_km", return_value=8.0):
+            out = aircraft_alert.dedupe_flights([fr24, adsb])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].get("registration") or out[0].get("callsign"), "N284PH")
+        self.assertEqual(out[0].get("plane"), "GLF5")
+        self.assertEqual(out[0].get("icao_hex"), "A27ABC")
+
+    def test_cross_feed_wide_merge_requires_fr24_data_source(self):
+        """Without data_source on the FR24 shell, 15 km lag merge must not run."""
+        from utilities import aircraft_alert
+
+        fr24 = {
+            "callsign": "N284PH",
+            "registration": "N284PH",
+            "plane": "GLF5",
+            "plane_latitude": 26.32,
+            "plane_longitude": -80.96,
+            "altitude": 650,
+            # Missing data_source — historical overhead.py bug.
+        }
+        adsb = {
+            "callsign": "",
+            "plane": "GLF5",
+            "plane_latitude": 26.35,
+            "plane_longitude": -80.90,
+            "altitude": 1075,
+            "data_source": "adsb_fi",
+            "icao_hex": "A27ABC",
+        }
+        with mock.patch.object(aircraft_alert.geo, "distance_km", return_value=8.0):
+            out = aircraft_alert.dedupe_flights([fr24, adsb])
+        self.assertEqual(len(out), 2)
+
     def test_dedupe_keeps_cross_feed_with_conflicting_callsigns(self):
         from utilities import aircraft_alert
 

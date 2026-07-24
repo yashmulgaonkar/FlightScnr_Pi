@@ -9,6 +9,7 @@ try:
         AIRLABS_API_KEY,
         AISSTREAM_API_KEY,
         FLIGHTAWARE_API_KEY,
+        FIRMS_MAP_KEY,
         FR24_API_KEY,
         LOCATION_HOME,
         web_portal_url,
@@ -18,6 +19,7 @@ except ImportError:
     AIRLABS_API_KEY = ""
     AISSTREAM_API_KEY = ""
     FLIGHTAWARE_API_KEY = ""
+    FIRMS_MAP_KEY = ""
     LOCATION_HOME = [0.0, 0.0]
 
     def web_portal_url(hostname: str) -> str:
@@ -79,6 +81,32 @@ def _route_api_line(name: str, key: str) -> str:
     if not key:
         return f"{name}: no key"
     return f"{name}: active"
+
+
+def _firms_api_line() -> str:
+    """FIRMS MAP_KEY status; note when another wildfire source is used at home."""
+    key = (FIRMS_MAP_KEY or "").strip()
+    if not key:
+        try:
+            import os
+
+            key = os.environ.get("FIRMS_MAP_KEY", "").strip()
+        except Exception:
+            key = ""
+    if not key:
+        return "FIRMS: no key"
+    try:
+        from display.round_touch import wildfire_overlay
+
+        if wildfire_overlay.using_firms():
+            return "FIRMS: active"
+        if wildfire_overlay.using_calfire():
+            return "FIRMS: set (CAL FIRE used)"
+        if wildfire_overlay.using_wfigs():
+            return "FIRMS: set (WFIGS used)"
+    except Exception:
+        pass
+    return "FIRMS: active"
 
 
 def _breadcrumb(page: int) -> list[str]:
@@ -597,6 +625,7 @@ def draw_info(surface, page: int, scroll_offset: int = 0, display_focus: int = 0
             _route_api_line("AirLabs", AIRLABS_API_KEY),
             _route_api_line("FlightAware", FLIGHTAWARE_API_KEY),
             _route_api_line("AIS", AISSTREAM_API_KEY),
+            _firms_api_line(),
         ]
         detail_font = draw.load_font(theme.s(13))
         gap = theme.s(2)

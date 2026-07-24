@@ -26,10 +26,31 @@ jobs:
             exit 1
           fi
 
+      - name: Build release notes from tag message
+        id: notes
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Annotated tag message from: release.sh --message "..."
+          RAW="$(git tag -l --format='%(contents)' "$TAG")"
+          RAW="$(printf '%s' "$RAW" | sed -e 's/[[:space:]]*$//')"
+          # Prefer the user text after "— " (FlightScnr Pi VER — notes)
+          USER_MSG="$(printf '%s\n' "$RAW" | head -n1 | sed -n 's/^FlightScnr Pi [^—]*—[[:space:]]*//p')"
+          if [ -z "$USER_MSG" ]; then
+            USER_MSG="$RAW"
+          fi
+          {
+            echo "body<<EOF"
+            if [ -n "$USER_MSG" ]; then
+              printf '%s\n\n' "$USER_MSG"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: FlightScnr Pi ${{ github.ref_name }}
+          body: ${{ steps.notes.outputs.body }}
           generate_release_notes: true
           draft: false
           prerelease: false

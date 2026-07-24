@@ -987,6 +987,8 @@ class Overhead:
                             "direction": degrees_to_cardinal(plane_bearing(f)),
                             "trail": trail,
                             "livery_note": livery_note,
+                            # Required for FR24↔ADS-B 15 km lag merge in aircraft_alert.
+                            "data_source": "fr24_grpc",
                         }
 
                         overhead_data.append(entry)

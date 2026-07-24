@@ -11,6 +11,7 @@
 #   ./scripts/release.sh --iteration 3  # force 2026.7.7.3 (uses today's date)
 #   ./scripts/release.sh --push       # commit, tag, and push to origin
 #   ./scripts/release.sh --message "Fix radar range sync"
+#       (--message is stored on the git tag and shown in GitHub Release notes)
 #
 set -euo pipefail
 
@@ -118,6 +119,9 @@ if [ "$PUSH" -eq 1 ]; then
     git -C "$REPO_ROOT" push origin HEAD
     git -C "$REPO_ROOT" push origin "$NEXT_VERSION"
     echo "GitHub Actions will publish the release for tag $NEXT_VERSION."
+    if [ -n "$MESSAGE" ]; then
+        echo "  (release notes will include: $MESSAGE)"
+    fi
 else
     echo ""
     echo "Push when ready:"
