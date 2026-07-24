@@ -103,7 +103,7 @@ Marine traffic uses live AIS from [aisstream.io](https://aisstream.io/) when ena
 
 ![Marine vessel photo](docs/images/marine_images1.png) · ![Marine vessel photo](docs/images/marine_images2.png)
 
-Optional **wildfire** markers: in California the radar uses [CAL FIRE](https://www.fire.ca.gov/incidents) active incidents (no API key); elsewhere it uses [NIFC WFIGS](https://data-nifc.opendata.arcgis.com/) current incident locations — the same large-fire layer shown on the [AirNow Fire and Smoke Map](https://fire.airnow.gov/) (no API key). Fire Details shows name, county, acres, and containment. Enable **Show wildfires** (Radar card or Settings → Options). Tap a fire icon for details. Data refreshes every 15 minutes and immediately after recenter or boot.
+Optional **wildfire** markers: in California the radar uses [CAL FIRE](https://www.fire.ca.gov/incidents) (no API key); elsewhere in the USA/Canada it uses [NIFC WFIGS](https://data-nifc.opendata.arcgis.com/) current incidents (AirNow Fire and Smoke Map large-fire layer, no API key); outside USA/Canada it uses [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/api/area/) VIIRS NRT hotspots (free [MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/map_key/) under portal → API Keys). Fire Details shows name, county, acres, and containment when the source provides them. Enable **Show wildfires** (Radar card or Settings → Options). Tap a fire icon for details. Data refreshes every 15 minutes and immediately after recenter or boot.
 
 ---
 
@@ -124,7 +124,7 @@ Open from any device on your LAN:
 | **Weather**           | °C / °F for clock and forecast                                                                           |
 | **Alerts**            | Military, emergency squawk, watch list, hide non-alerted aircraft                                        |
 | **Tracking**          | Track a callsign; **route search** (origin + destination) for live flights                               |
-| **API keys**          | FR24, Tomorrow.io, AirLabs, FlightAware (route fallback), aisstream.io - save or save & restart                                        |
+| **API keys**          | FR24, Tomorrow.io, AirLabs, FlightAware (route fallback), aisstream.io, NASA FIRMS (wildfires outside USA/Canada) - save or save & restart |
 | **Updates**           | Check GitHub for new releases; **Update Now** runs `git pull` and re-syncs (git checkout required)       |
 | **System**            | **Reboot** or **Shutdown** the Pi remotely                                                               |
 
@@ -160,7 +160,8 @@ Portal preferences are stored on the Pi in `/var/lib/flightscnr/` and apply with
 | **[Wikimedia Commons](https://commons.wikimedia.org/)**                | Optional (automatic)     | Vessel photos on marine detail; aircraft type photo fallback                                                                                        |
 | **[Tomorrow.io](https://app.tomorrow.io/signup)**                      | Yes (weather)            | Clock temperature and multi-day forecast                                                                                                          |
 | **[CAL FIRE](https://www.fire.ca.gov/incidents)**                      | Optional (California)    | Active wildfire incidents on the radar + Fire Details (counties, acres, containment); no API key                                                  |
-| **[NIFC WFIGS](https://data-nifc.opendata.arcgis.com/)**                | Optional (outside CA)    | Current wildland fire incident locations (AirNow Fire and Smoke Map large-fire layer); no API key                                                 |
+| **[NIFC WFIGS](https://data-nifc.opendata.arcgis.com/)**                | Optional (USA/Canada)    | Current wildland fire incident locations outside California (AirNow large-fire layer); no API key                                                   |
+| **[NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/api/map_key/)**     | Optional (rest of world) | Satellite wildfire hotspots when the radar is outside the USA and Canada (free MAP_KEY)                                                             |
 | **[AirLabs](https://airlabs.co/signup)**                               | Optional                 | Scheduled departure info when a tracked flight is not yet airborne                                                                                |
 | **[FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/)** | Optional             | Route fallback when FR24/AirLabs lack origin/destination (capped monthly spend — **not** a live radar feed)                                         |
 

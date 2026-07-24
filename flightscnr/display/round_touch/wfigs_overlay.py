@@ -64,9 +64,10 @@ def _maps_dir() -> str:
 
 def _enabled() -> bool:
     try:
-        from display.round_touch import calfire_overlay, settings
+        from display.round_touch import settings, wildfire_overlay
 
-        if calfire_overlay.home_in_california():
+        # USA/Canada outside California only (CA uses CAL FIRE).
+        if not wildfire_overlay.using_wfigs():
             return False
         return bool(settings.show_wildfires())
     except Exception:

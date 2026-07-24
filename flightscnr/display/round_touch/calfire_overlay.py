@@ -25,7 +25,7 @@ USER_AGENT = "FlightScnrPi/1.0 (CAL FIRE overlay; +https://github.com/yashmulgao
 FETCH_TIMEOUT_S = 25
 POLL_TTL_S = 15 * 60
 PAGE_TIMEOUT_S = 20
-# California mainland + roughly coastal waters (WFIGS used outside this box).
+# California mainland + roughly coastal waters (WFIGS covers other USA/Canada).
 _CA_LAT = (32.52, 42.02)
 _CA_LON = (-124.48, -114.12)
 # ArcGIS World Topo — same family as the Esri map embedded on incident pages.

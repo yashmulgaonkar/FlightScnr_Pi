@@ -188,8 +188,17 @@ def _seed_from_env(state: dict) -> None:
 
 
 def _default_show_wildfires() -> bool:
-    # CalFire (CA) and NIFC WFIGS (elsewhere) need no API key.
-    return True
+    # CalFire / WFIGS need no key; FIRMS (rest of world) needs MAP_KEY.
+    if os.environ.get("FIRMS_MAP_KEY", "").strip():
+        return True
+    try:
+        from display.round_touch import wildfire_overlay
+
+        if wildfire_overlay.using_calfire() or wildfire_overlay.using_wfigs():
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _save(data):

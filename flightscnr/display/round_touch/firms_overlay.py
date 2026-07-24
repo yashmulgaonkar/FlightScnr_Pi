@@ -71,10 +71,10 @@ def _enabled() -> bool:
     if not _map_key():
         return False
     try:
-        from display.round_touch import calfire_overlay, settings
+        from display.round_touch import settings, wildfire_overlay
 
-        # California uses CAL FIRE incidents instead of FIRMS hotspots.
-        if calfire_overlay.home_in_california():
+        # USA/Canada use CAL FIRE (CA) or NIFC WFIGS; FIRMS is rest-of-world only.
+        if not wildfire_overlay.using_firms():
             return False
         return bool(settings.show_wildfires())
     except Exception:
