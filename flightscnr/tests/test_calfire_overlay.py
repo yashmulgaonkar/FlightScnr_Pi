@@ -104,13 +104,13 @@ class TestCalfireOverlay(unittest.TestCase):
                 return_value=[{"name": "Little Fire", "source": "calfire"}],
             ):
                 with mock.patch.object(
-                    wildfire_overlay.firms_overlay, "get_fires"
-                ) as firms_get:
+                    wildfire_overlay.wfigs_overlay, "get_fires"
+                ) as wfigs_get:
                     fires = wildfire_overlay.get_fires()
-                    firms_get.assert_not_called()
+                    wfigs_get.assert_not_called()
         self.assertEqual(fires[0]["name"], "Little Fire")
 
-    def test_wildfire_router_skips_firms_refresh_in_ca(self):
+    def test_wildfire_router_skips_wfigs_refresh_in_ca(self):
         from display.round_touch import wildfire_overlay
 
         with mock.patch.object(wildfire_overlay, "using_calfire", return_value=True):
@@ -118,14 +118,14 @@ class TestCalfireOverlay(unittest.TestCase):
                 wildfire_overlay.calfire_overlay, "request_refresh"
             ) as cf:
                 with mock.patch.object(
-                    wildfire_overlay.firms_overlay, "request_refresh"
-                ) as firms:
+                    wildfire_overlay.wfigs_overlay, "request_refresh"
+                ) as wfigs:
                     with mock.patch.object(
-                        wildfire_overlay.firms_overlay, "invalidate"
+                        wildfire_overlay.wfigs_overlay, "invalidate"
                     ) as inv:
                         wildfire_overlay.request_refresh(force=True)
                         cf.assert_called_once_with(force=True)
-                        firms.assert_not_called()
+                        wfigs.assert_not_called()
                         inv.assert_called_once()
 
 

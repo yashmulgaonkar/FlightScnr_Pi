@@ -1,4 +1,4 @@
-"""Wildfire overlay router: CAL FIRE in California, NASA FIRMS elsewhere."""
+"""Wildfire overlay router: CAL FIRE in California, NIFC WFIGS elsewhere."""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ from typing import Any
 
 import pygame
 
-from display.round_touch import calfire_overlay, firms_overlay, geo, theme
+from display.round_touch import calfire_overlay, geo, theme, wfigs_overlay
 
 logger = logging.getLogger("flightscnr.display")
 
-POLL_TTL_S = min(firms_overlay.POLL_TTL_S, calfire_overlay.POLL_TTL_S)
+POLL_TTL_S = min(wfigs_overlay.POLL_TTL_S, calfire_overlay.POLL_TTL_S)
 
 _ICON_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -32,48 +32,41 @@ def using_calfire() -> bool:
 
 
 def invalidate() -> None:
-    firms_overlay.invalidate()
+    wfigs_overlay.invalidate()
     calfire_overlay.invalidate()
 
 
 def request_refresh(*, force: bool = False) -> None:
     if using_calfire():
-        # Do not hit FIRMS while the radar is centered in California.
-        firms_overlay.invalidate()
+        # Do not hit WFIGS while the radar is centered in California.
+        wfigs_overlay.invalidate()
         calfire_overlay.request_refresh(force=force)
     else:
         calfire_overlay.invalidate()
-        firms_overlay.request_refresh(force=force)
+        wfigs_overlay.request_refresh(force=force)
 
 
 def get_fires() -> list[dict[str, Any]]:
     if using_calfire():
         return calfire_overlay.get_fires()
-    return firms_overlay.get_fires()
+    return wfigs_overlay.get_fires()
 
 
 def attribution_text() -> str | None:
     if using_calfire():
         return calfire_overlay.attribution_text()
-    return firms_overlay.attribution_text()
+    return wfigs_overlay.attribution_text()
 
 
 def fires_by_distance() -> list[dict[str, Any]]:
     if using_calfire():
         return calfire_overlay.fires_by_distance()
-
-    def key(f: dict[str, Any]) -> float:
-        try:
-            return geo.local_offset_km(f["lat"], f["lon"])[2]
-        except Exception:
-            return 1e9
-
-    return sorted(get_fires(), key=key)
+    return wfigs_overlay.fires_by_distance()
 
 
 def _icon_height(fire: dict[str, Any]) -> int:
     base = max(10, theme.s(_ICON_HEIGHT))
-    if fire.get("source") == "calfire":
+    if fire.get("source") in ("calfire", "wfigs"):
         acres = fire.get("acres")
         try:
             acres_f = float(acres) if acres is not None else 0.0

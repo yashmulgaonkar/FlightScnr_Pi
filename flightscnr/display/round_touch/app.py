@@ -1686,13 +1686,14 @@ class RoundTouchDisplay:
     def _maybe_fetch_fire_map(self) -> None:
         if self.screen != SCREEN_FIRE:
             return
-        if not wildfire_overlay.using_calfire():
-            return
         ordered = wildfire_overlay.fires_by_distance()
         if not ordered:
             return
         self._sync_selected_fire_index()
         fire = ordered[self.fire_index]
+        source = fire.get("source")
+        if source not in ("calfire", "wfigs"):
+            return
         fid = self._fire_identity(fire)
         if not fid or fid in self._fire_maps:
             return
@@ -1702,9 +1703,14 @@ class RoundTouchDisplay:
                 self._fire_maps[fid] = path
                 self._fire_map_redraw = True
 
-        from display.round_touch import calfire_overlay
+        if source == "calfire":
+            from display.round_touch import calfire_overlay
 
-        calfire_overlay.request_map(fire, on_done=_on_done)
+            calfire_overlay.request_map(fire, on_done=_on_done)
+        else:
+            from display.round_touch import wfigs_overlay
+
+            wfigs_overlay.request_map(fire, on_done=_on_done)
 
     def _open_flight_or_fire_at(
         self, x: int, y: int, alt_x: int | None = None, alt_y: int | None = None

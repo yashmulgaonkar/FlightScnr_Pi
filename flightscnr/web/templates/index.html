@@ -180,7 +180,7 @@
                 <label for="show_wildfires">Show wildfires</label>
                 <span class="switch"><input id="show_wildfires" type="checkbox"><span class="track"></span></span>
             </div>
-            <p class="hint">In California: <a href="https://www.fire.ca.gov/incidents" target="_blank" rel="noopener">CAL FIRE</a> incidents (counties, acres, containment — no API key). Elsewhere: <a href="https://firms.modaps.eosdis.nasa.gov/api/area/" target="_blank" rel="noopener">NASA FIRMS</a> hotspots (free <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener">MAP_KEY</a> in API Keys). Tap a fire for details. Refreshes every 15 minutes and on recenter.</p>
+            <p class="hint">In California: <a href="https://www.fire.ca.gov/incidents" target="_blank" rel="noopener">CAL FIRE</a> incidents (counties, acres, containment — no API key). Elsewhere: <a href="https://data-nifc.opendata.arcgis.com/" target="_blank" rel="noopener">NIFC WFIGS</a> current incidents (same large-fire layer as the <a href="https://fire.airnow.gov/" target="_blank" rel="noopener">AirNow Fire and Smoke Map</a> — no API key). Tap a fire for details. Refreshes every 15 minutes and on recenter.</p>
             <label for="traffic_mode">Radar traffic</label>
             <select id="traffic_mode">
                 <option value="aircraft">Aircraft only</option>
@@ -343,7 +343,7 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#128273;</span>API Keys<span class="sum">FR24, Tomorrow.io, AirLabs, AIS, FlightAware, FIRMS</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#128273;</span>API Keys<span class="sum">FR24, Tomorrow.io, AirLabs, AIS, FlightAware</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <div class="chk">
                 <label for="use-fr24-api">Use FR24 API</label>
@@ -383,10 +383,10 @@
             <input type="password" id="aisstream-key" placeholder="API key" autocomplete="off">
             <p class="hint" id="aisstream-hint"></p>
             <p class="hint">Get a free key at <a href="https://aisstream.io" target="_blank" rel="noopener">aisstream.io</a> (non-commercial).</p>
-            <label for="firms-key">NASA FIRMS MAP_KEY (wildfires)</label>
+            <label for="firms-key" class="legacy-key">NASA FIRMS MAP_KEY (unused)</label>
             <input type="password" id="firms-key" placeholder="MAP_KEY" autocomplete="off">
             <p class="hint" id="firms-hint"></p>
-            <p class="hint">Free key from <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener">FIRMS map key</a>. Used for wildfire hotspots outside California (VIIRS NRT). In California the radar uses CAL FIRE instead.</p>
+            <p class="hint">Wildfires no longer use FIRMS. Outside California the radar uses free NIFC WFIGS (AirNow large-fire layer). This field is kept only if you still have an old key saved.</p>
             <div class="track-row" style="margin-top:.6rem">
                 <button class="btn btn-primary" id="btn-keys-save" type="button">Save keys</button>
                 <button class="btn" id="btn-keys-restart" type="button">Save &amp; restart</button>

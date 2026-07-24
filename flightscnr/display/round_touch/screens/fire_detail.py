@@ -1,4 +1,4 @@
-"""Wildfire detail screen — CAL FIRE counties / acres / containment + map."""
+"""Wildfire detail screen — counties / acres / containment + map."""
 
 from __future__ import annotations
 
@@ -92,6 +92,8 @@ def _fire_rows(fire: dict, title_font, body_font, detail_font) -> list[tuple[str
     source = fire.get("source")
     if source == "calfire":
         rows.append(("CAL FIRE", detail_font, theme.HINT))
+    elif source == "wfigs":
+        rows.append(("NIFC WFIGS", detail_font, theme.HINT))
     elif source == "firms":
         conf = (fire.get("confidence") or "").strip()
         bit = f"NASA FIRMS · {conf}" if conf else "NASA FIRMS"

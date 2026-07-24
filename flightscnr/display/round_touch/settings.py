@@ -188,14 +188,8 @@ def _seed_from_env(state: dict) -> None:
 
 
 def _default_show_wildfires() -> bool:
-    if os.environ.get("FIRMS_MAP_KEY", "").strip():
-        return True
-    try:
-        from display.round_touch.calfire_overlay import home_in_california
-
-        return bool(home_in_california())
-    except Exception:
-        return False
+    # CalFire (CA) and NIFC WFIGS (elsewhere) need no API key.
+    return True
 
 
 def _save(data):
