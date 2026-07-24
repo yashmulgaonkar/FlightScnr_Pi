@@ -181,10 +181,21 @@ def _seed_from_env(state: dict) -> None:
         # UI only cycles dark/light/vfr; map legacy osm to dark for first-run seed.
         state["map_style"] = env_style if env_style in MAP_STYLES else "dark"
         state["display_rotation"] = _env_display_rotation()
-        state["show_wildfires"] = bool(os.environ.get("FIRMS_MAP_KEY", "").strip())
+        state["show_wildfires"] = _default_show_wildfires()
     except ImportError:
         state["display_rotation"] = _env_display_rotation()
-        state["show_wildfires"] = bool(os.environ.get("FIRMS_MAP_KEY", "").strip())
+        state["show_wildfires"] = _default_show_wildfires()
+
+
+def _default_show_wildfires() -> bool:
+    if os.environ.get("FIRMS_MAP_KEY", "").strip():
+        return True
+    try:
+        from display.round_touch.calfire_overlay import home_in_california
+
+        return bool(home_in_california())
+    except Exception:
+        return False
 
 
 def _save(data):
@@ -293,7 +304,7 @@ def _load():
             state.get("display_rotation", 90)
         )
     if "show_wildfires" not in data:
-        state["show_wildfires"] = bool(os.environ.get("FIRMS_MAP_KEY", "").strip())
+        state["show_wildfires"] = _default_show_wildfires()
         migrated = True
     else:
         state["show_wildfires"] = bool(state.get("show_wildfires"))

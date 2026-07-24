@@ -17,7 +17,6 @@ from utilities.route_enrichment import (
 )
 from display.round_touch import (
     draw,
-    firms_overlay,
     ghost_touch_filter,
     gesture_handler,
     input_handler,
@@ -32,12 +31,14 @@ from display.round_touch import (
     theme,
     touch_debug,
     video,
+    wildfire_overlay,
 )
 from utilities import aircraft_alert
 from display.round_touch.screens import (
     clock,
     clock_settings,
     details,
+    fire_detail,
     flight_detail,
     forecast,
     info,
@@ -51,6 +52,7 @@ logger = logging.getLogger("flightscnr.display")
 
 SCREEN_RADAR = "radar"
 SCREEN_FLIGHT = "flight_detail"
+SCREEN_FIRE = "fire_detail"
 SCREEN_SETTINGS = "settings"
 SCREEN_DETAILS = "details"
 SCREEN_CLOCK = "clock"
@@ -121,6 +123,10 @@ class RoundTouchDisplay:
         self.flight_index = 0
         # Stable identity for the open detail page (index alone drifts as traffic changes).
         self._selected_flight_id: str | None = None
+        self.fire_index = 0
+        self._selected_fire_id: str | None = None
+        self._fire_maps: dict[str, str] = {}
+        self._fire_map_redraw = False
         self._secondary_activity = time.time()
         self._boot_until = time.time() + BOOT_SPLASH_S
         self._wifi_setup_mode = False
@@ -185,7 +191,7 @@ class RoundTouchDisplay:
             map_bg.request_background()
             map_bg.prewarm_all_scales()
             rainviewer_overlay.request_overlay()
-            firms_overlay.request_refresh(force=True)
+            wildfire_overlay.request_refresh(force=True)
         self._apply_brightness()
         if settings.auto_timezone_enabled():
             try:
@@ -225,7 +231,7 @@ class RoundTouchDisplay:
         map_bg.request_background()
         map_bg.prewarm_all_scales()
         rainviewer_overlay.request_overlay()
-        firms_overlay.request_refresh(force=True)
+        wildfire_overlay.request_refresh(force=True)
         self._open_screen(SCREEN_RADAR)
 
     def _tick_wifi_setup(self) -> None:
@@ -386,6 +392,13 @@ class RoundTouchDisplay:
                 self.flight_index,
                 self._scroll.offset,
             )
+        elif self.screen == SCREEN_FIRE:
+            self._scroll.max_offset = fire_detail.draw_fire_detail(
+                self.surface,
+                self._fires_for_detail(),
+                self.fire_index,
+                self._scroll.offset,
+            )
         elif self.screen == SCREEN_SETTINGS:
             self._scroll.max_offset = info.draw_info(
                 self.surface,
@@ -431,6 +444,8 @@ class RoundTouchDisplay:
         if self.screen == SCREEN_TRACKED and tracked.is_pinned():
             return None
         if self.screen == SCREEN_FLIGHT:
+            return float(settings.flight_detail_timeout_s())
+        if self.screen == SCREEN_FIRE:
             return float(settings.flight_detail_timeout_s())
         return float(SECONDARY_TIMEOUT_S)
 
@@ -554,8 +569,8 @@ class RoundTouchDisplay:
             scale.select(settings.scale_index())
             map_bg.request_background()
             rainviewer_overlay.request_overlay()
-            firms_overlay.invalidate()
-            firms_overlay.request_refresh(force=True)
+            wildfire_overlay.invalidate()
+            wildfire_overlay.request_refresh(force=True)
         elif action == "rotate":
             settings.cycle_display_rotation()
         elif action == "compass":
@@ -580,9 +595,9 @@ class RoundTouchDisplay:
             rainviewer_overlay.request_overlay()
         elif action == "wildfires":
             settings.toggle_show_wildfires()
-            firms_overlay.invalidate()
+            wildfire_overlay.invalidate()
             if settings.show_wildfires():
-                firms_overlay.request_refresh(force=True)
+                wildfire_overlay.request_refresh(force=True)
         elif action == "map_style":
             settings.cycle_map_style()
         elif action == "vfr_opacity":
@@ -655,8 +670,8 @@ class RoundTouchDisplay:
         map_bg.prewarm_all_scales()
         rainviewer_overlay.invalidate()
         rainviewer_overlay.request_overlay()
-        firms_overlay.invalidate()
-        firms_overlay.request_refresh(force=True)
+        wildfire_overlay.invalidate()
+        wildfire_overlay.request_refresh(force=True)
         self._position_smoother.reset()
         self._panning_map = False
         self._pan_offset = (0, 0)
@@ -802,8 +817,8 @@ class RoundTouchDisplay:
         scale.select(new_idx)
         map_bg.request_background()
         rainviewer_overlay.request_overlay()
-        firms_overlay.invalidate()
-        firms_overlay.request_refresh(force=True)
+        wildfire_overlay.invalidate()
+        wildfire_overlay.request_refresh(force=True)
         self._safe_draw()
 
     def _flights_for_detail(self):
@@ -1028,6 +1043,8 @@ class RoundTouchDisplay:
             return
         if self.screen == SCREEN_FLIGHT:
             self._apply_scroll_delta(-dy)
+        elif self.screen == SCREEN_FIRE:
+            self._apply_scroll_delta(-dy)
         elif self.screen == SCREEN_DETAILS:
             self._apply_scroll_delta(-dy)
         elif self.screen == SCREEN_SETTINGS:
@@ -1244,13 +1261,13 @@ class RoundTouchDisplay:
                 self._safe_draw()
             else:
                 if swipe_end:
-                    opened = self._open_flight_at(swipe_end[0], swipe_end[1])
+                    opened = self._open_flight_or_fire_at(swipe_end[0], swipe_end[1])
                 if not opened and swipe_start and swipe_end:
-                    opened = self._open_flight_at(
+                    opened = self._open_flight_or_fire_at(
                         swipe_start[0], swipe_start[1], swipe_end[0], swipe_end[1],
                     )
                 elif not opened and swipe_start:
-                    opened = self._open_flight_at(swipe_start[0], swipe_start[1])
+                    opened = self._open_flight_or_fire_at(swipe_start[0], swipe_start[1])
                 if opened:
                     self._safe_draw()
         elif swipe == input_handler.SWIPE_LEFT and self.screen == SCREEN_TRACKED:
@@ -1293,6 +1310,12 @@ class RoundTouchDisplay:
         elif self.screen == SCREEN_FLIGHT and swipe in (input_handler.SWIPE_UP, input_handler.SWIPE_DOWN):
             delta = -nav.scroll_step() if swipe == input_handler.SWIPE_UP else nav.scroll_step()
             self._scroll.step(delta)
+            self._note_activity()
+            self._safe_draw()
+        elif self.screen == SCREEN_FIRE and swipe in (input_handler.SWIPE_UP, input_handler.SWIPE_DOWN):
+            delta = -nav.scroll_step() if swipe == input_handler.SWIPE_UP else nav.scroll_step()
+            self._scroll.step(delta)
+            self._note_activity()
             self._safe_draw()
         elif swipe in (input_handler.SWIPE_UP, input_handler.SWIPE_DOWN) and self.screen == SCREEN_DETAILS:
             delta = -nav.scroll_step() if swipe == input_handler.SWIPE_UP else nav.scroll_step()
@@ -1324,26 +1347,49 @@ class RoundTouchDisplay:
         elif tap and self.screen == SCREEN_RADAR:
             if self.pinch.should_suppress_tap():
                 tap = None
-            if tap and not self._radar_modal_active() and self._open_flight_at(tap[0], tap[1]):
+            if tap and not self._radar_modal_active() and self._open_flight_or_fire_at(tap[0], tap[1]):
                 self._safe_draw()
         elif tap and self.screen == SCREEN_FLIGHT:
+            # Any tap (content or footer) restarts the idle countdown.
+            self._note_activity()
             self._sync_selected_flight_index()
             ordered = self._ordered_flights()
             action = flight_detail.tap_footer_action(tap[0], tap[1], ordered)
             if action == "prev" and ordered:
                 self._select_flight_at_index(self.flight_index - 1, ordered)
                 self._scroll.reset()
-                self._note_activity()
                 self._maybe_enrich_flight_detail()
                 self._safe_draw()
             elif action == "next" and ordered:
                 self._select_flight_at_index(self.flight_index + 1, ordered)
                 self._scroll.reset()
-                self._note_activity()
                 self._maybe_enrich_flight_detail()
                 self._safe_draw()
             elif action == "radar":
                 self._return_to_radar()
+                self._safe_draw()
+            else:
+                self._safe_draw()
+        elif tap and self.screen == SCREEN_FIRE:
+            # Any tap (content or footer) restarts the idle countdown.
+            self._note_activity()
+            self._sync_selected_fire_index()
+            ordered = wildfire_overlay.fires_by_distance()
+            action = fire_detail.tap_footer_action(tap[0], tap[1], ordered)
+            if action == "prev" and ordered:
+                self._select_fire_at_index(self.fire_index - 1, ordered)
+                self._scroll.reset()
+                self._maybe_fetch_fire_map()
+                self._safe_draw()
+            elif action == "next" and ordered:
+                self._select_fire_at_index(self.fire_index + 1, ordered)
+                self._scroll.reset()
+                self._maybe_fetch_fire_map()
+                self._safe_draw()
+            elif action == "radar":
+                self._return_to_radar()
+                self._safe_draw()
+            else:
                 self._safe_draw()
         elif tap and self.screen == SCREEN_TRACKED:
             action = tracked.tap_footer_action(
@@ -1500,7 +1546,7 @@ class RoundTouchDisplay:
         map_bg.request_background()
         map_bg.prewarm_all_scales()
         rainviewer_overlay.request_overlay()
-        firms_overlay.request_refresh(force=True)
+        wildfire_overlay.request_refresh(force=True)
         self._apply_brightness()
         try:
             from utilities.ais_client import sync_ais_client
@@ -1524,8 +1570,8 @@ class RoundTouchDisplay:
             map_bg.prewarm_all_scales()
             rainviewer_overlay.invalidate()
             rainviewer_overlay.request_overlay()
-            firms_overlay.invalidate()
-            firms_overlay.request_refresh(force=True)
+            wildfire_overlay.invalidate()
+            wildfire_overlay.request_refresh(force=True)
             self._position_smoother.reset()
             self.overhead.grab_data()
             lat, lon = float(LOCATION_HOME[0]), float(LOCATION_HOME[1])
@@ -1566,7 +1612,106 @@ class RoundTouchDisplay:
     def _tick_firms(self):
         if self.screen == SCREEN_WIFI_SETUP or self._radar_modal_active():
             return
-        firms_overlay.request_refresh()
+        wildfire_overlay.request_refresh()
+
+    def _fire_identity(self, fire: dict | None) -> str | None:
+        if not fire:
+            return None
+        fid = str(fire.get("id") or "").strip()
+        if fid:
+            return fid
+        try:
+            return f"{float(fire['lat']):.4f},{float(fire['lon']):.4f}"
+        except Exception:
+            return None
+
+    def _fires_for_detail(self) -> list:
+        fires = wildfire_overlay.fires_by_distance()
+        out = []
+        for fire in fires:
+            item = dict(fire)
+            fid = self._fire_identity(fire)
+            if fid and fid in self._fire_maps:
+                item["map_path"] = self._fire_maps[fid]
+            out.append(item)
+        return out
+
+    def _sync_selected_fire_index(self) -> bool:
+        ordered = wildfire_overlay.fires_by_distance()
+        if not ordered:
+            self.fire_index = 0
+            return False
+        if self._selected_fire_id:
+            for i, fire in enumerate(ordered):
+                if self._fire_identity(fire) == self._selected_fire_id:
+                    self.fire_index = i
+                    return True
+        self.fire_index = max(0, min(self.fire_index, len(ordered) - 1))
+        self._selected_fire_id = self._fire_identity(ordered[self.fire_index])
+        return True
+
+    def _select_fire(self, fire: dict, ordered: list | None = None) -> None:
+        ordered = ordered if ordered is not None else wildfire_overlay.fires_by_distance()
+        self._selected_fire_id = self._fire_identity(fire)
+        try:
+            self.fire_index = ordered.index(fire)
+        except ValueError:
+            # Identity match if object identity differs after refresh.
+            for i, item in enumerate(ordered):
+                if self._fire_identity(item) == self._selected_fire_id:
+                    self.fire_index = i
+                    return
+            self.fire_index = 0
+            if ordered:
+                self._selected_fire_id = self._fire_identity(ordered[0])
+
+    def _select_fire_at_index(self, index: int, ordered: list | None = None) -> None:
+        ordered = ordered if ordered is not None else wildfire_overlay.fires_by_distance()
+        if not ordered:
+            return
+        self.fire_index = index % len(ordered)
+        self._selected_fire_id = self._fire_identity(ordered[self.fire_index])
+
+    def _open_fire_at(self, x: int, y: int, alt_x: int | None = None, alt_y: int | None = None) -> bool:
+        picked = wildfire_overlay.pick_fire_at(x, y, alt_x, alt_y)
+        ordered = wildfire_overlay.fires_by_distance()
+        if not picked or not ordered:
+            return False
+        self._select_fire(picked, ordered)
+        self._open_screen(SCREEN_FIRE)
+        self._note_activity()
+        self._maybe_fetch_fire_map()
+        return True
+
+    def _maybe_fetch_fire_map(self) -> None:
+        if self.screen != SCREEN_FIRE:
+            return
+        if not wildfire_overlay.using_calfire():
+            return
+        ordered = wildfire_overlay.fires_by_distance()
+        if not ordered:
+            return
+        self._sync_selected_fire_index()
+        fire = ordered[self.fire_index]
+        fid = self._fire_identity(fire)
+        if not fid or fid in self._fire_maps:
+            return
+
+        def _on_done(path: str | None) -> None:
+            if path:
+                self._fire_maps[fid] = path
+                self._fire_map_redraw = True
+
+        from display.round_touch import calfire_overlay
+
+        calfire_overlay.request_map(fire, on_done=_on_done)
+
+    def _open_flight_or_fire_at(
+        self, x: int, y: int, alt_x: int | None = None, alt_y: int | None = None
+    ) -> bool:
+        if self._open_flight_at(x, y, alt_x, alt_y):
+            return True
+        return self._open_fire_at(x, y, alt_x, alt_y)
 
     def _tick_ais(self):
         if self._radar_modal_active():
@@ -1709,7 +1854,7 @@ class RoundTouchDisplay:
                 if (
                     self.screen != SCREEN_WIFI_SETUP
                     and not self._radar_modal_active()
-                    and now - self._last_firms_poll >= firms_overlay.POLL_TTL_S
+                    and now - self._last_firms_poll >= wildfire_overlay.POLL_TTL_S
                 ):
                     self._tick_firms()
                     self._last_firms_poll = now
@@ -1746,6 +1891,10 @@ class RoundTouchDisplay:
                 if self._vessel_photo_redraw and self.screen == SCREEN_FLIGHT:
                     self._vessel_photo_redraw = False
                     self._safe_draw()
+                    self._safe_draw()
+
+                if self._fire_map_redraw and self.screen == SCREEN_FIRE:
+                    self._fire_map_redraw = False
                     self._safe_draw()
 
                 if self._weather_redraw_pending and self.screen in (
@@ -1799,7 +1948,7 @@ class RoundTouchDisplay:
                     if (now - self._last_static_draw) >= interval:
                         self._safe_draw()
                         self._last_static_draw = now
-                elif self.screen in (SCREEN_FLIGHT, SCREEN_SETTINGS, SCREEN_DETAILS):
+                elif self.screen in (SCREEN_FLIGHT, SCREEN_FIRE, SCREEN_SETTINGS, SCREEN_DETAILS):
                     interval = (
                         theme.SWEEP_FRAME_MS / 1000.0
                         if self._timeout_remaining_fraction() is not None

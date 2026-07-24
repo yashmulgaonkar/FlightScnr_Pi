@@ -50,6 +50,7 @@ class TestFirmsOverlay(unittest.TestCase):
         self.assertEqual(len(fires), 2)
         self.assertAlmostEqual(fires[0]["lat"], 37.48)
         self.assertEqual(fires[0]["confidence"], "n")
+        self.assertEqual(fires[0]["source"], "firms")
         self.assertAlmostEqual(fires[1]["lat"], 37.49)
         self.assertEqual(fires[1]["confidence"], "h")
 

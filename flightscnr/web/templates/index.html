@@ -177,10 +177,10 @@
             </div>
             <p class="hint">Live rain/snow radar overlay via <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a> (free personal API, updates ~ every 5–10 min).</p>
             <div class="chk">
-                <label for="show_wildfires">Show wildfires (NASA FIRMS)</label>
+                <label for="show_wildfires">Show wildfires</label>
                 <span class="switch"><input id="show_wildfires" type="checkbox"><span class="track"></span></span>
             </div>
-            <p class="hint">Satellite fire detections in the radar area via <a href="https://firms.modaps.eosdis.nasa.gov/api/area/" target="_blank" rel="noopener">NASA FIRMS</a>. Requires a free <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener">MAP_KEY</a> in API Keys. Refreshes every 15 minutes and on recenter.</p>
+            <p class="hint">In California: <a href="https://www.fire.ca.gov/incidents" target="_blank" rel="noopener">CAL FIRE</a> incidents (counties, acres, containment — no API key). Elsewhere: <a href="https://firms.modaps.eosdis.nasa.gov/api/area/" target="_blank" rel="noopener">NASA FIRMS</a> hotspots (free <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener">MAP_KEY</a> in API Keys). Tap a fire for details. Refreshes every 15 minutes and on recenter.</p>
             <label for="traffic_mode">Radar traffic</label>
             <select id="traffic_mode">
                 <option value="aircraft">Aircraft only</option>
@@ -386,7 +386,7 @@
             <label for="firms-key">NASA FIRMS MAP_KEY (wildfires)</label>
             <input type="password" id="firms-key" placeholder="MAP_KEY" autocomplete="off">
             <p class="hint" id="firms-hint"></p>
-            <p class="hint">Free key from <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener">FIRMS map key</a>. Used for wildfire dots on the radar (VIIRS NRT).</p>
+            <p class="hint">Free key from <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener">FIRMS map key</a>. Used for wildfire hotspots outside California (VIIRS NRT). In California the radar uses CAL FIRE instead.</p>
             <div class="track-row" style="margin-top:.6rem">
                 <button class="btn btn-primary" id="btn-keys-save" type="button">Save keys</button>
                 <button class="btn" id="btn-keys-restart" type="button">Save &amp; restart</button>

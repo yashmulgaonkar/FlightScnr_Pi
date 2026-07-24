@@ -324,14 +324,14 @@ def location_set():
         except Exception:
             print("Weather/timezone refresh after location save failed")
         try:
-            from display.round_touch import firms_overlay, map_bg, rainviewer_overlay
+            from display.round_touch import wildfire_overlay, map_bg, rainviewer_overlay
 
             map_bg.invalidate()
             map_bg.request_background()
             rainviewer_overlay.invalidate()
             rainviewer_overlay.request_overlay()
-            firms_overlay.invalidate()
-            firms_overlay.request_refresh(force=True)
+            wildfire_overlay.invalidate()
+            wildfire_overlay.request_refresh(force=True)
         except Exception:
             print("Map/precip refresh after location save failed")
         return jsonify({
@@ -675,10 +675,10 @@ def radar_save():
         map_bg.request_background()
         rainviewer_overlay.request_overlay()
         try:
-            from display.round_touch import firms_overlay
+            from display.round_touch import wildfire_overlay
 
-            firms_overlay.invalidate()
-            firms_overlay.request_refresh(force=True)
+            wildfire_overlay.invalidate()
+            wildfire_overlay.request_refresh(force=True)
         except Exception:
             pass
     elif "scale_index" in data:
@@ -687,10 +687,10 @@ def radar_save():
         map_bg.request_background()
         rainviewer_overlay.request_overlay()
         try:
-            from display.round_touch import firms_overlay
+            from display.round_touch import wildfire_overlay
 
-            firms_overlay.invalidate()
-            firms_overlay.request_refresh(force=True)
+            wildfire_overlay.invalidate()
+            wildfire_overlay.request_refresh(force=True)
         except Exception:
             pass
     if "min_height_ft" in data:
@@ -715,12 +715,12 @@ def radar_save():
         if settings.show_precipitation():
             rainviewer_overlay.request_overlay()
     if "show_wildfires" in data:
-        from display.round_touch import firms_overlay
+        from display.round_touch import wildfire_overlay
 
         settings.set_show_wildfires(bool(data.get("show_wildfires")))
-        firms_overlay.invalidate()
+        wildfire_overlay.invalidate()
         if settings.show_wildfires():
-            firms_overlay.request_refresh(force=True)
+            wildfire_overlay.request_refresh(force=True)
     if "map_style" in data:
         settings.set_map_style(str(data.get("map_style") or ""))
     if "vfr_map_opacity" in data:

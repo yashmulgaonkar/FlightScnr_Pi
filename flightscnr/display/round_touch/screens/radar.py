@@ -5,7 +5,7 @@ import time
 
 import pygame
 
-from display.round_touch import aircraft, draw, firms_overlay, geo, map_bg, rainviewer_overlay, scale, settings, theme
+from display.round_touch import aircraft, draw, geo, map_bg, rainviewer_overlay, scale, settings, theme, wildfire_overlay
 from display.round_touch import alert_prefs
 from display.round_touch import vessel_declutter
 from utilities import aircraft_alert
@@ -112,14 +112,14 @@ def draw_radar(
     # Keep async map/precip/fire fetch warm even when using the cached backdrop.
     map_bg.request_background()
     rainviewer_overlay.request_overlay()
-    firms_overlay.request_refresh()
+    wildfire_overlay.request_refresh()
 
     if pan_mode:
         _draw_map_pan_overlay(surface, pan_offset=offset)
     elif calibrate:
         _draw_facing_calibrate_overlay(surface)
     else:
-        firms_overlay.draw_fires(surface, pan_offset=offset)
+        wildfire_overlay.draw_fires(surface, pan_offset=offset)
         _draw_flights(surface, flights)
         if settings.show_sweep_line():
             sweep = (_sweep_angle - settings.effective_facing_deg()) % 360.0
@@ -666,7 +666,7 @@ def _draw_map_attribution(surface):
     precip_text = rainviewer_overlay.attribution_text()
     if precip_text:
         parts.append(precip_text)
-    firms_text = firms_overlay.attribution_text()
+    firms_text = wildfire_overlay.attribution_text()
     if firms_text:
         parts.append(firms_text)
     if not parts:
@@ -691,32 +691,17 @@ def _flight_screen_xy(flight) -> tuple[int, int] | None:
     return geo.beyond_ring_position(lat, lon)
 
 
-def _aircraft_tag_rect(x: int, y: int) -> pygame.Rect:
-    block_h, _, _, _ = _tag_block_metrics()
-    ly = y - block_h // 2
-    symbol_half = theme.AIRCRAFT_ICON_RADIUS + theme.s(12)
-    if x < theme.CENTER_X:
-        anchor_x = min(
-            x + symbol_half + theme.AIRCRAFT_LABEL_GAP,
-            theme.CENTER_X + theme.VISIBLE_RADIUS - theme.s(20),
-        )
-        width = theme.CENTER_X + theme.VISIBLE_RADIUS - anchor_x - theme.s(4)
-        return pygame.Rect(anchor_x, ly, max(theme.s(48), width), block_h)
-    anchor_x = max(
-        x - symbol_half - theme.AIRCRAFT_LABEL_GAP,
-        theme.CENTER_X - theme.VISIBLE_RADIUS + theme.s(20),
-    )
-    width = anchor_x - (theme.CENTER_X - theme.VISIBLE_RADIUS) + theme.s(4)
-    return pygame.Rect(anchor_x - max(theme.s(48), width), ly, max(theme.s(48), width), block_h)
-
-
 def pick_flight_at(flights, tap_x, tap_y, alt_x=None, alt_y=None):
+    """Hit-test aircraft/vessel *icons* only — labels are not tappable."""
     points = [(tap_x, tap_y)]
     if alt_x is not None and alt_y is not None:
         points.append((alt_x, alt_y))
 
     best = None
     best_d2 = None
+    # Match the drawn glyph, not the wide callsign/type tag beside it.
+    hit_r = max(theme.TAP_PICK_RADIUS, theme.AIRCRAFT_ICON_RADIUS + theme.s(10))
+    hit_r2 = hit_r * hit_r
     for flight in _visible_flights(flights):
         if not aircraft_alert.is_shown_on_radar(flight):
             continue
@@ -724,22 +709,9 @@ def pick_flight_at(flights, tap_x, tap_y, alt_x=None, alt_y=None):
         if not pos:
             continue
         x, y = pos
-        lat = flight.get("plane_latitude")
-        lon = flight.get("plane_longitude")
-        _, _, dist_km = geo.local_offset_km(lat, lon)
-        compact = dist_km > geo.inner_ring_max_km()
-        hit_r = theme.TAP_PICK_RADIUS if compact else max(theme.TAP_PICK_RADIUS, theme.s(52))
-        hit_r2 = hit_r * hit_r
-        tag_rect = None if compact else _aircraft_tag_rect(x, y)
-
         for px, py in points:
             d2 = (x - px) ** 2 + (y - py) ** 2
-            hit = d2 <= hit_r2
-            if not hit and tag_rect is not None:
-                hit = tag_rect.collidepoint(px, py)
-                if hit:
-                    d2 = d2 // 2
-            if hit and (best_d2 is None or d2 < best_d2):
+            if d2 <= hit_r2 and (best_d2 is None or d2 < best_d2):
                 best = flight
                 best_d2 = d2
     return best

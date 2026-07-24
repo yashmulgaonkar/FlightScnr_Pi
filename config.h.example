@@ -30,7 +30,8 @@ TOMORROW_API_KEY =
 // Optional — aisstream.io AIS vessels (https://aisstream.io — free, non-commercial)
 // AISSTREAM_API_KEY =
 
-// Optional — NASA FIRMS MAP_KEY for wildfire dots (https://firms.modaps.eosdis.nasa.gov/api/map_key/)
+// Optional — NASA FIRMS MAP_KEY for wildfires outside California
+// (In California the radar uses CAL FIRE incidents — no key required)
 // FIRMS_MAP_KEY =
 
 // Radar center (or set location in the web portal)

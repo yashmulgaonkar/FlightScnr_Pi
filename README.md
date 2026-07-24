@@ -103,7 +103,7 @@ Marine traffic uses live AIS from [aisstream.io](https://aisstream.io/) when ena
 
 ![Marine vessel photo](docs/images/marine_images1.png) · ![Marine vessel photo](docs/images/marine_images2.png)
 
-Optional **wildfire** dots use [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/api/area/) (VIIRS NRT). Add a free [MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/map_key/) under portal → API Keys, then enable **Show wildfires** (Radar card or Settings → Options). Detections refresh every 15 minutes and immediately after recenter or boot.
+Optional **wildfire** markers: in California the radar uses [CAL FIRE](https://www.fire.ca.gov/incidents) active incidents (no API key) with a Fire Details page for counties, acres burned, and containment; elsewhere it uses [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/api/area/) VIIRS NRT (free [MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/map_key/) under portal → API Keys). Enable **Show wildfires** (Radar card or Settings → Options). Tap a fire icon for details. Data refreshes every 15 minutes and immediately after recenter or boot.
 
 ---
 
@@ -159,6 +159,8 @@ Portal preferences are stored on the Pi in `/var/lib/flightscnr/` and apply with
 | **[planespotters.net](https://www.planespotters.net/)**                | Optional (automatic)     | Aircraft photos on flight detail (by hex / registration)                                                                                            |
 | **[Wikimedia Commons](https://commons.wikimedia.org/)**                | Optional (automatic)     | Vessel photos on marine detail; aircraft type photo fallback                                                                                        |
 | **[Tomorrow.io](https://app.tomorrow.io/signup)**                      | Yes (weather)            | Clock temperature and multi-day forecast                                                                                                          |
+| **[CAL FIRE](https://www.fire.ca.gov/incidents)**                      | Optional (California)    | Active wildfire incidents on the radar + Fire Details (counties, acres, containment); no API key                                                  |
+| **[NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/api/map_key/)**     | Optional (outside CA)    | Satellite wildfire hotspots when the radar is not centered in California (free MAP_KEY)                                                             |
 | **[AirLabs](https://airlabs.co/signup)**                               | Optional                 | Scheduled departure info when a tracked flight is not yet airborne                                                                                |
 | **[FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/)** | Optional             | Route fallback when FR24/AirLabs lack origin/destination (capped monthly spend — **not** a live radar feed)                                         |
 

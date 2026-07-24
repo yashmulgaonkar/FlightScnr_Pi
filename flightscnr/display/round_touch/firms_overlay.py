@@ -71,8 +71,11 @@ def _enabled() -> bool:
     if not _map_key():
         return False
     try:
-        from display.round_touch import settings
+        from display.round_touch import calfire_overlay, settings
 
+        # California uses CAL FIRE incidents instead of FIRMS hotspots.
+        if calfire_overlay.home_in_california():
+            return False
         return bool(settings.show_wildfires())
     except Exception:
         return False
@@ -211,8 +214,11 @@ def parse_firms_csv(text: str, *, now: float | None = None) -> list[dict[str, An
         confidence = (row.get("confidence") or row.get("Confidence") or "").strip()
         out.append(
             {
+                "source": "firms",
+                "id": f"firms:{lat:.4f},{lon:.4f}",
                 "lat": lat,
                 "lon": lon,
+                "name": "Hotspot",
                 "frp": frp,
                 "confidence": confidence,
             }
