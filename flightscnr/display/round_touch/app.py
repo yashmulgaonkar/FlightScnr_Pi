@@ -123,6 +123,8 @@ class RoundTouchDisplay:
         self.flight_index = 0
         # Stable identity for the open detail page (index alone drifts as traffic changes).
         self._selected_flight_id: str | None = None
+        # Radar path selection (tap icon once = highlight+path; tap again = detail).
+        self._radar_path_id: str | None = None
         self.fire_index = 0
         self._selected_fire_id: str | None = None
         self._fire_maps: dict[str, str] = {}
@@ -378,12 +380,26 @@ class RoundTouchDisplay:
         if self.screen == SCREEN_WIFI_SETUP:
             wifi_setup_screen.draw_wifi_setup(self.surface)
         elif self.screen == SCREEN_RADAR:
+            path_id = self._radar_path_id
+            trail_points = None
+            if path_id:
+                # Drop path if the aircraft left coverage.
+                still = any(
+                    self._flight_identity(f) == path_id for f in self._radar_flights()
+                )
+                if not still:
+                    self._radar_path_id = None
+                    path_id = None
+                else:
+                    trail_points = self._trail_points_for_id(path_id)
             radar.draw_radar(
                 self.surface,
                 self._radar_flights(),
                 calibrate=self._calibrating_facing,
                 pan_mode=self._panning_map,
                 pan_offset=self._pan_offset if self._panning_map else None,
+                selected_flight_id=path_id,
+                trail_points=trail_points,
             )
         elif self.screen == SCREEN_FLIGHT:
             self._scroll.max_offset = flight_detail.draw_flight_detail(
@@ -986,12 +1002,41 @@ class RoundTouchDisplay:
         """Flights with dead-reckoned positions for radar draw / tap hit-testing."""
         return self._position_smoother.apply(self.flights)
 
+    def _trail_points_for_id(self, flight_id: str | None) -> list | None:
+        if not flight_id:
+            return None
+        for flight in self._radar_flights():
+            if self._flight_identity(flight) == flight_id:
+                return self._position_smoother.trails.trail_for_flight(flight)
+        return self._position_smoother.trails.local_trail(flight_id)
+
+    def _clear_radar_path(self) -> bool:
+        if self._radar_path_id is None:
+            return False
+        self._radar_path_id = None
+        return True
+
     def _open_flight_at(self, x: int, y: int, alt_x: int | None = None, alt_y: int | None = None) -> bool:
         picked = radar.pick_flight_at(self._radar_flights(), x, y, alt_x, alt_y)
         ordered = self._ordered_flights()
         if not picked or not ordered:
             return False
+        picked_id = self._flight_identity(picked)
+        # First tap: stay on radar, highlight + draw path. Second tap on same: details.
+        if self.screen == SCREEN_RADAR and picked_id and picked_id != self._radar_path_id:
+            self._select_flight(picked, ordered)
+            self._radar_path_id = picked_id
+            if picked.get("kind") == "vessel":
+                logger.info(
+                    "[ais] path-selected vessel MMSI=%s name=%r",
+                    picked.get("mmsi"),
+                    picked.get("name") or picked.get("callsign"),
+                )
+            self._note_activity()
+            return True
+
         self._select_flight(picked, ordered)
+        self._radar_path_id = picked_id
         if picked.get("kind") == "vessel":
             logger.info(
                 "[ais] selected vessel MMSI=%s name=%r",
@@ -1002,6 +1047,19 @@ class RoundTouchDisplay:
         self._note_activity()
         self._maybe_enrich_flight_detail()
         return True
+
+    def _open_flight_or_fire_at(
+        self, x: int, y: int, alt_x: int | None = None, alt_y: int | None = None
+    ) -> bool:
+        if self._open_flight_at(x, y, alt_x, alt_y):
+            return True
+        if self._open_fire_at(x, y, alt_x, alt_y):
+            return True
+        # Empty radar tap clears path selection.
+        if self.screen == SCREEN_RADAR and self._clear_radar_path():
+            self._note_activity()
+            return True
+        return False
 
     def _apply_scroll_delta(self, delta: int):
         if not delta:
@@ -1705,13 +1763,6 @@ class RoundTouchDisplay:
         from display.round_touch import calfire_overlay
 
         calfire_overlay.request_map(fire, on_done=_on_done)
-
-    def _open_flight_or_fire_at(
-        self, x: int, y: int, alt_x: int | None = None, alt_y: int | None = None
-    ) -> bool:
-        if self._open_flight_at(x, y, alt_x, alt_y):
-            return True
-        return self._open_fire_at(x, y, alt_x, alt_y)
 
     def _tick_ais(self):
         if self._radar_modal_active():

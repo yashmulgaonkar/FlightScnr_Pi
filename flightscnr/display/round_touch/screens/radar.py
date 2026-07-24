@@ -91,6 +91,8 @@ def draw_radar(
     calibrate: bool = False,
     pan_mode: bool = False,
     pan_offset: tuple[int, int] | None = None,
+    selected_flight_id: str | None = None,
+    trail_points: list | None = None,
 ):
     alert_prefs.reload()
     offset = pan_offset if pan_mode else None
@@ -120,7 +122,8 @@ def draw_radar(
         _draw_facing_calibrate_overlay(surface)
     else:
         wildfire_overlay.draw_fires(surface, pan_offset=offset)
-        _draw_flights(surface, flights)
+        _draw_flight_trail(surface, trail_points)
+        _draw_flights(surface, flights, selected_flight_id=selected_flight_id)
         if settings.show_sweep_line():
             sweep = (_sweep_angle - settings.effective_facing_deg()) % 360.0
             draw.draw_sweep_line(
@@ -134,6 +137,47 @@ def draw_radar(
             _draw_alert_rim_flash(surface)
         _draw_status(surface, flights)
         _draw_map_attribution(surface)
+
+
+def _trail_screen_points(trail_points: list | None) -> list[tuple[int, int]]:
+    """Project chronological lat/lon trail into radar screen points (inner ring only)."""
+    if not trail_points:
+        return []
+    max_km = geo.inner_ring_max_km()
+    pts: list[tuple[int, int]] = []
+    for item in trail_points:
+        try:
+            lat = float(item[0])
+            lon = float(item[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        _, _, dist_km = geo.local_offset_km(lat, lon)
+        if dist_km > max_km:
+            continue
+        x, y = geo.lat_lon_to_screen(lat, lon)
+        if pts:
+            px, py = pts[-1]
+            if abs(px - x) < 1 and abs(py - y) < 1:
+                continue
+        pts.append((int(x), int(y)))
+    return pts
+
+
+def _draw_flight_trail(surface, trail_points: list | None) -> None:
+    pts = _trail_screen_points(trail_points)
+    if len(pts) < 2:
+        return
+    color = _overlay_color_for_basemap(theme.ROUTE)
+    # FR24-style dotted trail: small discs along the path.
+    r = max(1, theme.s(2))
+    step = max(1, theme.s(3))
+    # Also a thin connecting line under the dots for continuity.
+    if len(pts) >= 2:
+        pygame.draw.lines(surface, color, False, pts, max(1, theme.s(1)))
+    for i, (x, y) in enumerate(pts):
+        if i % step != 0 and i != len(pts) - 1:
+            continue
+        pygame.draw.circle(surface, color, (x, y), r)
 
 
 def _draw_grid(surface, *, calibrate: bool = False):
@@ -426,7 +470,9 @@ def _draw_light_map_icon_halo(surface, x: int, y: int, *, compact: bool) -> None
     surface.blit(halo, (int(x) - r - 1, int(y) - r - 1))
 
 
-def _flight_icon_color(flight, *, compact: bool):
+def _flight_icon_color(flight, *, compact: bool, selected: bool = False):
+    if selected:
+        return _overlay_color_for_basemap(theme.SWEEP)
     if _is_tracked(flight) and not compact:
         return _overlay_color_for_basemap(theme.SWEEP)
     if aircraft_alert.is_highlighted(flight):
@@ -441,7 +487,15 @@ def _flight_icon_color(flight, *, compact: bool):
     return _overlay_color_for_basemap(theme.AIRCRAFT)
 
 
-def _draw_flights(surface, flights):
+def _flight_is_selected(flight, selected_flight_id: str | None) -> bool:
+    if not selected_flight_id:
+        return False
+    from display.round_touch.trail_history import flight_identity
+
+    return flight_identity(flight) == selected_flight_id
+
+
+def _draw_flights(surface, flights, *, selected_flight_id: str | None = None):
     rim_items: list[tuple[float, dict, tuple[int, int]]] = []
     inner_items: list[tuple[float, dict, tuple[int, int]]] = []
 
@@ -465,26 +519,29 @@ def _draw_flights(surface, flights):
     def _draw_order(item):
         dist_km, flight, _ = item
         parked = 1 if vessel_declutter.is_parked(flight) else 0
-        return (parked, -dist_km)
+        selected = 0 if _flight_is_selected(flight, selected_flight_id) else 1
+        return (selected, parked, -dist_km)
 
     rim_items.sort(key=_draw_order)
     inner_items.sort(key=_draw_order)
 
     for _, flight, (x, y) in rim_items:
+        selected = _flight_is_selected(flight, selected_flight_id)
         _draw_light_map_icon_halo(surface, x, y, compact=True)
         aircraft.draw_plane_icon(
             surface,
             x,
             y,
             geo.screen_heading(flight.get("heading") or 0),
-            _flight_icon_color(flight, compact=True),
+            _flight_icon_color(flight, compact=True, selected=selected),
             compact=True,
             flight=flight,
         )
 
     for _, flight, (x, y) in inner_items:
+        selected = _flight_is_selected(flight, selected_flight_id)
         heading = geo.screen_heading(flight.get("heading") or 0)
-        color = _flight_icon_color(flight, compact=False)
+        color = _flight_icon_color(flight, compact=False, selected=selected)
         _draw_light_map_icon_halo(surface, x, y, compact=False)
         aircraft.draw_plane_icon(surface, x, y, heading, color, flight=flight)
         _draw_aircraft_tag(surface, x, y, flight)

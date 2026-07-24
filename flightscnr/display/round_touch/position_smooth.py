@@ -81,13 +81,18 @@ class PositionSmoother:
 
     def __init__(self) -> None:
         self._tracks: dict[str, dict[str, Any]] = {}
+        from display.round_touch.trail_history import TrailHistory
+
+        self.trails = TrailHistory()
 
     def reset(self) -> None:
         self._tracks.clear()
+        self.trails.reset()
 
     def apply(self, flights: list[dict], now: float | None = None) -> list[dict]:
         """Return shallow copies with plane_latitude/longitude dead-reckoned to ``now``."""
         now = time.time() if now is None else float(now)
+        self.trails.observe_many(flights, now=now)
         seen: set[str] = set()
         out: list[dict] = []
 
