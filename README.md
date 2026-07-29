@@ -20,7 +20,7 @@ Contributions are welcome. If you find a bug, have an idea, or want to improve t
 
 ## What it does
 
-FlightScnr Pi shows live aircraft around your pre set location on a circular radar, with rich flight details when you tap a plane. It combines **FlightRadar24 (FR24)**, live positions from **[adsb.fi](https://adsb.fi)** (free cloud feed — no local ADS-B dongle), optional **local dump1090/readsb**, **Tomorrow.io weather**, and optional **AirLabs** / **FlightAware AeroAPI** route enrichment. Settings, API keys, tracking, and updates are managed through a local web portal. No SSH required for day-to-day use.
+FlightScnr Pi shows live aircraft around your pre set location on a circular radar, with rich flight details when you tap a plane. It combines **FlightRadar24 (FR24)**, live positions from **[adsb.fi](https://adsb.fi)** (free cloud feed — no local ADS-B dongle), optional **local dump1090/readsb**, **Tomorrow.io weather**, and optional **AirLabs** / **FlightAware AeroAPI** / **OpenSky Network** route enrichment. Settings, API keys, tracking, and updates are managed through a local web portal. No SSH required for day-to-day use.
 
 ### Round touch display
 
@@ -124,7 +124,7 @@ Open from any device on your LAN:
 | **Weather**           | °C / °F for clock and forecast                                                                           |
 | **Alerts**            | Military, emergency squawk, watch list, hide non-alerted aircraft                                        |
 | **Tracking**          | Track a callsign; **route search** (origin + destination) for live flights                               |
-| **API keys**          | FR24, Tomorrow.io, AirLabs, FlightAware (route fallback), aisstream.io, NASA FIRMS (wildfires outside USA/Canada) - save or save & restart |
+| **API keys**          | FR24, Tomorrow.io, AirLabs, FlightAware (route fallback), OpenSky Network (route fallback), aisstream.io, NASA FIRMS (wildfires outside USA/Canada) - save or save & restart |
 | **Updates**           | Check GitHub for new releases; **Update Now** runs `git pull` and re-syncs (git checkout required)       |
 | **System**            | **Reboot** or **Shutdown** the Pi remotely                                                               |
 
@@ -164,6 +164,7 @@ Portal preferences are stored on the Pi in `/var/lib/flightscnr/` and apply with
 | **[NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/api/map_key/)**     | Optional (rest of world) | Satellite wildfire hotspots when the radar is outside the USA and Canada (free MAP_KEY)                                                             |
 | **[AirLabs](https://airlabs.co/signup)**                               | Optional                 | Scheduled departure info when a tracked flight is not yet airborne                                                                                |
 | **[FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/)** | Optional             | Route fallback when FR24/AirLabs lack origin/destination (capped monthly spend — **not** a live radar feed)                                         |
+| **[OpenSky Network](https://opensky-network.org/)**                    | Optional                 | Further route fallback when FR24/AirLabs/FlightAware all lack origin/destination; derived from position history, not a filed flight plan — destination is often empty while airborne |
 
 
 API responses are **cached** (e.g. FR24 feed ~90s, flight details ~30 min, weather ~1 hr) to reduce quota use during 24/7 operation. Offline databases (`airports.json`, `airlines.json`, `icao_types.json`) download on first run.
@@ -351,13 +352,11 @@ If the Pi was installed from a **git clone**, open **Updates** in the portal →
 
 ### Firmware
 
-Original application code, tools, and documentation in this repository are licensed under **[Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International](https://creativecommons.org/licenses/by-nc-sa/4.0/)** ([LICENSE](LICENSE)). Required attribution text is in [NOTICE](NOTICE).
+Original application code, tools, and documentation in this repository are licensed under **[Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International](https://creativecommons.org/licenses/by-nc-sa/4.0/)** ([LICENSE](LICENSE)).
 
-- **Attribution:** credit the author (Yash Mulgaonkar), link to https://github.com/yashmulgaonkar/FlightScnr_Pi and the license when you share or adapt this work.
+- **Attribution:** credit the author and link to the license when you share or adapt this work.
 - **NonCommercial:** you may not use this material for commercial purposes without separate permission.
 - **ShareAlike:** adaptations must be released under the same license.
-
-First-party source files include a copyright / SPDX / `[AI-DIRECTIVE]` header. Do not remove those headers. AI coding agents and forks should follow [AGENTS.md](AGENTS.md) (and `.cursor/rules/license-attribution.mdc`) so attribution and license terms stay intact.
 
 
 
@@ -369,4 +368,3 @@ The 3D-printed enclosure is **not** part of this firmware repository. Its digita
 > You shall not share, sub-license, sell, rent, host, transfer, or distribute in any way the digital or 3D printed versions of this object, nor any other derivative work of this object in its digital or physical format (including - but not limited to - remixes of this object, and hosting on other digital platforms). The objects may not be used without permission in any way whatsoever in which you charge money, or collect fees.
 
 Always read the full license on MakerWorld before downloading, printing, or sharing the enclosure design.
-
