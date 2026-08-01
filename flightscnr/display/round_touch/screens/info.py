@@ -138,9 +138,14 @@ SYSTEM_ACTIONS = (
 )
 
 _atc_buttons: list[tuple[str, pygame.Rect]] = []
-# ATC airport / channel picker overlay hit targets: ("close"|"item", value).
+# ATC airport / channel / output picker overlay hit targets: ("close"|"item", value).
 _atc_picker_hits: list[tuple[str, str, pygame.Rect]] = []
 _atc_picker_list_rect: pygame.Rect | None = None
+_ATC_PICKER_TITLES = {
+    "airport": "Select airport",
+    "channel": "Select channel",
+    "output": "Select output",
+}
 
 _SYSTEM_BTN_FILL = (8, 36, 16)
 _SYSTEM_BTN_BORDER = (48, 160, 72)
@@ -289,9 +294,10 @@ def system_needs_confirm(action: str) -> bool:
 
 
 def atc_picker_items(kind: str) -> list[dict]:
-    """Build picker rows for ``airport`` or ``channel``.
+    """Build picker rows for ``airport``, ``channel``, or ``output``.
 
     Each item: ``{"id": str, "label": str, "selected": bool}``.
+    Output ids: ``usb`` or ``bt:<MAC>``.
     """
     from utilities import atc_audio
 
@@ -341,7 +347,63 @@ def atc_picker_items(kind: str) -> list[dict]:
                 }
             )
         return out
+    if kind == "output":
+        return _atc_output_picker_items()
     return []
+
+
+def _atc_output_picker_items() -> list[dict]:
+    """USB audio + connected Bluetooth devices (preferred always listed)."""
+    from utilities import bluetooth_audio
+
+    route = settings.audio_route()
+    preferred = settings.bluetooth_speaker_mac()
+    out: list[dict] = []
+
+    usb_label = "USB Audio"
+    try:
+        sink = bluetooth_audio.find_usb_sink()
+    except Exception:
+        sink = None
+    if sink:
+        desc = str(sink.get("description") or sink.get("name") or "").strip()
+        if desc:
+            short = desc if len(desc) <= 26 else desc[:24] + "…"
+            usb_label = f"USB  {short}"
+    out.append({"id": "usb", "label": usb_label, "selected": route != "bluetooth"})
+
+    seen: set[str] = set()
+    try:
+        devices = bluetooth_audio.list_known_devices()
+    except Exception:
+        devices = []
+    for device in devices:
+        mac = str(device.get("mac") or "").strip().upper()
+        if not mac or not device.get("connected"):
+            continue
+        seen.add(mac)
+        name = str(device.get("name") or mac).strip() or mac
+        short = name if len(name) <= 28 else name[:26] + "…"
+        out.append(
+            {
+                "id": f"bt:{mac}",
+                "label": f"BT  {short}",
+                "selected": route == "bluetooth" and preferred == mac,
+            }
+        )
+
+    # Keep the preferred speaker selectable even if it just dropped.
+    if preferred and preferred not in seen:
+        name = settings.bluetooth_speaker_name() or preferred
+        short = name if len(name) <= 22 else name[:20] + "…"
+        out.append(
+            {
+                "id": f"bt:{preferred}",
+                "label": f"BT  {short} …",
+                "selected": route == "bluetooth",
+            }
+        )
+    return out
 
 
 def draw_atc_picker(
@@ -350,45 +412,40 @@ def draw_atc_picker(
     *,
     scroll_offset: int = 0,
 ) -> int:
-    """Modal scrollable list for ATC airport / channel. Returns max_scroll."""
+    """Modal scrollable list for ATC airport / channel / output. Returns max_scroll."""
     global _atc_picker_hits, _atc_picker_list_rect
     _atc_picker_hits = []
     _atc_picker_list_rect = None
 
     kind = str(kind or "").strip().lower()
-    title_text = "Select airport" if kind == "airport" else "Select channel"
+    title_text = _ATC_PICKER_TITLES.get(kind, "Select")
     items = atc_picker_items(kind)
 
-    dim = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
-    dim.fill((0, 0, 0, 170))
-    surface.blit(dim, (0, 0))
+    # Opaque cover — per-pixel SRCALPHA dims often fail on the Pi framebuffer
+    # and left ATC settings text bleeding through the picker.
+    draw.fill_background(surface)
 
     title_font = draw.load_font(theme.s(15), bold=True)
     body_font = draw.load_font(theme.s(12))
     hint_font = draw.load_font(theme.s(11))
     title = title_font.render(title_text, True, theme.LABEL)
 
-    panel_w = int(theme.VISIBLE_RADIUS * 1.55)
-    panel_h = int(theme.VISIBLE_RADIUS * 1.55)
-    panel = pygame.Rect(0, 0, panel_w, panel_h)
-    panel.center = (theme.CENTER_X, theme.CENTER_Y)
-    radius = theme.s(12)
-    pygame.draw.rect(surface, (6, 24, 12), panel, border_radius=radius)
-    pygame.draw.rect(
-        surface, _SYSTEM_BTN_BORDER, panel, max(1, theme.s(2)), border_radius=radius
-    )
+    # Content sits in a circle-safe band — no rectangular card chrome (looks
+    # wrong against the round bezel when the box nearly fills the display).
+    rim_pad = theme.s(22)
+    content_side = int(theme.VISIBLE_RADIUS * 1.22)
+    content = pygame.Rect(0, 0, content_side, content_side)
+    content.center = (theme.CENTER_X, theme.CENTER_Y)
+    # Pull in from the circle so title/close stay clear of the rim.
+    content.inflate_ip(-rim_pad // 2, -rim_pad)
 
-    pad = theme.s(12)
+    pad = theme.s(4)
     close_size = theme.s(28)
     close_rect = pygame.Rect(
-        panel.right - pad - close_size,
-        panel.top + pad,
+        content.right - close_size,
+        content.top,
         close_size,
         close_size,
-    )
-    pygame.draw.rect(surface, (20, 40, 24), close_rect, border_radius=theme.s(8))
-    pygame.draw.rect(
-        surface, theme.GRID, close_rect, max(1, theme.s(1)), border_radius=theme.s(8)
     )
     # Draw a geometric X — unicode glyphs often fail on the Pi font set.
     inset = max(6, theme.s(7))
@@ -409,18 +466,19 @@ def draw_atc_picker(
     )
     _atc_picker_hits.append(("close", "", close_rect.copy()))
 
-    title_y = panel.top + pad
+    title_y = content.top + theme.s(2)
     surface.blit(
         title,
         title.get_rect(midtop=(theme.CENTER_X - close_size // 2, title_y)),
     )
 
+    hint_reserve = theme.s(18)
     list_top = title_y + title.get_height() + theme.s(10)
-    list_bottom = panel.bottom - pad
+    list_bottom = content.bottom - pad - hint_reserve
     list_rect = pygame.Rect(
-        panel.left + pad,
+        content.left + pad,
         list_top,
-        panel.width - pad * 2,
+        content.width - pad * 2,
         max(theme.s(40), list_bottom - list_top),
     )
     _atc_picker_list_rect = list_rect.copy()
@@ -465,10 +523,8 @@ def draw_atc_picker(
                 )
             text_color = theme.LABEL if selected else theme.MUTED
             rendered = body_font.render(label, True, text_color)
-            # Keep text inside the round panel width.
             max_text_w = list_rect.width - theme.s(16)
             if rendered.get_width() > max_text_w:
-                # Truncate visually with ellipsis.
                 trimmed = label
                 while trimmed and body_font.size(trimmed + "…")[0] > max_text_w:
                     trimmed = trimmed[:-1]
@@ -487,7 +543,7 @@ def draw_atc_picker(
         hint = hint_font.render("Swipe to scroll", True, theme.HINT)
         surface.blit(
             hint,
-            hint.get_rect(midbottom=(theme.CENTER_X, panel.bottom - theme.s(4))),
+            hint.get_rect(midbottom=(theme.CENTER_X, content.bottom - theme.s(2))),
         )
     return max_scroll
 
@@ -569,10 +625,8 @@ def draw_system_confirm_popup(surface, action: str) -> None:
     title_text, detail_text = copy
     danger = action in ("reboot", "shutdown")
 
-    # Dim the page behind the dialog.
-    dim = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
-    dim.fill((0, 0, 0, 160))
-    surface.blit(dim, (0, 0))
+    # Opaque cover — SRCALPHA dims are unreliable on the Pi framebuffer.
+    draw.fill_background(surface)
 
     title_font = draw.load_font(theme.s(16), bold=True)
     body_font = draw.load_font(theme.s(12))
@@ -1159,7 +1213,7 @@ def _atc_status_label() -> str:
 
 
 def _atc_output_label() -> str:
-    """USB vs Bluetooth route; tap cycles when a preferred speaker is paired."""
+    """Short current-output label for the Output › row."""
     try:
         from utilities import bluetooth_audio
 
@@ -1170,14 +1224,14 @@ def _atc_output_label() -> str:
             name = name[:12] + "…"
         if route == "bluetooth":
             if st.get("connected"):
-                return (f"Output: BT {name}" if name else "Output: Bluetooth")[:42]
+                return (f"BT {name}" if name else "Bluetooth")[:28]
             if st.get("mac"):
-                return (f"Output: BT… {name}" if name else "Output: Bluetooth")[:42]
-            return "Output: BT (pair portal)"[:42]
-        return "Output: USB"
+                return (f"BT… {name}" if name else "Bluetooth")[:28]
+            return "BT (pair portal)"[:28]
+        return "USB"
     except Exception:
         route = settings.audio_route()
-        return "Output: Bluetooth" if route == "bluetooth" else "Output: USB"
+        return "Bluetooth" if route == "bluetooth" else "USB"
 
 
 def _atc_row_labels() -> list[str]:
@@ -1187,7 +1241,7 @@ def _atc_row_labels() -> list[str]:
         "",  # volume slider
         f"Airport › {_atc_airport_label()}",
         f"Channel › {_atc_channel_label()}",
-        _atc_output_label(),
+        f"Output › {_atc_output_label()}",
         _atc_status_label(),
     ]
 
@@ -1732,7 +1786,10 @@ def draw_info(
         )
 
     elif page == PAGE_ATC:
-        max_scroll = _draw_atc_page(surface, scroll_offset, display_focus, top, bottom)
+        if not atc_picker:
+            max_scroll = _draw_atc_page(
+                surface, scroll_offset, display_focus, top, bottom
+            )
 
     elif page == PAGE_ATC_QUIET:
         max_scroll = _draw_settings_rows(
@@ -1835,10 +1892,10 @@ def draw_info(
     elif page == PAGE_SYSTEM:
         max_scroll = _draw_system_page(surface, top, bottom)
 
+    if page == PAGE_ATC and atc_picker:
+        # Full-screen picker; skip footer chrome underneath.
+        return draw_atc_picker(surface, atc_picker, scroll_offset=atc_picker_scroll)
     nav.draw_footer_buttons(surface, list(footer_kinds_for_page(page)))
     if page == PAGE_SYSTEM and system_confirm:
         draw_system_confirm_popup(surface, system_confirm)
-    if page == PAGE_ATC and atc_picker:
-        # Picker owns its own scroll; page scroll stays underneath.
-        return draw_atc_picker(surface, atc_picker, scroll_offset=atc_picker_scroll)
     return max_scroll

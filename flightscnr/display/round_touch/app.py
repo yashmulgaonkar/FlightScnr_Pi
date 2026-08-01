@@ -161,7 +161,7 @@ class RoundTouchDisplay:
         self._last_static_draw = 0
         self._display_focus = 0
         self._system_confirm: str | None = None
-        # ATC settings list picker: "airport" | "channel" | None.
+        # ATC settings list picker: "airport" | "channel" | "output" | None.
         self._atc_picker: str | None = None
         self._atc_picker_scroll = nav.ScrollState()
         self._fatal_error = None
@@ -1079,13 +1079,13 @@ class RoundTouchDisplay:
         elif action == "channel":
             self._open_atc_picker("channel")
         elif action == "output":
-            self._cycle_audio_output()
+            self._open_atc_picker("output")
         elif action == "status":
             return
 
     def _open_atc_picker(self, kind: str) -> None:
         kind = str(kind or "").strip().lower()
-        if kind not in ("airport", "channel"):
+        if kind not in ("airport", "channel", "output"):
             return
         if kind == "channel" and not settings.atc_airport():
             return
@@ -1095,19 +1095,6 @@ class RoundTouchDisplay:
     def _close_atc_picker(self) -> None:
         self._atc_picker = None
         self._atc_picker_scroll.reset()
-
-    def _cycle_audio_output(self) -> None:
-        """On-screen USB ↔ Bluetooth output switch for ATC / chime."""
-        from utilities import bluetooth_audio
-
-        if not settings.bluetooth_speaker_mac():
-            # Nothing to toggle — stay on USB / local sink.
-            bluetooth_audio.use_usb_output(disconnect_bluetooth=False)
-            return
-        nxt = "usb" if settings.audio_route() == "bluetooth" else "bluetooth"
-        bluetooth_audio.apply_audio_route(nxt)
-        if nxt == "bluetooth":
-            bluetooth_audio.ensure_reconnect_watch()
 
     def _select_atc_airport(self, icao: str) -> None:
         from utilities import atc_audio
@@ -1156,6 +1143,44 @@ class RoundTouchDisplay:
             settings.set_atc_mount(prev_mount)
             atc_audio.start(override=True)
 
+    def _select_audio_output(self, value: str) -> None:
+        """Apply USB or Bluetooth output from the Select output picker."""
+        from utilities import bluetooth_audio
+
+        choice = str(value or "").strip()
+        if choice == "usb":
+            bluetooth_audio.use_usb_output(disconnect_bluetooth=True)
+            return
+        if not choice.startswith("bt:"):
+            return
+        mac = choice[3:].strip().upper()
+        if not mac:
+            return
+
+        name = ""
+        try:
+            for device in bluetooth_audio.list_known_devices():
+                if str(device.get("mac") or "").strip().upper() == mac:
+                    name = str(device.get("name") or "").strip()
+                    break
+        except Exception:
+            pass
+        if not name and settings.bluetooth_speaker_mac() == mac:
+            name = settings.bluetooth_speaker_name()
+
+        def _apply() -> None:
+            try:
+                bluetooth_audio.set_preferred(mac, name)
+                bluetooth_audio.set_audio_route("bluetooth")
+                bluetooth_audio.connect(mac, pair_if_needed=False)
+                bluetooth_audio.ensure_reconnect_watch()
+            except Exception:
+                logging.getLogger(__name__).debug(
+                    "Bluetooth output select failed", exc_info=True
+                )
+
+        Thread(target=_apply, daemon=True, name="bt-output-select").start()
+
     def _handle_atc_picker_tap(self, x: int, y: int) -> None:
         hit = info.atc_picker_hit(x, y)
         if hit is None:
@@ -1173,6 +1198,8 @@ class RoundTouchDisplay:
             self._select_atc_airport(value)
         elif kind == "channel":
             self._select_atc_channel(value)
+        elif kind == "output":
+            self._select_audio_output(value)
 
     def _apply_atc_volume_slider(self, x: int, *, persist: bool = True) -> bool:
         from utilities import atc_audio
