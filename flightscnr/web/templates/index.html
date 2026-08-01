@@ -13,8 +13,7 @@
         color:var(--text);line-height:1.45;padding-bottom:1.2rem;}
         .wrap{max-width:34rem;margin:0 auto;padding:1.25rem 1rem;}
         .app-head{display:flex;align-items:center;gap:.65rem;margin-bottom:.25rem;}
-        .logo{width:2.1rem;height:2.1rem;border-radius:50%;flex:none;border:1px solid #0a5;
-        background:radial-gradient(circle at 50% 50%,#0c2,#063 70%,#021 100%);}
+        .logo{width:2.1rem;height:2.1rem;flex:none;display:block;object-fit:contain;}
         h1{font-size:1.3rem;margin:0;}
         .subtitle{color:var(--muted);font-size:.85rem;margin:.15rem 0 1.1rem;}
         .card{background:var(--card);border:1px solid var(--line);border-radius:14px;margin:0 0 .9rem;overflow:hidden;}
@@ -94,7 +93,10 @@
 </head>
 <body>
 <div class="wrap">
-    <div class="app-head"><div class="logo"></div><h1>FlightScnrPi</h1></div>
+    <div class="app-head">
+        <img class="logo" src="/static/radar_icon.png" alt="" width="34" height="34">
+        <h1>FlightScnrPi</h1>
+    </div>
     <p class="subtitle">Portal settings for radar, local ADS-B, display, alerts, tracking, and API keys.</p>
 
     <details class="card" open>
@@ -473,9 +475,9 @@
     </details>
 
     <details class="card atc-card">
-        <summary><span class="ico">&#9835;</span>ATC Audio<span class="sum">LiveATC USB</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9835;</span>ATC Audio<span class="sum">LiveATC</span><span class="chev">&#9656;</span></summary>
         <div class="body">
-            <p class="hint">Manual LiveATC stream to the Pi’s USB / default speaker via <code>mpv</code> (<code>sudo apt install mpv</code>). Airport lists every large/medium field in radar range. Channel loads known streams immediately from the local seed/index, then auto-discovers more mounts in the background (same idea as plane-tracker ATC: probe <code>d.liveatc.net</code>, never wait on LiveATC HTML). If audio is already playing, changing airport (or moving the map) retunes to that airport’s Tower and keeps playing; if it was stopped, only the selection changes. Playback resumes after reboot/app restart when it was playing (Stop clears that). Quiet hours block auto-start and resume; Play still overrides until you Stop.</p>
+            <p class="hint">Manual LiveATC stream to the Pi’s USB or Bluetooth speaker via <code>mpv</code> (<code>sudo apt install mpv</code>). Pair a Bluetooth speaker in the card below. Airport lists every large/medium field in radar range. Channel loads known streams immediately from the local seed/index, then auto-discovers more mounts in the background (same idea as plane-tracker ATC: probe <code>d.liveatc.net</code>, never wait on LiveATC HTML). If audio is already playing, changing airport (or moving the map) retunes to that airport’s Tower and keeps playing; if it was stopped, only the selection changes. Playback resumes after reboot/app restart when it was playing (Stop clears that). Quiet hours block auto-start and resume; Play still overrides until you Stop.</p>
             <div class="chk">
                 <label for="atc_enabled">Enable ATC audio</label>
                 <span class="switch"><input id="atc_enabled" type="checkbox"><span class="track"></span></span>
@@ -516,6 +518,24 @@
                 <button class="btn" id="btn-atc-stop" type="button">Stop</button>
             </div>
             <div id="atc-status" class="status"></div>
+        </div>
+    </details>
+
+    <details class="card bluetooth-card">
+        <summary><span class="ico">&#9834;</span>Bluetooth Speaker<span class="sum" id="bt-sum">ATC &amp; chime</span><span class="chev">&#9656;</span></summary>
+        <div class="body">
+            <p class="hint">Scan, pair, and select a Bluetooth speaker for ATC audio and the hourly chime. On the round display, Settings → ATC shows status and a quick Use Bluetooth reconnect for the speaker paired here. Put the speaker in pairing mode before Scan / Pair &amp; Connect. Requires <code>bluez</code> on the Pi.</p>
+            <p class="hint" id="bt_status_line">Status: —</p>
+            <p class="hint" id="bt_route_line">Output: USB</p>
+            <div class="track-row" style="margin-top:.55rem;flex-wrap:wrap;gap:.5rem">
+                <button class="btn btn-primary" id="btn-bt-scan" type="button">Scan</button>
+                <button class="btn" id="btn-bt-use" type="button">Use Bluetooth</button>
+                <button class="btn" id="btn-bt-usb" type="button">Use USB</button>
+                <button class="btn" id="btn-bt-disconnect" type="button">Disconnect</button>
+            </div>
+            <label style="margin-top:.75rem">Nearby / paired devices</label>
+            <div id="bt-device-list" class="hint">No devices yet — tap Scan.</div>
+            <div id="bluetooth-status" class="status"></div>
         </div>
     </details>
 
@@ -706,7 +726,9 @@ function clearStatus(id) {
 }
 
 async function jsonFetch(url, opts = {}) {
-    const res = await fetch(url, opts);
+    const headers = { ...(opts.headers || {}) };
+    // Prefer fresh prefs from the Pi — portal + display are separate processes.
+    const res = await fetch(url, { cache: "no-store", ...opts, headers });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.message || "Request failed");
     return data;
@@ -965,6 +987,10 @@ async function loadAll() {
 
     try {
         await loadAtc();
+    } catch (_) {}
+
+    try {
+        await loadBluetooth();
     } catch (_) {}
 
     try {
@@ -1968,6 +1994,222 @@ if ($("atc_channel")) {
 if ($("btn-atc-save")) $("btn-atc-save").addEventListener("click", () => saveAtc());
 if ($("btn-atc-play")) $("btn-atc-play").addEventListener("click", () => saveAtc({ action: "play" }));
 if ($("btn-atc-stop")) $("btn-atc-stop").addEventListener("click", () => saveAtc({ action: "stop" }));
+
+function renderBluetoothStatus(st) {
+    const line = $("bt_status_line");
+    const routeLine = $("bt_route_line");
+    const sum = $("bt-sum");
+    if (!line) return;
+    const name = st.name || st.mac || "";
+    let text = `Status: ${st.state || "—"}`;
+    if (name) text += ` — ${name}`;
+    if (st.mac && st.name) text += ` (${st.mac})`;
+    else if (st.mac && !st.name) text += ` (${st.mac})`;
+    if (st.error) text += ` — ${st.error}`;
+    line.textContent = text;
+    const route = st.audio_route === "bluetooth" ? "Bluetooth" : "USB";
+    if (routeLine) {
+        routeLine.textContent = `Output for ATC & chime: ${route}`
+            + (st.audio_route === "bluetooth" && name ? ` (${name})` : "");
+    }
+    if (sum) {
+        if (st.audio_route === "bluetooth" && st.connected) {
+            sum.textContent = name ? `BT: ${name}` : "Bluetooth";
+        } else if (st.audio_route === "bluetooth") {
+            sum.textContent = "Bluetooth";
+        } else {
+            sum.textContent = "USB";
+        }
+    }
+}
+
+function renderBluetoothDevices(devices, preferredMac) {
+    const host = $("bt-device-list");
+    if (!host) return;
+    const list = Array.isArray(devices) ? devices : [];
+    if (!list.length) {
+        host.innerHTML = "No devices yet — tap Scan with the speaker in pairing mode.";
+        return;
+    }
+    host.innerHTML = "";
+    for (const d of list) {
+        const row = document.createElement("div");
+        row.className = "track-row";
+        row.style.cssText = "flex-wrap:wrap;gap:.4rem;align-items:center;margin:.35rem 0;";
+        const label = document.createElement("span");
+        label.style.flex = "1 1 10rem";
+        const flags = [];
+        if (d.connected) flags.push("connected");
+        else if (d.paired) flags.push("paired");
+        if (d.discovered) flags.push("nearby");
+        if (preferredMac && d.mac === preferredMac) flags.push("preferred");
+        const mac = String(d.mac || "");
+        const rawName = String(d.name || "").trim();
+        const macLike = !rawName || /^([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}$/.test(rawName);
+        const title = macLike ? "Unknown device" : rawName;
+        const suffix = flags.length ? ` (${flags.join(", ")})` : "";
+        if (macLike) {
+            label.textContent = `${title}${suffix} — ${mac}`;
+        } else {
+            label.textContent = `${title}${suffix}`;
+            if (mac) {
+                const macEl = document.createElement("span");
+                macEl.className = "hint";
+                macEl.style.marginLeft = ".35rem";
+                macEl.textContent = mac;
+                label.appendChild(document.createTextNode(" "));
+                label.appendChild(macEl);
+            }
+        }
+        row.appendChild(label);
+        const connectBtn = document.createElement("button");
+        connectBtn.type = "button";
+        connectBtn.className = "btn btn-primary";
+        connectBtn.textContent = d.paired ? "Connect" : "Pair & Connect";
+        connectBtn.addEventListener("click", () => bluetoothConnect(d.mac, !d.paired));
+        row.appendChild(connectBtn);
+        if (d.paired || d.connected) {
+            const forgetBtn = document.createElement("button");
+            forgetBtn.type = "button";
+            forgetBtn.className = "btn";
+            forgetBtn.textContent = "Forget";
+            forgetBtn.addEventListener("click", () => bluetoothForget(d.mac));
+            row.appendChild(forgetBtn);
+        }
+        host.appendChild(row);
+    }
+}
+
+async function loadBluetooth() {
+    if (!$("bt_status_line")) return;
+    const st = await jsonFetch("/bluetooth/status");
+    renderBluetoothStatus(st);
+    renderBluetoothDevices(st.devices || [], st.mac || "");
+    if (st.error) showStatus("bluetooth-status", st.error, true);
+    else clearStatus("bluetooth-status");
+}
+
+async function bluetoothScan() {
+    clearStatus("bluetooth-status");
+    showStatus("bluetooth-status", "Scanning… put the speaker in pairing mode.");
+    const btn = $("btn-bt-scan");
+    if (btn) btn.disabled = true;
+    try {
+        const st = await jsonFetch("/bluetooth/scan", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ timeout: 12 }),
+        });
+        renderBluetoothStatus(st);
+        renderBluetoothDevices(st.devices || [], st.mac || "");
+        showStatus(
+            "bluetooth-status",
+            st.error || `Found ${(st.devices || []).length} device(s). Names appear as BlueZ resolves them — scan again if yours still shows as Unknown.`
+        );
+        if (st.error) showStatus("bluetooth-status", st.error, true);
+    } catch (e) {
+        showStatus("bluetooth-status", e.message, true);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function bluetoothConnect(mac, pair) {
+    clearStatus("bluetooth-status");
+    showStatus("bluetooth-status", pair ? "Pairing & connecting…" : "Connecting…");
+    try {
+        const st = await jsonFetch("/bluetooth/connect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mac, pair: !!pair }),
+        });
+        renderBluetoothStatus(st);
+        renderBluetoothDevices(st.devices || [], st.mac || "");
+        if (st.error && !st.connected) {
+            showStatus("bluetooth-status", st.error, true);
+        } else {
+            showStatus(
+                "bluetooth-status",
+                st.connected
+                    ? `Using ${st.name || st.mac} for ATC and chime.`
+                    : st.error || st.state || "Done."
+            );
+        }
+    } catch (e) {
+        showStatus("bluetooth-status", e.message, true);
+    }
+}
+
+async function bluetoothDisconnect() {
+    clearStatus("bluetooth-status");
+    try {
+        const st = await jsonFetch("/bluetooth/disconnect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+        });
+        renderBluetoothStatus(st);
+        renderBluetoothDevices(st.devices || [], st.mac || "");
+        showStatus("bluetooth-status", st.error || "Disconnected.");
+        if (st.error) showStatus("bluetooth-status", st.error, true);
+    } catch (e) {
+        showStatus("bluetooth-status", e.message, true);
+    }
+}
+
+async function bluetoothUsePreferred() {
+    clearStatus("bluetooth-status");
+    showStatus("bluetooth-status", "Connecting preferred speaker…");
+    try {
+        const st = await jsonFetch("/bluetooth/use", { method: "POST" });
+        renderBluetoothStatus(st);
+        renderBluetoothDevices(st.devices || [], st.mac || "");
+        if (st.error && !st.connected) showStatus("bluetooth-status", st.error, true);
+        else showStatus("bluetooth-status", st.connected ? `Using ${st.name || st.mac}.` : st.state || "Done.");
+    } catch (e) {
+        showStatus("bluetooth-status", e.message, true);
+    }
+}
+
+async function bluetoothUseUsb() {
+    clearStatus("bluetooth-status");
+    showStatus("bluetooth-status", "Switching to USB / local audio…");
+    try {
+        const st = await jsonFetch("/bluetooth/route", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ route: "usb" }),
+        });
+        renderBluetoothStatus(st);
+        renderBluetoothDevices(st.devices || [], st.mac || "");
+        if (st.error) showStatus("bluetooth-status", st.error, true);
+        else showStatus("bluetooth-status", "Using USB / local audio for ATC and chime.");
+    } catch (e) {
+        showStatus("bluetooth-status", e.message, true);
+    }
+}
+
+async function bluetoothForget(mac) {
+    if (!confirm("Forget this Bluetooth speaker on the Pi?")) return;
+    clearStatus("bluetooth-status");
+    try {
+        const st = await jsonFetch("/bluetooth/forget", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mac: mac || "" }),
+        });
+        renderBluetoothStatus(st);
+        renderBluetoothDevices(st.devices || [], st.mac || "");
+        showStatus("bluetooth-status", "Forgot speaker.");
+    } catch (e) {
+        showStatus("bluetooth-status", e.message, true);
+    }
+}
+
+if ($("btn-bt-scan")) $("btn-bt-scan").addEventListener("click", bluetoothScan);
+if ($("btn-bt-use")) $("btn-bt-use").addEventListener("click", bluetoothUsePreferred);
+if ($("btn-bt-usb")) $("btn-bt-usb").addEventListener("click", bluetoothUseUsb);
+if ($("btn-bt-disconnect")) $("btn-bt-disconnect").addEventListener("click", bluetoothDisconnect);
 
 document.addEventListener("DOMContentLoaded", () => {
     wireRgbGroup("theme");

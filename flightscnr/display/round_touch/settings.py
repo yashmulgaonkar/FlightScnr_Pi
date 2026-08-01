@@ -252,6 +252,11 @@ _defaults = {
     "radar_hud_layout_bottom": copy_radar_hud_layout_bottom_default(),
     "hourly_chime_enabled": False,
     "hourly_chime_volume": 80,
+    # Preferred Bluetooth A2DP speaker (paired via web portal).
+    "bluetooth_speaker_mac": "",
+    "bluetooth_speaker_name": "",
+    # Active playback route for ATC / chime: "usb" | "bluetooth".
+    "audio_route": "usb",
 }
 
 # Live preview while calibrating facing (not persisted until save).
@@ -678,6 +683,30 @@ def _load():
     except (TypeError, ValueError):
         state["hourly_chime_volume"] = 80
         migrated = True
+    if "bluetooth_speaker_mac" not in data:
+        state["bluetooth_speaker_mac"] = ""
+        migrated = True
+    else:
+        state["bluetooth_speaker_mac"] = str(
+            state.get("bluetooth_speaker_mac") or ""
+        ).strip().upper()
+    if "bluetooth_speaker_name" not in data:
+        state["bluetooth_speaker_name"] = ""
+        migrated = True
+    else:
+        state["bluetooth_speaker_name"] = str(
+            state.get("bluetooth_speaker_name") or ""
+        ).strip()
+    route = str(state.get("audio_route") or "usb").strip().lower()
+    if route not in ("usb", "bluetooth"):
+        # If a BT speaker was already preferred, default route to bluetooth.
+        route = "bluetooth" if state.get("bluetooth_speaker_mac") else "usb"
+        state["audio_route"] = route
+        migrated = True
+    else:
+        state["audio_route"] = route
+    if "audio_route" not in data:
+        migrated = True
     if color_presets.migrate_theme_index(state):
         migrated = True
     if migrated:
@@ -761,6 +790,9 @@ def _settings_snapshot(state: dict) -> tuple:
         ),
         bool(state.get("hourly_chime_enabled", False)),
         clamp_hourly_chime_volume(state.get("hourly_chime_volume", 80)),
+        str(state.get("bluetooth_speaker_mac") or "").strip().upper(),
+        str(state.get("bluetooth_speaker_name") or "").strip(),
+        str(state.get("audio_route") or "usb").strip().lower(),
     )
 
 
@@ -791,6 +823,33 @@ def _consume_reload_request() -> bool:
     return True
 
 
+def sync_from_disk() -> bool:
+    """Reload in-memory settings when the JSON file mtime changes.
+
+    Safe for the web portal process: does **not** consume the display
+    ``request_reload`` flag. Skips while unpersisted slider edits are pending.
+    """
+    global _state, _settings_mtime, _disk_synced
+    if not _disk_synced:
+        return False
+    try:
+        mtime = os.path.getmtime(SETTINGS_PATH)
+    except OSError:
+        mtime = None
+    if mtime is not None and _settings_mtime is not None and mtime == _settings_mtime:
+        return False
+    _state = _load()
+    try:
+        _settings_mtime = os.path.getmtime(SETTINGS_PATH)
+    except OSError:
+        _settings_mtime = None
+    _disk_synced = True
+    _sync_config_min_height()
+    _sync_config_max_height()
+    apply_theme_colors()
+    return True
+
+
 def reload() -> bool:
     """Reload settings from disk if file changed externally."""
     global _state, _settings_mtime, _disk_synced
@@ -799,6 +858,18 @@ def reload() -> bool:
     # that have not been flushed to disk yet — otherwise values flicker every poll.
     if not force and not _disk_synced:
         return False
+    if not force:
+        # Same mtime check as sync_from_disk — avoid rereading every display frame.
+        try:
+            mtime = os.path.getmtime(SETTINGS_PATH)
+        except OSError:
+            mtime = None
+        if (
+            mtime is not None
+            and _settings_mtime is not None
+            and mtime == _settings_mtime
+        ):
+            return False
     try:
         with open(SETTINGS_PATH, encoding="utf-8") as f:
             data = json.load(f)
@@ -1914,6 +1985,48 @@ def set_hourly_chime_volume(value: int, *, persist: bool = True) -> int:
     else:
         _disk_synced = False
     return vol
+
+
+def bluetooth_speaker_mac() -> str:
+    return str(_state.get("bluetooth_speaker_mac") or "").strip().upper()
+
+
+def bluetooth_speaker_name() -> str:
+    return str(_state.get("bluetooth_speaker_name") or "").strip()
+
+
+def set_bluetooth_speaker(mac: str, name: str = "") -> None:
+    mac_n = str(mac or "").strip().upper()
+    name_n = str(name or "").strip()
+    updates = {
+        "bluetooth_speaker_mac": mac_n,
+        "bluetooth_speaker_name": name_n if mac_n else "",
+    }
+    # Pairing/connecting a speaker implies Bluetooth output unless cleared.
+    if mac_n:
+        updates["audio_route"] = "bluetooth"
+    _rmw_save(updates)
+
+
+def audio_route() -> str:
+    raw = str(_state.get("audio_route") or "usb").strip().lower()
+    return raw if raw in ("usb", "bluetooth") else "usb"
+
+
+def set_audio_route(route: str) -> str:
+    value = str(route or "usb").strip().lower()
+    if value not in ("usb", "bluetooth"):
+        value = "usb"
+    _rmw_save({"audio_route": value})
+    return value
+
+
+def cycle_audio_route() -> str:
+    """Toggle USB ↔ Bluetooth when a preferred BT speaker exists."""
+    if not bluetooth_speaker_mac():
+        return set_audio_route("usb")
+    nxt = "usb" if audio_route() == "bluetooth" else "bluetooth"
+    return set_audio_route(nxt)
 
 
 apply_theme_colors()

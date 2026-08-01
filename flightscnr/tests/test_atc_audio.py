@@ -696,5 +696,47 @@ class PlayerTests(unittest.TestCase):
         self.assertTrue(st["playing"])
 
 
+class VisibleAirportsRadiusTests(unittest.TestCase):
+    def test_radius_uses_settings_scale_not_default_active_band(self):
+        """Portal process must not use scale's default ~3 mi in-memory index."""
+        from display.round_touch import scale as scale_mod
+        from utilities import atc_audio
+
+        # Leave module active index at default (1); settings say largest band.
+        scale_mod.select(1)
+        last_idx = len(scale_mod.SCALE_BANDS) - 1
+        with mock.patch(
+            "display.round_touch.settings.scale_index", return_value=last_idx
+        ):
+            radius = atc_audio._radar_airport_radius_km()
+        self.assertEqual(scale_mod.active_index(), last_idx)
+        self.assertGreater(radius, scale_mod.SCALE_BANDS[1]["coverage_km"])
+
+    def test_visible_airports_queries_settings_radius(self):
+        from utilities import atc_audio
+
+        with mock.patch(
+            "config.location_configured", return_value=True
+        ), mock.patch(
+            "config.LOCATION_HOME", [37.57, -122.26]
+        ), mock.patch.object(
+            atc_audio, "_radar_airport_radius_km", return_value=25.0
+        ), mock.patch(
+            "utilities.airports.iter_airports_near",
+            return_value=[
+                {
+                    "ident": "KOAK",
+                    "name": "Metro Oakland",
+                    "dist_km": 12.0,
+                    "type": "large_airport",
+                }
+            ],
+        ) as near:
+            out = atc_audio.visible_airports()
+        near.assert_called_once()
+        self.assertEqual(near.call_args.args[2], 25.0)
+        self.assertEqual(out[0]["ident"], "KOAK")
+
+
 if __name__ == "__main__":
     unittest.main()

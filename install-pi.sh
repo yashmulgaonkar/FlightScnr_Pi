@@ -97,7 +97,9 @@ install_apt_packages() {
         fonts-dejavu-core \
         plymouth plymouth-themes \
         unzip git curl \
-        mpv
+        mpv \
+        bluez \
+        libspa-0.2-bluetooth
     log_ok "System packages ready"
 }
 

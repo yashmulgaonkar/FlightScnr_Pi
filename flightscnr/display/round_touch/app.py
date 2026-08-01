@@ -161,6 +161,9 @@ class RoundTouchDisplay:
         self._last_static_draw = 0
         self._display_focus = 0
         self._system_confirm: str | None = None
+        # ATC settings list picker: "airport" | "channel" | None.
+        self._atc_picker: str | None = None
+        self._atc_picker_scroll = nav.ScrollState()
         self._fatal_error = None
         self._scroll = nav.ScrollState()
         self._last_grab_seq = 0
@@ -247,7 +250,7 @@ class RoundTouchDisplay:
             from utilities import atc_audio
             from utilities.audio_output import ensure_speaker_watch
 
-            # Watch USB speaker plug/unplug; skips ATC/chime until one appears.
+            # Watch USB/Bluetooth speaker; skips ATC/chime until one is ready.
             ensure_speaker_watch()
             atc_audio.maybe_resume_after_boot()
         except Exception:
@@ -634,13 +637,20 @@ class RoundTouchDisplay:
                 self._scroll.offset,
             )
         elif self.screen == SCREEN_SETTINGS:
-            self._scroll.max_offset = info.draw_info(
+            drawn_max = info.draw_info(
                 self.surface,
                 self.settings_page,
                 self._scroll.offset,
                 self._display_focus,
                 system_confirm=self._system_confirm,
+                atc_picker=self._atc_picker,
+                atc_picker_scroll=self._atc_picker_scroll.offset,
             )
+            if self._atc_picker:
+                self._atc_picker_scroll.max_offset = drawn_max
+                self._atc_picker_scroll.clamp()
+            else:
+                self._scroll.max_offset = drawn_max
         elif self.screen == SCREEN_DETAILS:
             self._scroll.max_offset = details.draw_details(self.surface, scroll_offset=self._scroll.offset)
         elif self.screen == SCREEN_CLOCK:
@@ -888,6 +898,7 @@ class RoundTouchDisplay:
             self._cancel_map_pan()
         if self._pan_commit_choice:
             self._cancel_pan_commit_choice()
+        self._close_atc_picker()
         previous = self.screen
         if self.screen == SCREEN_TRACKED:
             tracked.reset_marquee()
@@ -912,6 +923,7 @@ class RoundTouchDisplay:
         self._hud_opacity_slider_active = False
         self._chime_volume_slider_active = False
         self._system_confirm = None
+        self._close_atc_picker()
         if page != self.settings_page:
             self._scroll.reset()
             if page not in (
@@ -920,6 +932,7 @@ class RoundTouchDisplay:
                 info.PAGE_OPTIONS,
                 info.PAGE_LAYERS,
                 info.PAGE_ATC,
+                info.PAGE_ATC_QUIET,
             ):
                 self._display_focus = 0
         self.settings_page = page
@@ -1062,27 +1075,50 @@ class RoundTouchDisplay:
         elif action == "quiet_end":
             settings.cycle_atc_quiet_time("end")
         elif action == "airport":
-            self._cycle_atc_airport()
+            self._open_atc_picker("airport")
         elif action == "channel":
-            self._cycle_atc_channel()
+            self._open_atc_picker("channel")
+        elif action == "output":
+            self._cycle_audio_output()
         elif action == "status":
             return
 
-    def _cycle_atc_airport(self) -> None:
+    def _open_atc_picker(self, kind: str) -> None:
+        kind = str(kind or "").strip().lower()
+        if kind not in ("airport", "channel"):
+            return
+        if kind == "channel" and not settings.atc_airport():
+            return
+        self._atc_picker = kind
+        self._atc_picker_scroll.reset()
+
+    def _close_atc_picker(self) -> None:
+        self._atc_picker = None
+        self._atc_picker_scroll.reset()
+
+    def _cycle_audio_output(self) -> None:
+        """On-screen USB ↔ Bluetooth output switch for ATC / chime."""
+        from utilities import bluetooth_audio
+
+        if not settings.bluetooth_speaker_mac():
+            # Nothing to toggle — stay on USB / local sink.
+            bluetooth_audio.use_usb_output(disconnect_bluetooth=False)
+            return
+        nxt = "usb" if settings.audio_route() == "bluetooth" else "bluetooth"
+        bluetooth_audio.apply_audio_route(nxt)
+        if nxt == "bluetooth":
+            bluetooth_audio.ensure_reconnect_watch()
+
+    def _select_atc_airport(self, icao: str) -> None:
         from utilities import atc_audio
 
-        airports = atc_audio.visible_airports()
-        if not airports:
+        nxt = str(icao or "").strip().upper()
+        if not nxt:
             return
-        idents = [a["ident"] for a in airports]
-        current = settings.atc_airport()
-        try:
-            idx = idents.index(current)
-            nxt = idents[(idx + 1) % len(idents)]
-        except ValueError:
-            nxt = idents[0]
-        prev_airport = current
+        prev_airport = settings.atc_airport()
         prev_mount = settings.atc_mount()
+        if nxt == prev_airport:
+            return
         was_playing = atc_audio.is_playing()
         settings.set_atc_airport(nxt)
         feeds = atc_audio.feeds_for_airport(nxt)
@@ -1095,7 +1131,6 @@ class RoundTouchDisplay:
             atc_audio.retune_if_playing(airport=nxt, mount=settings.atc_mount())
             if atc_audio.is_playing():
                 return
-            # New feed failed — restore previous airport/stream.
             if prev_airport and prev_mount:
                 settings.set_atc_airport(prev_airport)
                 settings.set_atc_mount(prev_mount)
@@ -1103,24 +1138,15 @@ class RoundTouchDisplay:
         else:
             atc_audio.stop()
 
-    def _cycle_atc_channel(self) -> None:
+    def _select_atc_channel(self, mount: str) -> None:
         from utilities import atc_audio
 
-        icao = settings.atc_airport()
-        feeds = atc_audio.feeds_for_airport(icao)
-        if not feeds:
-            settings.set_atc_mount("")
-            if atc_audio.is_playing():
-                atc_audio.stop()
+        nxt = str(mount or "").strip()
+        if not nxt:
             return
-        mounts = [f["mount"] for f in feeds]
-        current = settings.atc_mount()
-        try:
-            idx = mounts.index(current)
-            nxt = mounts[(idx + 1) % len(mounts)]
-        except ValueError:
-            nxt = mounts[0]
-        prev_mount = current
+        prev_mount = settings.atc_mount()
+        if nxt == prev_mount:
+            return
         was_playing = atc_audio.is_playing()
         settings.set_atc_mount(nxt)
         if not was_playing:
@@ -1129,6 +1155,24 @@ class RoundTouchDisplay:
         if not atc_audio.is_playing() and prev_mount:
             settings.set_atc_mount(prev_mount)
             atc_audio.start(override=True)
+
+    def _handle_atc_picker_tap(self, x: int, y: int) -> None:
+        hit = info.atc_picker_hit(x, y)
+        if hit is None:
+            self._close_atc_picker()
+            return
+        action, value = hit
+        if action in ("close", "outside"):
+            self._close_atc_picker()
+            return
+        if action != "item" or not value:
+            return
+        kind = self._atc_picker
+        self._close_atc_picker()
+        if kind == "airport":
+            self._select_atc_airport(value)
+        elif kind == "channel":
+            self._select_atc_channel(value)
 
     def _apply_atc_volume_slider(self, x: int, *, persist: bool = True) -> bool:
         from utilities import atc_audio
@@ -1890,11 +1934,27 @@ class RoundTouchDisplay:
     def _apply_scroll_delta(self, delta: int):
         if not delta:
             return
-        self._scroll.step(delta)
+        if (
+            self.screen == SCREEN_SETTINGS
+            and self.settings_page == info.PAGE_ATC
+            and self._atc_picker
+        ):
+            self._atc_picker_scroll.step(delta)
+        else:
+            self._scroll.step(delta)
         self._note_activity()
         self._safe_draw()
 
     def _handle_scroll_drag(self):
+        if (
+            self.screen == SCREEN_SETTINGS
+            and self.settings_page == info.PAGE_ATC
+            and self._atc_picker
+        ):
+            dy = self.input.consume_scroll_drag()
+            if dy:
+                self._apply_scroll_delta(-dy)
+            return
         if self.screen == SCREEN_SETTINGS and self.settings_page == info.PAGE_COLORS:
             if self._rgb_slider_channel is not None:
                 self.input.consume_scroll_drag()
@@ -2072,6 +2132,7 @@ class RoundTouchDisplay:
                 info.PAGE_OPTIONS,
                 info.PAGE_LAYERS,
                 info.PAGE_ATC,
+                info.PAGE_ATC_QUIET,
             )
             and x is not None
             and y is not None
@@ -2298,8 +2359,7 @@ class RoundTouchDisplay:
             self._safe_draw()
         elif swipe in (input_handler.SWIPE_UP, input_handler.SWIPE_DOWN) and self.screen == SCREEN_SETTINGS:
             delta = -nav.scroll_step() if swipe == input_handler.SWIPE_UP else nav.scroll_step()
-            self._scroll.step(delta)
-            self._safe_draw()
+            self._apply_scroll_delta(delta)
         if tap and not theme.in_visible_circle(tap[0], tap[1]):
             tap = None
         if tap and nav.tap_breadcrumb(tap[0], tap[1]) and self.screen != SCREEN_RADAR:
@@ -2309,20 +2369,12 @@ class RoundTouchDisplay:
                 self._open_screen(SCREEN_CLOCK)
             elif self.screen == SCREEN_CLOCK_SETTINGS:
                 self._open_screen(SCREEN_CLOCK)
-            elif self.screen == SCREEN_SETTINGS and self.settings_page == info.PAGE_SYSTEM:
-                self._set_settings_page(info.PAGE_ATC)
-            elif self.screen == SCREEN_SETTINGS and self.settings_page == info.PAGE_ATC:
-                self._set_settings_page(info.PAGE_COLORS)
-            elif self.screen == SCREEN_SETTINGS and self.settings_page == info.PAGE_COLORS:
-                self._set_settings_page(info.PAGE_LAYERS)
-            elif self.screen == SCREEN_SETTINGS and self.settings_page == info.PAGE_LAYERS:
-                self._set_settings_page(info.PAGE_OPTIONS)
-            elif self.screen == SCREEN_SETTINGS and self.settings_page == info.PAGE_OPTIONS:
-                self._set_settings_page(info.PAGE_HUD)
-            elif self.screen == SCREEN_SETTINGS and self.settings_page == info.PAGE_HUD:
-                self._set_settings_page(info.PAGE_DISPLAY)
-            elif self.screen == SCREEN_SETTINGS and self.settings_page == info.PAGE_DISPLAY:
-                self._set_settings_page(info.PAGE_MAIN)
+            elif self.screen == SCREEN_SETTINGS:
+                prev = info.prev_page(self.settings_page)
+                if prev is not None:
+                    self._set_settings_page(prev)
+                else:
+                    self._return_to_radar()
             else:
                 self._return_to_radar()
             self._note_activity()
@@ -2455,6 +2507,10 @@ class RoundTouchDisplay:
                 # Taps outside the dialog buttons dismiss without acting.
                 else:
                     self._system_confirm = None
+                self._note_activity()
+                self._safe_draw()
+            elif self._atc_picker is not None:
+                self._handle_atc_picker_tap(tap[0], tap[1])
                 self._note_activity()
                 self._safe_draw()
             else:

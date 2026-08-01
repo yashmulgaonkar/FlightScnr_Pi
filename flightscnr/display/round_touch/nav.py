@@ -28,12 +28,13 @@ _BTN_ICON_ACCENT = theme.SWEEP
 # Settings sub-page labels (must match info.py page constants)
 SETTINGS_PAGES = (
     "Main",
+    "ATC",
+    "Quiet",
     "Display",
     "HUD",
     "Options",
     "Layers",
     "Theme",
-    "ATC",
     "System",
 )
 

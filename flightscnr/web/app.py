@@ -199,6 +199,30 @@ def _wifi_portal_active() -> bool:
 # Phone OS captive-portal probes are covered by the blanket redirect below.
 
 
+def _sync_portal_prefs_from_disk() -> None:
+    """Refresh in-memory prefs before serving/saving portal forms.
+
+    The web server is a separate process from the display; without this, GETs
+    can return stale values after on-device changes until FlightScnr restarts.
+    """
+    try:
+        from display.round_touch import settings
+
+        settings.sync_from_disk()
+    except Exception:
+        pass
+    try:
+        from display.round_touch import alert_prefs
+
+        alert_prefs.reload()
+    except Exception:
+        pass
+    try:
+        reload_location_override()
+    except Exception:
+        pass
+
+
 @app.before_request
 def _captive_wifi_gateway():
     if not _wifi_portal_active():
@@ -209,6 +233,31 @@ def _captive_wifi_gateway():
     if request.method in ("GET", "HEAD"):
         return redirect("/wifi")
     return None
+
+
+@app.before_request
+def _portal_sync_settings():
+    """Keep portal JSON/forms aligned with disk (display may have written)."""
+    path = request.path or "/"
+    if path.startswith("/static") or path == "/favicon.ico":
+        return None
+    # Skip captive Wi-Fi endpoints — they don't use round_touch settings.
+    if path.startswith("/wifi"):
+        return None
+    _sync_portal_prefs_from_disk()
+    return None
+
+
+@app.after_request
+def _portal_no_store_json(response):
+    """Avoid browser/proxy caching of live settings JSON."""
+    path = request.path or "/"
+    if path.endswith("/json") or path.startswith("/atc/") or path.startswith(
+        "/bluetooth/"
+    ):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.get("/wifi")
@@ -1244,6 +1293,96 @@ def atc_save():
         return jsonify(result)
     settings.request_reload()
     return jsonify(atc_audio.status())
+
+
+@app.get("/bluetooth/status")
+def bluetooth_status():
+    from utilities import bluetooth_audio
+
+    bluetooth_audio.ensure_reconnect_watch()
+    return jsonify(bluetooth_audio.status())
+
+
+@app.post("/bluetooth/scan")
+def bluetooth_scan():
+    from utilities import bluetooth_audio
+
+    data = request.get_json(silent=True) or {}
+    try:
+        timeout = float(data.get("timeout") or 8)
+    except (TypeError, ValueError):
+        timeout = 8.0
+    devices = bluetooth_audio.scan(timeout=timeout)
+    payload = bluetooth_audio.status()
+    payload["devices"] = devices
+    return jsonify(payload)
+
+
+@app.post("/bluetooth/connect")
+def bluetooth_connect():
+    from display.round_touch import settings
+    from utilities import bluetooth_audio
+
+    data = request.get_json(silent=True) or {}
+    mac = str(data.get("mac") or "").strip()
+    pair = data.get("pair", True)
+    if isinstance(pair, str):
+        pair = pair.strip().lower() not in ("0", "false", "no")
+    result = bluetooth_audio.connect(mac, pair_if_needed=bool(pair))
+    bluetooth_audio.ensure_reconnect_watch()
+    settings.request_reload()
+    return jsonify(result)
+
+
+@app.post("/bluetooth/disconnect")
+def bluetooth_disconnect():
+    from display.round_touch import settings
+    from utilities import bluetooth_audio
+
+    data = request.get_json(silent=True) or {}
+    mac = str(data.get("mac") or "").strip() or None
+    result = bluetooth_audio.disconnect(mac)
+    settings.request_reload()
+    return jsonify(result)
+
+
+@app.post("/bluetooth/forget")
+def bluetooth_forget():
+    from display.round_touch import settings
+    from utilities import bluetooth_audio
+
+    data = request.get_json(silent=True) or {}
+    mac = str(data.get("mac") or "").strip() or None
+    result = bluetooth_audio.forget(mac)
+    settings.request_reload()
+    return jsonify(result)
+
+
+@app.post("/bluetooth/use")
+def bluetooth_use():
+    """Connect the preferred paired speaker and set it as default sink."""
+    from display.round_touch import settings
+    from utilities import bluetooth_audio
+
+    result = bluetooth_audio.use_preferred()
+    bluetooth_audio.ensure_reconnect_watch()
+    settings.request_reload()
+    return jsonify(result)
+
+
+@app.post("/bluetooth/route")
+def bluetooth_route():
+    """Set ATC/chime output route to ``usb`` or ``bluetooth``."""
+    from display.round_touch import settings
+    from utilities import bluetooth_audio
+
+    data = request.get_json(silent=True) or {}
+    route = str(data.get("route") or "").strip().lower()
+    result = bluetooth_audio.apply_audio_route(route)
+    if route == "bluetooth":
+        bluetooth_audio.ensure_reconnect_watch()
+    settings.request_reload()
+    return jsonify(result)
 
 
 @app.post("/system/reboot")

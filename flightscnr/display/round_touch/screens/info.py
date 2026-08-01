@@ -42,14 +42,15 @@ except ImportError:
 from display.round_touch import draw, nav, settings, theme
 
 PAGE_MAIN = 0
-PAGE_DISPLAY = 1
-PAGE_HUD = 2
-PAGE_OPTIONS = 3
-PAGE_LAYERS = 4
-PAGE_COLORS = 5
-PAGE_ATC = 6
-PAGE_SYSTEM = 7
-PAGE_COUNT = 8
+PAGE_ATC = 1
+PAGE_ATC_QUIET = 2
+PAGE_DISPLAY = 3
+PAGE_HUD = 4
+PAGE_OPTIONS = 5
+PAGE_LAYERS = 6
+PAGE_COLORS = 7  # Theme — immediately before System
+PAGE_SYSTEM = 8
+PAGE_COUNT = 9
 
 FOOTER_BUTTONS = ("prev", "next", "radar")
 
@@ -63,6 +64,10 @@ def footer_kinds_for_page(page: int) -> tuple[str, ...]:
         kinds.append("next")
     kinds.append("radar")
     return tuple(kinds)
+
+
+def is_atc_page(page: int) -> bool:
+    return page in (PAGE_ATC, PAGE_ATC_QUIET)
 
 # Display was overflowing the round viewport after HUD/chime rows were added.
 # Compass / range / screen controls stay here; radar HUD + chime get PAGE_HUD.
@@ -106,16 +111,20 @@ LAYERS_ACTIONS = (
     "ground_vehicles",
     "idle_clock",
 )
-# LiveATC USB playback (portal ATC Audio section equivalent).
+# LiveATC playback — page 1 (no scroll): stream select + Play/Stop.
 ATC_ACTIONS = (
     "enabled",
     "volume",
+    "airport",
+    "channel",
+    "output",
+    "status",
+)
+# LiveATC quiet hours — page 2 (no scroll).
+ATC_QUIET_ACTIONS = (
     "quiet",
     "quiet_start",
     "quiet_end",
-    "airport",
-    "channel",
-    "status",
 )
 ATC_BUTTON_ACTIONS = (
     "play",
@@ -129,6 +138,9 @@ SYSTEM_ACTIONS = (
 )
 
 _atc_buttons: list[tuple[str, pygame.Rect]] = []
+# ATC airport / channel picker overlay hit targets: ("close"|"item", value).
+_atc_picker_hits: list[tuple[str, str, pygame.Rect]] = []
+_atc_picker_list_rect: pygame.Rect | None = None
 
 _SYSTEM_BTN_FILL = (8, 36, 16)
 _SYSTEM_BTN_BORDER = (48, 160, 72)
@@ -225,10 +237,12 @@ def _breadcrumb(page: int) -> list[str]:
         trail.append("Options")
     elif page == PAGE_LAYERS:
         trail.append("Layers")
-    elif page == PAGE_COLORS:
-        trail.append("Theme")
     elif page == PAGE_ATC:
         trail.append("ATC")
+    elif page == PAGE_ATC_QUIET:
+        trail.append("Quiet")
+    elif page == PAGE_COLORS:
+        trail.append("Theme")
     elif page == PAGE_SYSTEM:
         trail.append("System")
     return trail
@@ -272,6 +286,223 @@ def system_confirm_hit(x: int, y: int) -> str | None:
 
 def system_needs_confirm(action: str) -> bool:
     return action in _SYSTEM_CONFIRM_COPY
+
+
+def atc_picker_items(kind: str) -> list[dict]:
+    """Build picker rows for ``airport`` or ``channel``.
+
+    Each item: ``{"id": str, "label": str, "selected": bool}``.
+    """
+    from utilities import atc_audio
+
+    kind = str(kind or "").strip().lower()
+    if kind == "airport":
+        current = settings.atc_airport()
+        out: list[dict] = []
+        for ap in atc_audio.visible_airports():
+            ident = str(ap.get("ident") or "").strip().upper()
+            if not ident:
+                continue
+            name = str(ap.get("name") or "").strip()
+            if name and name.upper() != ident:
+                short = name if len(name) <= 22 else name[:20] + "…"
+                label = f"{ident}  {short}"
+            else:
+                label = ident
+            if ap.get("has_feeds"):
+                pass
+            else:
+                label = f"{label}  (no feeds)"
+            out.append(
+                {
+                    "id": ident,
+                    "label": label,
+                    "selected": ident == current,
+                }
+            )
+        return out
+    if kind == "channel":
+        icao = settings.atc_airport()
+        current = settings.atc_mount()
+        feeds = atc_audio.feeds_for_airport(icao) if icao else []
+        out = []
+        for feed in feeds:
+            mount = str(feed.get("mount") or "").strip()
+            if not mount:
+                continue
+            label = str(feed.get("label") or mount).strip() or mount
+            if len(label) > 34:
+                label = label[:32] + "…"
+            out.append(
+                {
+                    "id": mount,
+                    "label": label,
+                    "selected": mount == current,
+                }
+            )
+        return out
+    return []
+
+
+def draw_atc_picker(
+    surface,
+    kind: str,
+    *,
+    scroll_offset: int = 0,
+) -> int:
+    """Modal scrollable list for ATC airport / channel. Returns max_scroll."""
+    global _atc_picker_hits, _atc_picker_list_rect
+    _atc_picker_hits = []
+    _atc_picker_list_rect = None
+
+    kind = str(kind or "").strip().lower()
+    title_text = "Select airport" if kind == "airport" else "Select channel"
+    items = atc_picker_items(kind)
+
+    dim = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
+    dim.fill((0, 0, 0, 170))
+    surface.blit(dim, (0, 0))
+
+    title_font = draw.load_font(theme.s(15), bold=True)
+    body_font = draw.load_font(theme.s(12))
+    hint_font = draw.load_font(theme.s(11))
+    title = title_font.render(title_text, True, theme.LABEL)
+
+    panel_w = int(theme.VISIBLE_RADIUS * 1.55)
+    panel_h = int(theme.VISIBLE_RADIUS * 1.55)
+    panel = pygame.Rect(0, 0, panel_w, panel_h)
+    panel.center = (theme.CENTER_X, theme.CENTER_Y)
+    radius = theme.s(12)
+    pygame.draw.rect(surface, (6, 24, 12), panel, border_radius=radius)
+    pygame.draw.rect(
+        surface, _SYSTEM_BTN_BORDER, panel, max(1, theme.s(2)), border_radius=radius
+    )
+
+    pad = theme.s(12)
+    close_size = theme.s(28)
+    close_rect = pygame.Rect(
+        panel.right - pad - close_size,
+        panel.top + pad,
+        close_size,
+        close_size,
+    )
+    pygame.draw.rect(surface, (20, 40, 24), close_rect, border_radius=theme.s(8))
+    pygame.draw.rect(
+        surface, theme.GRID, close_rect, max(1, theme.s(1)), border_radius=theme.s(8)
+    )
+    # Draw a geometric X — unicode glyphs often fail on the Pi font set.
+    inset = max(6, theme.s(7))
+    x_w = max(2, theme.s(2))
+    pygame.draw.line(
+        surface,
+        theme.LABEL,
+        (close_rect.left + inset, close_rect.top + inset),
+        (close_rect.right - inset, close_rect.bottom - inset),
+        x_w,
+    )
+    pygame.draw.line(
+        surface,
+        theme.LABEL,
+        (close_rect.right - inset, close_rect.top + inset),
+        (close_rect.left + inset, close_rect.bottom - inset),
+        x_w,
+    )
+    _atc_picker_hits.append(("close", "", close_rect.copy()))
+
+    title_y = panel.top + pad
+    surface.blit(
+        title,
+        title.get_rect(midtop=(theme.CENTER_X - close_size // 2, title_y)),
+    )
+
+    list_top = title_y + title.get_height() + theme.s(10)
+    list_bottom = panel.bottom - pad
+    list_rect = pygame.Rect(
+        panel.left + pad,
+        list_top,
+        panel.width - pad * 2,
+        max(theme.s(40), list_bottom - list_top),
+    )
+    _atc_picker_list_rect = list_rect.copy()
+
+    row_h = body_font.get_height() + theme.s(10)
+    if not items:
+        empty = hint_font.render(
+            "None in radar range" if kind == "airport" else "No channels",
+            True,
+            theme.HINT,
+        )
+        surface.blit(empty, empty.get_rect(center=list_rect.center))
+        return 0
+
+    total_h = len(items) * row_h
+    max_scroll = max(0, total_h - list_rect.height)
+    scroll = max(0, min(int(scroll_offset), max_scroll))
+
+    # Clip rows to the list band.
+    clip_prev = surface.get_clip()
+    surface.set_clip(list_rect)
+    y = list_rect.top - scroll
+    for item in items:
+        item_id = str(item.get("id") or "")
+        label = str(item.get("label") or item_id)
+        selected = bool(item.get("selected"))
+        row_rect = pygame.Rect(list_rect.left, int(y), list_rect.width, row_h)
+        if row_rect.bottom >= list_rect.top and row_rect.top <= list_rect.bottom:
+            if selected:
+                pygame.draw.rect(
+                    surface,
+                    (12, 52, 22),
+                    row_rect.inflate(-theme.s(2), -theme.s(2)),
+                    border_radius=theme.s(6),
+                )
+                pygame.draw.rect(
+                    surface,
+                    theme.SWEEP,
+                    row_rect.inflate(-theme.s(2), -theme.s(2)),
+                    max(1, theme.s(1)),
+                    border_radius=theme.s(6),
+                )
+            text_color = theme.LABEL if selected else theme.MUTED
+            rendered = body_font.render(label, True, text_color)
+            # Keep text inside the round panel width.
+            max_text_w = list_rect.width - theme.s(16)
+            if rendered.get_width() > max_text_w:
+                # Truncate visually with ellipsis.
+                trimmed = label
+                while trimmed and body_font.size(trimmed + "…")[0] > max_text_w:
+                    trimmed = trimmed[:-1]
+                rendered = body_font.render(trimmed + "…", True, text_color)
+            surface.blit(
+                rendered,
+                rendered.get_rect(
+                    midleft=(list_rect.left + theme.s(8), row_rect.centery)
+                ),
+            )
+            _atc_picker_hits.append(("item", item_id, row_rect.copy()))
+        y += row_h
+    surface.set_clip(clip_prev)
+
+    if max_scroll > 0:
+        hint = hint_font.render("Swipe to scroll", True, theme.HINT)
+        surface.blit(
+            hint,
+            hint.get_rect(midbottom=(theme.CENTER_X, panel.bottom - theme.s(4))),
+        )
+    return max_scroll
+
+
+def atc_picker_hit(x: int, y: int) -> tuple[str, str] | None:
+    """Hit-test picker: ``('close'|'item'|'outside', value)``."""
+    for action, value, rect in _atc_picker_hits:
+        if rect.collidepoint(x, y):
+            return action, value
+    # Any tap on the dimmed area dismisses.
+    return ("outside", "")
+
+
+def atc_picker_list_rect() -> pygame.Rect | None:
+    return _atc_picker_list_rect.copy() if _atc_picker_list_rect is not None else None
 
 
 def _system_button_label(action: str) -> str:
@@ -529,7 +760,14 @@ def _display_font():
 
 
 def _settings_row_page(page: int) -> bool:
-    return page in (PAGE_DISPLAY, PAGE_HUD, PAGE_OPTIONS, PAGE_LAYERS, PAGE_ATC)
+    return page in (
+        PAGE_DISPLAY,
+        PAGE_HUD,
+        PAGE_OPTIONS,
+        PAGE_LAYERS,
+        PAGE_ATC,
+        PAGE_ATC_QUIET,
+    )
 
 
 def _row_actions(page: int) -> tuple[str, ...]:
@@ -543,6 +781,8 @@ def _row_actions(page: int) -> tuple[str, ...]:
         return LAYERS_ACTIONS
     if page == PAGE_ATC:
         return ATC_ACTIONS
+    if page == PAGE_ATC_QUIET:
+        return ATC_QUIET_ACTIONS
     return ()
 
 
@@ -918,18 +1158,46 @@ def _atc_status_label() -> str:
         return "Status: —"
 
 
+def _atc_output_label() -> str:
+    """USB vs Bluetooth route; tap cycles when a preferred speaker is paired."""
+    try:
+        from utilities import bluetooth_audio
+
+        st = bluetooth_audio.status()
+        route = str(st.get("audio_route") or settings.audio_route() or "usb")
+        name = str(st.get("name") or st.get("mac") or "").strip()
+        if name and len(name) > 14:
+            name = name[:12] + "…"
+        if route == "bluetooth":
+            if st.get("connected"):
+                return (f"Output: BT {name}" if name else "Output: Bluetooth")[:42]
+            if st.get("mac"):
+                return (f"Output: BT… {name}" if name else "Output: Bluetooth")[:42]
+            return "Output: BT (pair portal)"[:42]
+        return "Output: USB"
+    except Exception:
+        route = settings.audio_route()
+        return "Output: Bluetooth" if route == "bluetooth" else "Output: USB"
+
+
 def _atc_row_labels() -> list[str]:
     enabled = "on" if settings.atc_enabled() else "off"
-    quiet = "on" if settings.atc_quiet_hours_enabled() else "off"
     return [
         f"ATC Audio: {enabled}",
         "",  # volume slider
+        f"Airport › {_atc_airport_label()}",
+        f"Channel › {_atc_channel_label()}",
+        _atc_output_label(),
+        _atc_status_label(),
+    ]
+
+
+def _atc_quiet_row_labels() -> list[str]:
+    quiet = "on" if settings.atc_quiet_hours_enabled() else "off"
+    return [
         f"Quiet hours: {quiet}",
         f"Quiet start: {settings.atc_quiet_start_label()}",
         f"Quiet end: {settings.atc_quiet_end_label()}",
-        f"Airport: {_atc_airport_label()}",
-        f"Channel: {_atc_channel_label()}",
-        _atc_status_label(),
     ]
 
 
@@ -1012,34 +1280,34 @@ def _atc_action_button_metrics() -> tuple[int, int, int]:
 
 
 def _draw_atc_page(surface, scroll_offset: int, display_focus: int, top: int, bottom: int) -> int:
-    """Draw ATC settings rows + Play/Stop side-by-side; returns max_scroll."""
+    """Draw ATC rows with sticky Play/Stop so controls stay visible; returns max_scroll."""
     global _atc_buttons
     _atc_buttons = []
     body_font = _display_font()
     row_h = body_font.get_height() + theme.s(6)
     rows = _atc_row_labels()
+    btn_w, btn_h, gap = _atc_action_button_metrics()
+    # Keep Play/Stop pinned above the footer; scroll rows in the space above.
+    btn_pad = theme.s(6)
+    btn_y = bottom - btn_h - theme.s(2)
+    rows_bottom = max(top + theme.s(40), btn_y - btn_pad)
     max_scroll_rows = _draw_settings_rows(
         surface,
         rows,
         scroll_offset,
         display_focus,
         top,
-        bottom,
+        rows_bottom,
         draw_atc_volume_slider=True,
     )
-    btn_w, btn_h, gap = _atc_action_button_metrics()
-    y = top + theme.s(4) - scroll_offset + len(rows) * row_h + theme.s(6)
     total_w = btn_w * 2 + gap
     x0 = theme.CENTER_X - total_w // 2
     for i, action in enumerate(ATC_BUTTON_ACTIONS):
         x = x0 + i * (btn_w + gap)
-        if y + btn_h >= top and y <= bottom:
-            rect = _draw_atc_button(surface, int(x), int(y), action, btn_w, btn_h)
-        else:
-            rect = pygame.Rect(int(x), int(y), btn_w, btn_h)
+        rect = _draw_atc_button(surface, int(x), int(btn_y), action, btn_w, btn_h)
         _atc_buttons.append((action, rect.copy()))
-    total_h = theme.s(4) + len(rows) * row_h + theme.s(6) + btn_h + theme.s(4)
-    return max(max_scroll_rows, max(0, total_h - (bottom - top)))
+    total_h = theme.s(4) + len(rows) * row_h + theme.s(4)
+    return max(max_scroll_rows, max(0, total_h - (rows_bottom - top)))
 
 
 def _display_row_labels() -> list[str]:
@@ -1355,6 +1623,8 @@ def draw_info(
     display_focus: int = 0,
     *,
     system_confirm: str | None = None,
+    atc_picker: str | None = None,
+    atc_picker_scroll: int = 0,
 ) -> int:
     draw.fill_background(surface)
     nav.draw_breadcrumb(surface, _breadcrumb(page))
@@ -1464,10 +1734,17 @@ def draw_info(
     elif page == PAGE_ATC:
         max_scroll = _draw_atc_page(surface, scroll_offset, display_focus, top, bottom)
 
-    elif page == PAGE_SYSTEM:
-        max_scroll = _draw_system_page(surface, top, bottom)
+    elif page == PAGE_ATC_QUIET:
+        max_scroll = _draw_settings_rows(
+            surface,
+            _atc_quiet_row_labels(),
+            scroll_offset,
+            display_focus,
+            top,
+            bottom,
+        )
 
-    else:
+    elif page == PAGE_COLORS:
         theme_rgb = settings.theme_rgb()
         runway_rgb = settings.runway_darkmap_rgb()
         group_rgbs = {
@@ -1555,7 +1832,13 @@ def draw_info(
 
             section_y = slider_y0 + 3 * slider_h + section_gap
 
+    elif page == PAGE_SYSTEM:
+        max_scroll = _draw_system_page(surface, top, bottom)
+
     nav.draw_footer_buttons(surface, list(footer_kinds_for_page(page)))
     if page == PAGE_SYSTEM and system_confirm:
         draw_system_confirm_popup(surface, system_confirm)
+    if page == PAGE_ATC and atc_picker:
+        # Picker owns its own scroll; page scroll stays underneath.
+        return draw_atc_picker(surface, atc_picker, scroll_offset=atc_picker_scroll)
     return max_scroll
