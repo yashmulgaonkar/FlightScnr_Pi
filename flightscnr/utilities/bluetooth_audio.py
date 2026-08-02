@@ -563,12 +563,25 @@ def find_sink_for_mac(mac: str) -> dict | None:
     token = _mac_to_sink_token(mac).lower()
     if not token:
         return None
-    for sink in list_audio_sinks():
+    sinks = list_audio_sinks()
+    for sink in sinks:
         blob = f"{sink.get('name', '')} {sink.get('description', '')}".lower()
         if "bluez" in blob and token in blob.replace(":", "_"):
             return sink
         if token in blob.replace(":", "_"):
             return sink
+    # MAC-token matching only works against pactl's technical sink names
+    # (e.g. bluez_output.8C_41_F2_22_DF_33.1). The wpctl status fallback
+    # (used when pactl isn't installed - see list_audio_sinks) only ever
+    # exposes the device's friendly name, never its MAC, so the match above
+    # can never succeed there even when the sink genuinely exists. Fall
+    # back to matching by the device's known name in that case.
+    name = str(_device_info(mac).get("name") or "").strip().lower()
+    if name and name != mac.lower():
+        for sink in sinks:
+            blob = f"{sink.get('name', '')} {sink.get('description', '')}".lower()
+            if name in blob:
+                return sink
     return None
 
 
