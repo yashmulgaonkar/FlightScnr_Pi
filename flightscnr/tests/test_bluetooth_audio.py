@@ -107,6 +107,92 @@ class BluetoothAudioTests(unittest.TestCase):
             self.assertEqual(hit["id"], "42")
             self.assertIsNone(bluetooth_audio.find_sink_for_mac("11:22:33:44:55:66"))
 
+    def test_find_sink_for_mac_uses_mac_field(self):
+        sinks = [
+            {
+                "id": "80",
+                "name": "Creative T100",
+                "description": "Creative T100",
+                "mac": "30:22:00:00:7B:6D",
+            }
+        ]
+        with mock.patch.object(bluetooth_audio, "list_audio_sinks", return_value=sinks):
+            hit = bluetooth_audio.find_sink_for_mac("30:22:00:00:7B:6D")
+            self.assertIsNotNone(hit)
+            self.assertEqual(hit["id"], "80")
+
+    def test_mac_from_bluez_node_name(self):
+        self.assertEqual(
+            bluetooth_audio._mac_from_bluez_node_name(
+                "bluez_output.30_22_00_00_7B_6D.1"
+            ),
+            "30:22:00:00:7B:6D",
+        )
+        self.assertEqual(bluetooth_audio._mac_from_bluez_node_name("alsa_output.usb"), "")
+
+    def test_parse_wpctl_inspect(self):
+        text = (
+            'id 80, type PipeWire:Interface:Node\n'
+            '  * node.name = "bluez_output.30_22_00_00_7B_6D.1"\n'
+            '  * node.description = "Creative T100"\n'
+            '    api.bluez5.address = "30:22:00:00:7B:6D"\n'
+            '  * device.api = "bluez5"\n'
+        )
+        props = bluetooth_audio._parse_wpctl_inspect(text)
+        self.assertEqual(props["node.name"], "bluez_output.30_22_00_00_7B_6D.1")
+        self.assertEqual(props["node.description"], "Creative T100")
+        self.assertEqual(props["api.bluez5.address"], "30:22:00:00:7B:6D")
+        self.assertEqual(props["device.api"], "bluez5")
+
+    def test_list_audio_sinks_wpctl_fallback_enriches_bluez(self):
+        """Issue #42: without pactl, friendly sink names must still match MAC."""
+        status_out = (
+            "Audio\n"
+            " ├─ Sinks:\n"
+            " │  *   57. Built-in Audio Stereo               [vol: 0.40]\n"
+            " │      80. Creative T100                       [vol: 0.40]\n"
+            " │\n"
+            " ├─ Sources:\n"
+        )
+        inspect_80 = (
+            'id 80, type PipeWire:Interface:Node\n'
+            '  * node.name = "bluez_output.30_22_00_00_7B_6D.1"\n'
+            '  * node.description = "Creative T100"\n'
+            '    api.bluez5.address = "30:22:00:00:7B:6D"\n'
+        )
+        inspect_57 = (
+            'id 57, type PipeWire:Interface:Node\n'
+            '  * node.name = "alsa_output.platform-fe00b840.mailbox.stereo-fallback"\n'
+            '  * node.description = "Built-in Audio Stereo"\n'
+        )
+
+        def fake_run(cmd, timeout=4.0):
+            del timeout
+            if cmd[:3] == ["pactl", "list", "short"]:
+                return mock.Mock(returncode=127, stdout="", stderr="not found")
+            if cmd[:2] == ["wpctl", "status"]:
+                return mock.Mock(returncode=0, stdout=status_out, stderr="")
+            if cmd[:2] == ["wpctl", "inspect"]:
+                oid = cmd[2]
+                text = inspect_80 if oid == "80" else inspect_57
+                return mock.Mock(returncode=0, stdout=text, stderr="")
+            return mock.Mock(returncode=1, stdout="", stderr="")
+
+        with mock.patch.object(bluetooth_audio, "_run_as_audio_user", side_effect=fake_run):
+            sinks = bluetooth_audio.list_audio_sinks()
+            hit = bluetooth_audio.find_sink_for_mac("30:22:00:00:7B:6D")
+            usb = bluetooth_audio.find_usb_sink()
+
+        ids = {s["id"] for s in sinks}
+        self.assertEqual(ids, {"57", "80"})
+        bt = next(s for s in sinks if s["id"] == "80")
+        self.assertEqual(bt["name"], "bluez_output.30_22_00_00_7B_6D.1")
+        self.assertEqual(bt["mac"], "30:22:00:00:7B:6D")
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit["id"], "80")
+        self.assertIsNotNone(usb)
+        self.assertEqual(usb["id"], "57")
+
     def test_status_without_bluetoothctl(self):
         with mock.patch.object(bluetooth_audio, "available", return_value=False):
             with mock.patch.object(bluetooth_audio, "preferred_mac", return_value=""):

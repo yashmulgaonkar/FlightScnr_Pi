@@ -99,7 +99,8 @@ install_apt_packages() {
         unzip git curl \
         mpv \
         bluez \
-        libspa-0.2-bluetooth
+        libspa-0.2-bluetooth \
+        pulseaudio-utils
     log_ok "System packages ready"
 }
 

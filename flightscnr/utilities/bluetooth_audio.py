@@ -511,8 +511,57 @@ def _mac_to_sink_token(mac: str) -> str:
     return _normalize_mac(mac).replace(":", "_")
 
 
+def _mac_from_bluez_node_name(name: str) -> str:
+    """Extract MAC from PipeWire node names like ``bluez_output.AA_BB_….1``."""
+    text = str(name or "")
+    m = re.search(r"bluez_(?:output|card)\.([0-9A-Fa-f_]{17})", text)
+    if not m:
+        return ""
+    return _normalize_mac(m.group(1).replace("_", ":"))
+
+
+def _parse_wpctl_inspect(text: str) -> dict[str, str]:
+    """Pull useful properties from ``wpctl inspect`` output."""
+    props: dict[str, str] = {}
+    keys = (
+        "node.name",
+        "node.description",
+        "api.bluez5.address",
+        "device.api",
+        "device.description",
+        "device.name",
+        "media.class",
+    )
+    for key in keys:
+        m = re.search(
+            rf'(?:^|\n)\s*\*?\s*{re.escape(key)}\s*=\s*"([^"]*)"',
+            text or "",
+        )
+        if m:
+            props[key] = m.group(1).strip()
+    return props
+
+
+def _wpctl_inspect(object_id: str) -> dict[str, str]:
+    oid = str(object_id or "").strip()
+    if not oid:
+        return {}
+    proc = _run_as_audio_user(["wpctl", "inspect", oid], timeout=4.0)
+    if proc.returncode != 0:
+        return {}
+    return _parse_wpctl_inspect(proc.stdout or "")
+
+
+def _sink_is_bluetooth(sink: dict) -> bool:
+    blob = (
+        f"{sink.get('name', '')} {sink.get('description', '')} "
+        f"{sink.get('mac', '')} {sink.get('device_api', '')}"
+    ).lower()
+    return "bluez" in blob or bool(_normalize_mac(str(sink.get("mac") or "")))
+
+
 def list_audio_sinks() -> list[dict]:
-    """PipeWire/Pulse sinks (id, name, description)."""
+    """PipeWire/Pulse sinks (id, name, description[, mac])."""
     sinks: list[dict] = []
     # pactl short: INDEX\tNAME\tDRIVER\tSAMPLE\tSTATE
     proc = _run_as_audio_user(["pactl", "list", "short", "sinks"], timeout=4.0)
@@ -521,15 +570,20 @@ def list_audio_sinks() -> list[dict]:
             parts = line.split("\t")
             if len(parts) < 2:
                 continue
-            sinks.append(
-                {
-                    "id": parts[0].strip(),
-                    "name": parts[1].strip(),
-                    "description": parts[1].strip(),
-                }
-            )
+            name = parts[1].strip()
+            entry = {
+                "id": parts[0].strip(),
+                "name": name,
+                "description": name,
+            }
+            mac = _mac_from_bluez_node_name(name)
+            if mac:
+                entry["mac"] = mac
+            sinks.append(entry)
         return sinks
-    # Fallback: parse wpctl status Audio/Sinks section lightly.
+    # Fallback when pulseaudio-utils / pactl is missing: parse wpctl status,
+    # then inspect each sink so Bluetooth nodes keep a matchable name/MAC
+    # (friendly labels like "Creative T100" alone are not enough).
     proc = _run_as_audio_user(["wpctl", "status"], timeout=4.0)
     if proc.returncode != 0:
         return sinks
@@ -549,25 +603,47 @@ def list_audio_sinks() -> list[dict]:
         m = re.search(r"(\d+)\.\s+(.+?)(?:\s+\[|$)", line)
         if not m:
             continue
-        sinks.append(
-            {
-                "id": m.group(1),
-                "name": m.group(2).strip(),
-                "description": m.group(2).strip(),
-            }
+        sink_id = m.group(1).strip()
+        friendly = m.group(2).strip()
+        props = _wpctl_inspect(sink_id)
+        node_name = props.get("node.name") or friendly
+        description = (
+            props.get("node.description")
+            or props.get("device.description")
+            or friendly
         )
+        mac = _normalize_mac(props.get("api.bluez5.address") or "")
+        if not mac:
+            mac = _mac_from_bluez_node_name(node_name) or _mac_from_bluez_node_name(
+                props.get("device.name") or ""
+            )
+        entry = {
+            "id": sink_id,
+            "name": node_name,
+            "description": description,
+        }
+        if mac:
+            entry["mac"] = mac
+        if props.get("device.api"):
+            entry["device_api"] = props["device.api"]
+        sinks.append(entry)
     return sinks
 
 
 def find_sink_for_mac(mac: str) -> dict | None:
-    token = _mac_to_sink_token(mac).lower()
-    if not token:
+    mac_n = _normalize_mac(mac)
+    token = _mac_to_sink_token(mac_n).lower()
+    if not mac_n or not token:
         return None
     for sink in list_audio_sinks():
-        blob = f"{sink.get('name', '')} {sink.get('description', '')}".lower()
-        if "bluez" in blob and token in blob.replace(":", "_"):
+        sink_mac = _normalize_mac(str(sink.get("mac") or ""))
+        if sink_mac and sink_mac == mac_n:
             return sink
-        if token in blob.replace(":", "_"):
+        blob = f"{sink.get('name', '')} {sink.get('description', '')}".lower()
+        blob_token = blob.replace(":", "_")
+        if "bluez" in blob and token in blob_token:
+            return sink
+        if token in blob_token:
             return sink
     return None
 
@@ -610,8 +686,7 @@ def find_usb_sink() -> dict | None:
     sinks = list_audio_sinks()
     non_bt = []
     for sink in sinks:
-        blob = f"{sink.get('name', '')} {sink.get('description', '')}".lower()
-        if "bluez" in blob:
+        if _sink_is_bluetooth(sink):
             continue
         non_bt.append(sink)
     if not non_bt:
@@ -702,8 +777,7 @@ def is_output_ready(mac: str | None = None) -> bool:
     if not mac:
         # Any connected bluez sink counts for the speaker gate.
         for sink in list_audio_sinks():
-            name = str(sink.get("name") or "").lower()
-            if "bluez" in name:
+            if _sink_is_bluetooth(sink):
                 return True
         return False
     if not is_connected(mac):
