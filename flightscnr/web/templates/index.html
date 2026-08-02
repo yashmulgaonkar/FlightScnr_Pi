@@ -437,13 +437,8 @@
                 <option value="off">Turn off display</option>
             </select>
             <div id="dim-row">
-                <label for="night_dim">Dim brightness</label>
-                <select id="night_dim">
-                    <option value="3">3%</option><option value="5">5%</option>
-                    <option value="10">10%</option><option value="15">15%</option><option value="20">20%</option>
-                    <option value="30">30%</option><option value="40">40%</option><option value="50">50%</option>
-                    <option value="100">100% (full)</option>
-                </select>
+                <label for="night_dim">Dim brightness <span id="night_dim_label">20%</span></label>
+                <input id="night_dim" type="range" min="3" max="100" step="1" value="20">
             </div>
             <div class="chk">
                 <label for="night_clock">Show clock during off-hours</label>
@@ -963,6 +958,7 @@ async function loadAll() {
         $("night_start").value = o.start || "22:00";
         $("night_end").value = o.end || "06:00";
         $("night_dim").value = String(o.dim_percent || 20);
+        syncNightDimLabel();
         if ($("night_clock")) $("night_clock").checked = !!o.force_clock || (o.mode === "clock");
         toggleDimRow();
     } catch (_) {}
@@ -1033,6 +1029,10 @@ function toggleDimRow() {
 function syncBrightLabel() {
     const el = $("bright_pct_label");
     if (el) el.textContent = `${$("bright_pct").value}%`;
+}
+function syncNightDimLabel() {
+    const el = $("night_dim_label");
+    if (el) el.textContent = `${$("night_dim").value}%`;
 }
 function syncHudOpacityLabel() {
     const el = $("radar_hud_opacity_label");
@@ -1936,6 +1936,7 @@ $("fav-list").addEventListener("click", (ev) => {
 $("night_mode").addEventListener("change", toggleDimRow);
 $("range_index").addEventListener("change", syncRangeSelect);
 $("bright_pct").addEventListener("input", syncBrightLabel);
+$("night_dim").addEventListener("input", syncNightDimLabel);
 if ($("radar_hud_opacity")) $("radar_hud_opacity").addEventListener("input", syncHudOpacityLabel);
 if ($("hourly_chime_volume")) $("hourly_chime_volume").addEventListener("input", syncChimeVolumeLabel);
 if ($("btn-chime-preview")) {
