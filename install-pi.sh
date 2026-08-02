@@ -421,6 +421,85 @@ setup_env_file() {
     setup_config_h
 }
 
+suppress_desktop_bluetooth_popups() {
+    # Raspberry Pi OS panel plugin (lxplug-bluetooth / wfplug-bluetooth) shows a
+    # modal "Connection successful" dialog on every BlueZ connect. That steals
+    # focus from fullscreen FlightScnr. Pairing is done via the web portal, so
+    # remove the panel widget — BlueZ/PipeWire still work for ATC audio.
+    log_step "Suppressing desktop Bluetooth pair/connect popups"
+
+    local changed=0
+    local panel
+    local panels=(
+        "${REPO_OWNER_HOME}/.config/lxpanel/LXDE-pi/panels/panel"
+        "/etc/xdg/lxpanel/LXDE-pi/panels/panel"
+        "/root/.config/lxpanel/LXDE-pi/panels/panel"
+    )
+
+    for panel in "${panels[@]}"; do
+        if [ -f "$panel" ] && grep -q 'type=bluetooth' "$panel"; then
+            # Drop the Plugin { type=bluetooth ... } block (and a following blank line).
+            python3 - "$panel" <<'PY'
+import pathlib, re, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+new, n = re.subn(
+    r"(?ms)^Plugin \{\n(?:[^\n]*\n)*?[ \t]*type=bluetooth\n(?:[^\n]*\n)*?^\}\n?",
+    "",
+    text,
+)
+if n:
+    path.write_text(new, encoding="utf-8")
+    print(n)
+else:
+    print(0)
+PY
+            changed=1
+            log_ok "Removed bluetooth plugin from $panel"
+        fi
+    done
+
+    local wf_ini="${REPO_OWNER_HOME}/.config/wf-panel-pi.ini"
+    local default_right="tray power ejecter updater spacing2 connect spacing2 netman spacing2 volumepulse spacing2 clock spacing2 batt spacing2 squeek"
+    mkdir -p "$(dirname "$wf_ini")"
+    if [ -f "$wf_ini" ]; then
+        if grep -qE '^[[:space:]]*widgets_right=' "$wf_ini"; then
+            if grep -qE '^[[:space:]]*widgets_right=.*bluetooth' "$wf_ini"; then
+                sed -i -E 's/(^[[:space:]]*widgets_right=.*)([[:space:]]+bluetooth|[[:space:]]+spacing2[[:space:]]+bluetooth|bluetooth[[:space:]]+spacing2)/\1/g; s/(^[[:space:]]*widgets_right=.*)bluetooth/\1/g' "$wf_ini"
+                # Collapse leftover double spaces in the widgets list.
+                sed -i -E 's/(^[[:space:]]*widgets_right=.*)/\1/; s/  +/ /g' "$wf_ini"
+                changed=1
+                log_ok "Removed bluetooth widget from $wf_ini"
+            fi
+        else
+            printf '\nwidgets_right=%s\n' "$default_right" >> "$wf_ini"
+            changed=1
+            log_ok "Set widgets_right without bluetooth in $wf_ini"
+        fi
+    else
+        printf '[panel]\nwidgets_right=%s\n' "$default_right" > "$wf_ini"
+        if [ -n "${REPO_OWNER:-}" ]; then
+            chown "$REPO_OWNER:$REPO_OWNER" "$wf_ini" 2>/dev/null || true
+        fi
+        changed=1
+        log_ok "Created $wf_ini without bluetooth widget"
+    fi
+
+    if [ "$changed" -eq 1 ]; then
+        # Reload panel if one is running (best-effort; ignore failures).
+        if pgrep -x lxpanel >/dev/null 2>&1; then
+            killall -q lxpanel 2>/dev/null || true
+            log_ok "Restarted lxpanel (will respawn with desktop session)"
+        fi
+        if pgrep -x wf-panel-pi >/dev/null 2>&1; then
+            killall -q wf-panel-pi 2>/dev/null || true
+            log_ok "Restarted wf-panel-pi"
+        fi
+    else
+        log_ok "Desktop Bluetooth panel plugin already disabled (or not present)"
+    fi
+}
+
 install_systemd_service() {
     local service_src="$SETUP_DIR/flightscnr.service"
     local xauthority="${REPO_OWNER_HOME}/.Xauthority"
@@ -528,6 +607,7 @@ cmd_install() {
     verify_python_deps || true
     setup_data_dir
     setup_env_file
+    suppress_desktop_bluetooth_popups
     install_systemd_service
     install_update_sudoers
     fix_repo_permissions

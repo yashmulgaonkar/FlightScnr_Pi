@@ -54,6 +54,8 @@ _action_lock = threading.Lock()
 _watch_lock = threading.Lock()
 _watch_thread: threading.Thread | None = None
 _watch_stop = threading.Event()
+_agent_lock = threading.Lock()
+_agent_proc: subprocess.Popen | None = None
 _discovered: dict[str, dict] = {}
 _discovered_lock = threading.Lock()
 
@@ -133,7 +135,7 @@ def _run(
 
 
 def _bluetoothctl(*args: str, timeout: float = 30.0) -> subprocess.CompletedProcess:
-    return _run(["bluetoothctl", *args], timeout=timeout)
+    return _run(["bluetoothctl", *args], timeout=timeout, env=_headless_env())
 
 
 def _pipewire_env() -> dict[str, str] | None:
@@ -191,11 +193,11 @@ def ensure_adapter_powered() -> bool:
     if not available():
         _set_error("bluetoothctl not installed (sudo apt install bluez)")
         return False
-    # Agent helps Just Works pairing from a headless service.
+    # Keep a silent BlueZ pair agent so desktop UIs don't pop confirmation
+    # dialogs that steal focus from the fullscreen FlightScnr display.
+    ensure_pair_agent()
     for cmd in (
         ["power", "on"],
-        ["agent", "NoInputNoOutput"],
-        ["default-agent"],
         ["pairable", "on"],
         ["discoverable", "off"],
     ):
@@ -212,6 +214,84 @@ def ensure_adapter_powered() -> bool:
     if not ok:
         _set_error("Bluetooth adapter is not powered on")
     return ok
+
+
+def ensure_pair_agent() -> None:
+    """Hold a NoInputNoOutput agent so pairing/connect stays headless.
+
+    One-shot ``bluetoothctl agent …`` exits immediately and does not keep the
+    agent registered; desktop agents can then show PIN/confirm popups that
+    knock FlightScnr out of fullscreen.
+    """
+    global _agent_proc
+    if not available():
+        return
+    with _agent_lock:
+        if _agent_proc is not None and _agent_proc.poll() is None:
+            return
+        # Prefer bt-agent when installed (bluez-tools); fall back to bluetoothctl.
+        try:
+            if shutil.which("bt-agent"):
+                _agent_proc = subprocess.Popen(
+                    ["bt-agent", "-c", "NoInputNoOutput"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    env=_headless_env(),
+                )
+            else:
+                _agent_proc = subprocess.Popen(
+                    ["bluetoothctl"],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    bufsize=1,
+                    env=_headless_env(),
+                )
+                assert _agent_proc.stdin is not None
+                _agent_proc.stdin.write("agent NoInputNoOutput\n")
+                _agent_proc.stdin.write("default-agent\n")
+                _agent_proc.stdin.flush()
+            logger.info("Bluetooth pair agent started (NoInputNoOutput)")
+        except Exception:
+            _agent_proc = None
+            logger.debug("Could not start Bluetooth pair agent", exc_info=True)
+
+
+def _headless_env() -> dict[str, str]:
+    """Env for BlueZ helpers — drop DISPLAY so GUI agents aren't spawned."""
+    env = os.environ.copy()
+    for key in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"):
+        env.pop(key, None)
+    return env
+
+
+def stop_pair_agent_for_tests() -> None:
+    global _agent_proc
+    with _agent_lock:
+        proc = _agent_proc
+        _agent_proc = None
+    if proc is None:
+        return
+    try:
+        if proc.stdin and not proc.stdin.closed:
+            try:
+                proc.stdin.write("quit\n")
+                proc.stdin.flush()
+            except Exception:
+                pass
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
+        proc.terminate()
+        proc.wait(timeout=2.0)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
 
 def _parse_device_lines(text: str) -> list[dict]:
@@ -459,6 +539,7 @@ def scan(*, timeout: float = _SCAN_DEFAULT_S) -> list[dict]:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                env=_headless_env(),
             )
             reader = threading.Thread(
                 target=_drain_scan_output,
@@ -1005,6 +1086,7 @@ def ensure_reconnect_watch() -> None:
     """Start a daemon that re-connects the preferred Bluetooth speaker."""
     if not available():
         return
+    ensure_pair_agent()
     if not preferred_mac():
         return
     global _watch_thread
@@ -1028,6 +1110,7 @@ def stop_reconnect_watch_for_tests() -> None:
         _watch_thread = None
     if thread is not None and thread.is_alive():
         thread.join(timeout=1.0)
+    stop_pair_agent_for_tests()
     with _discovered_lock:
         _discovered.clear()
     _set_error("")

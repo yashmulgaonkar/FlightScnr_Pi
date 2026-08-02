@@ -9,6 +9,8 @@
 
 """SDL video driver selection with Pi-friendly fallbacks."""
 
+from __future__ import annotations
+
 import logging
 import os
 
@@ -49,6 +51,10 @@ def init_display(width: int, height: int, fullscreen: bool) -> pygame.Surface:
     flags = pygame.FULLSCREEN if fullscreen else 0
     last_error = None
 
+    # Desktop Bluetooth / notification dialogs can steal focus; keep the
+    # kiosk surface mapped instead of minimizing exclusive fullscreen.
+    os.environ.setdefault("SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS", "0")
+
     for driver in _driver_candidates():
         if pygame.get_init():
             pygame.display.quit()
@@ -82,3 +88,32 @@ def init_display(width: int, height: int, fullscreen: bool) -> pygame.Surface:
         "or run under the Pi desktop (X11). "
         f"Last error: {last_error}"
     ) from last_error
+
+
+def reassert_fullscreen(surface: pygame.Surface | None, *, fullscreen: bool) -> pygame.Surface | None:
+    """Bring the kiosk window forward after another dialog steals focus.
+
+    Avoid ``set_mode()`` here — recreating the display surface mid-loop races
+    the renderer and can black-screen / crash the app under Xwayland.
+    """
+    if not fullscreen:
+        return surface
+    try:
+        pygame.mouse.set_visible(False)
+        try:
+            pygame.display.raise_window()
+        except Exception:
+            pass
+        return surface if surface is not None else pygame.display.get_surface()
+    except Exception:
+        logger.debug("Could not reassert fullscreen", exc_info=True)
+        return surface
+
+
+def theme_size() -> tuple[int, int]:
+    try:
+        from display.round_touch import theme
+
+        return (theme.SIZE, theme.SIZE)
+    except Exception:
+        return (720, 720)

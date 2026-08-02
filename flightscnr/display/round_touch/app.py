@@ -94,8 +94,9 @@ class RoundTouchDisplay:
         except ImportError:
             fullscreen = os.environ.get("DISPLAY_FULLSCREEN", "true").lower() in ("1", "true", "yes")
 
+        self._fullscreen = bool(fullscreen)
         requested = theme.SIZE
-        self._display = video.init_display(requested, requested, fullscreen)
+        self._display = video.init_display(requested, requested, self._fullscreen)
         fit_side = min(self._display.get_size())
         if fit_side != theme.SIZE:
             logger.info(
@@ -109,7 +110,7 @@ class RoundTouchDisplay:
             map_bg.invalidate()
             if self._display.get_size() != (fit_side, fit_side):
                 pygame.display.quit()
-                self._display = video.init_display(fit_side, fit_side, fullscreen)
+                self._display = video.init_display(fit_side, fit_side, self._fullscreen)
         self.surface = pygame.Surface((theme.SIZE, theme.SIZE))
         pygame.mouse.set_visible(False)
         pygame.event.set_allowed(
@@ -252,6 +253,13 @@ class RoundTouchDisplay:
 
             # Watch USB/Bluetooth speaker; skips ATC/chime until one is ready.
             ensure_speaker_watch()
+            try:
+                from utilities import bluetooth_audio
+
+                # Claim BlueZ agent early so pair/connect never pops a desktop UI.
+                bluetooth_audio.ensure_pair_agent()
+            except Exception:
+                pass
             atc_audio.maybe_resume_after_boot()
         except Exception:
             logger.debug("ATC resume after boot failed", exc_info=True)
@@ -538,6 +546,14 @@ class RoundTouchDisplay:
         except ValueError:
             self.flight_index = 0
             self._selected_flight_id = self._flight_identity(ordered[0])
+
+    def _reassert_fullscreen(self) -> None:
+        """Recover after desktop Bluetooth dialogs steal window focus."""
+        if not self._fullscreen:
+            return
+        restored = video.reassert_fullscreen(self._display, fullscreen=True)
+        if restored is not None:
+            self._display = restored
 
     def _present(self):
         # Fast radar path: reuse a cached rotated static layer and only redraw
@@ -2960,7 +2976,15 @@ class RoundTouchDisplay:
                         continue
                     if event.type == pygame.ACTIVEEVENT and not event.gain:
                         logger.debug("Display lost focus (continuing)")
+                        self._reassert_fullscreen()
                         continue
+                    focus_lost = getattr(pygame, "WINDOWFOCUSLOST", None)
+                    if focus_lost is not None and event.type == focus_lost:
+                        logger.debug("Window focus lost — raising display")
+                        self._reassert_fullscreen()
+                        continue
+                    # Do not recreate the display on WINDOWEXPOSED / FOCUSGAINED —
+                    # that races the render loop and can black-screen the kiosk.
                     if gesture_handler.RadarGestureHandler.is_touch_event(event):
                         if not self._ghost_filter.allow(
                             event,
