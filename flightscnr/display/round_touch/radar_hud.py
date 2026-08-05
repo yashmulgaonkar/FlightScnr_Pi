@@ -183,9 +183,7 @@ def _wind_bits(
     direction = wx.get("wind_direction")
     if speed is None and direction is None:
         return 0, None, None
-    font = _ampm_font()
-    speed_txt = _format_wind_speed(speed, wx.get("wind_unit"))
-    speed_img = font.render(speed_txt, True, color) if speed_txt else None
+    speed_img = _render_wind_speed(speed, wx.get("wind_unit"), color)
     w = 0
     if direction is not None:
         w = max(w, arrow_px)
@@ -212,11 +210,41 @@ def _clock_bits(color: tuple[int, int, int]) -> tuple[int, pygame.Surface, pygam
     return t_img.get_width(), t_img, None
 
 
+def _aqi_bits(
+    wx: dict | None, color: tuple[int, int, int]
+) -> tuple[int, pygame.Surface | None, pygame.Surface | None, tuple[int, int, int]]:
+    """Return (width, label_surf, value_surf, value_rgb) for US AQI.
+
+    Vertical stack like wind: small ``AQI`` label above the colored number.
+    """
+    if not wx or wx.get("aqi") is None:
+        return 0, None, None, color
+    try:
+        aqi = int(wx.get("aqi"))
+    except (TypeError, ValueError):
+        return 0, None, None, color
+    try:
+        from utilities.air_quality import aqi_band_color
+
+        value_rgb = aqi_band_color(aqi)
+    except Exception:
+        value_rgb = color
+    font = _ampm_font()
+    # On dark HUD chrome, keep the "AQI" caption readable; number uses band color.
+    label_img = font.render("AQI", True, color)
+    value_img = font.render(str(aqi), True, value_rgb)
+    w = max(label_img.get_width(), value_img.get_width())
+    return w, label_img, value_img, value_rgb
+
+
 def _geometry(wx: dict | None = None) -> dict:
     """Place HUD items along the curved pill arc with the clock centered.
 
-    Left of clock: weather (icon+temp) · wind
+    Left of clock: weather (icon+temp) · wind · AQI
     Right of clock: volume · chime · ATC
+
+    The pill half-span is ``max(left, right)`` so the clock stays at ``mid``
+    even when AQI widens the left cluster.
     """
     cx, cy = theme.CENTER_X, theme.CENTER_Y
     r_mid = int(theme.VISIBLE_RADIUS * 0.84)
@@ -233,24 +261,32 @@ def _geometry(wx: dict | None = None) -> dict:
     bottom = settings.radar_hud_position() == "bottom"
     weather_w = _weather_cluster_width(wx_icon_w, temp_w, bottom=bottom)
     wind_w, _, _ = _wind_bits(wx, arrow_px, color)
+    aqi_w, _, _, _ = _aqi_bits(wx, color)
     clock_w, _, _ = _clock_bits(color)
     has_wx_icon = wx_icon_w > 0
     has_temp = temp_w > 0
     has_weather = weather_w > 0
     has_wind = wind_w > 0
+    has_aqi = aqi_w > 0
 
     major_gap = theme.s(8)
-    # Keep weather cluster close to wind; slightly larger gap to the clock.
-    weather_to_wind_gap = theme.s(5)
+    # Left environmental cluster: keep pieces readable without crowding.
+    weather_to_wind_gap = theme.s(12)
+    wind_to_aqi_gap = theme.s(12)
 
     # Left of clock, screen L→R toward the clock. (name, width, gap_after)
     left_pieces: list[tuple[str, int, int]] = []
     if has_weather:
-        left_pieces.append(
-            ("weather", weather_w, weather_to_wind_gap if has_wind else major_gap)
+        next_gap = weather_to_wind_gap if has_wind else (
+            wind_to_aqi_gap if has_aqi else major_gap
         )
+        left_pieces.append(("weather", weather_w, next_gap))
     if has_wind:
-        left_pieces.append(("wind", wind_w, major_gap))
+        left_pieces.append(
+            ("wind", wind_w, wind_to_aqi_gap if has_aqi else major_gap)
+        )
+    if has_aqi:
+        left_pieces.append(("aqi", aqi_w, major_gap))
 
     right_pieces: list[tuple[str, int, int]] = [
         ("speaker", icon_px, major_gap),
@@ -343,6 +379,7 @@ def _geometry(wx: dict | None = None) -> dict:
             if has_temp:
                 temp_c = (cx_w + temp_dx, y + temp_h // 2)
     wind_c = centers.get("wind", (cx, y_fallback))
+    aqi_c = centers.get("aqi", (cx, y_fallback))
     clock_c = centers["clock"]
     speaker_c = centers["speaker"]
     chime_c = centers["chime"]
@@ -353,6 +390,7 @@ def _geometry(wx: dict | None = None) -> dict:
         "wx_icon": wx_icon_c,
         "temp": temp_c,
         "wind": wind_c,
+        "aqi": aqi_c,
         "clock": clock_c,
         "speaker": speaker_c,
         "chime": chime_c,
@@ -371,6 +409,8 @@ def _geometry(wx: dict | None = None) -> dict:
             temp_c = (bx + dx, by + dy)
         elif key == "wind":
             wind_c = (bx + dx, by + dy)
+        elif key == "aqi":
+            aqi_c = (bx + dx, by + dy)
         elif key == "clock":
             clock_c = (bx + dx, by + dy)
         elif key == "speaker":
@@ -403,6 +443,7 @@ def _geometry(wx: dict | None = None) -> dict:
         "temp_c": temp_c,
         "weather_c": weather_c,
         "wind_c": wind_c,
+        "aqi_c": aqi_c,
         "chime_c": chime_c,
         "atc_c": atc_c,
         "clock_c": clock_c,
@@ -412,6 +453,7 @@ def _geometry(wx: dict | None = None) -> dict:
         "has_temp": has_temp,
         "has_weather": has_weather,
         "has_wind": has_wind,
+        "has_aqi": has_aqi,
         "base_centers": base,
     }
 
@@ -558,16 +600,48 @@ def _ampm_font():
 
 
 def _format_wind_speed(speed: float | None, unit: str | None) -> str:
-    if speed is None:
+    """Full wind string (tests / callers that want a single line)."""
+    num, unit_txt = _wind_speed_parts(speed, unit)
+    if not num:
         return ""
+    return f"{num} {unit_txt}"
+
+
+def _wind_speed_parts(
+    speed: float | None, unit: str | None
+) -> tuple[str, str]:
+    """Return ``(number, unit_label)`` for HUD rendering."""
+    if speed is None:
+        return "", ""
     try:
         n = int(round(float(speed)))
     except (TypeError, ValueError):
-        return ""
+        return "", ""
     u = (unit or "m/s").strip()
     if u == "mph":
-        return f"{n} mph"
-    return f"{n} m/s"
+        return str(n), "mph"
+    return str(n), "m/s"
+
+
+def _render_wind_speed(
+    speed: float | None, unit: str | None, color: tuple[int, int, int]
+) -> pygame.Surface | None:
+    """Number at HUD body size; unit in a smaller font beside it."""
+    num, unit_txt = _wind_speed_parts(speed, unit)
+    if not num:
+        return None
+    num_font = _ampm_font()
+    unit_font = draw_mod.load_font(max(7, theme.s(8)), bold=True)
+    num_img = num_font.render(num, True, color)
+    unit_img = unit_font.render(unit_txt, True, color)
+    gap = max(1, theme.s(2))
+    w = num_img.get_width() + gap + unit_img.get_width()
+    h = max(num_img.get_height(), unit_img.get_height())
+    out = pygame.Surface((w, h), pygame.SRCALPHA)
+    # Bottom-align so the smaller unit sits on the same baseline.
+    out.blit(num_img, (0, h - num_img.get_height()))
+    out.blit(unit_img, (num_img.get_width() + gap, h - unit_img.get_height()))
+    return out
 
 
 def _draw_wind_arrow(
@@ -721,6 +795,25 @@ def _draw_wind_cluster(
         y += arrow_h + (gap if speed_h else 0)
     if speed_img is not None:
         surface.blit(speed_img, speed_img.get_rect(midtop=(cx, y)))
+
+
+def _draw_aqi_cluster(
+    surface: pygame.Surface,
+    center: tuple[int, int],
+    color: tuple[int, int, int],
+    wx: dict | None,
+) -> None:
+    """``AQI`` label above colored US AQI value, centered on the arc slot."""
+    w, label_img, value_img, _ = _aqi_bits(wx, color)
+    if w <= 0 or label_img is None or value_img is None:
+        return
+    cx, cy = center
+    gap = theme.s(1)
+    total_h = label_img.get_height() + gap + value_img.get_height()
+    y = cy - total_h // 2
+    surface.blit(label_img, label_img.get_rect(midtop=(cx, y)))
+    y += label_img.get_height() + gap
+    surface.blit(value_img, value_img.get_rect(midtop=(cx, y)))
 
 
 def _draw_clock_cluster(
@@ -905,6 +998,8 @@ def draw_hud(
                 pts.append(g["weather_c"])
             if g.get("has_wind"):
                 pts.append(g["wind_c"])
+            if g.get("has_aqi"):
+                pts.append(g["aqi_c"])
             xs = [p[0] for p in pts]
             ys = [p[1] for p in pts]
             pad = g["band"] // 2 + theme.s(4)
@@ -921,6 +1016,8 @@ def draw_hud(
             _draw_temp(surface, g["temp_c"], wx_icon_px, color, wx)
         if g.get("has_wind"):
             _draw_wind_cluster(surface, g["wind_c"], arrow_px, color, wx)
+        if g.get("has_aqi"):
+            _draw_aqi_cluster(surface, g["aqi_c"], color, wx)
         _draw_clock_cluster(surface, g["clock_c"], color)
 
         vol_name = "mute" if settings.atc_volume() <= 0 else "volume"

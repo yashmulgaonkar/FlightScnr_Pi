@@ -125,6 +125,21 @@ def _parse_days(intervals: list, max_days: int = 3) -> list[dict]:
     return days
 
 
+def _merge_aqi(payload: dict, *, force: bool = False) -> dict:
+    """Attach Open-Meteo US AQI to a weather payload (independent of Tomorrow)."""
+    try:
+        from utilities.air_quality import grab_us_aqi
+
+        result = grab_us_aqi(force=force)
+        aqi = result.get("aqi")
+    except Exception:
+        logger.debug("AQI merge failed", exc_info=True)
+        aqi = payload.get("aqi")
+    out = dict(payload)
+    out["aqi"] = aqi
+    return out
+
+
 def refresh(force: bool = False) -> dict | None:
     """Fetch temperature + forecast when clock/forecast screens are open."""
     global _CACHE
@@ -167,7 +182,7 @@ def refresh(force: bool = False) -> dict | None:
     if not force and cached and cached.get("unit") == units and _CACHE.get("date") == today:
         ttl = _CACHE_TTL_S if cached.get("ready") else _FAIL_RETRY_S
         if now - _CACHE["ts"] < ttl:
-            # Keep wind fresh even when the rest of the payload is TTL-cached.
+            # Keep wind / AQI fresh even when the rest of the payload is TTL-cached.
             try:
                 from utilities.temperature import current_wind
 
@@ -179,9 +194,10 @@ def refresh(force: bool = False) -> dict | None:
                         "wind_direction": direction,
                         "wind_unit": wind_unit,
                     }
-                    _CACHE["payload"] = cached
             except Exception:
                 pass
+            cached = _merge_aqi(cached)
+            _CACHE["payload"] = cached
             return cached
 
     temp_hum = grab_temperature_and_humidity(force=force)
@@ -205,7 +221,7 @@ def refresh(force: bool = False) -> dict | None:
         # Keep the last good reading when the provider is rate-limiting.
         prev = _CACHE.get("payload")
         if isinstance(prev, dict) and prev.get("ready"):
-            return prev
+            return _merge_aqi(prev)
         payload = {
             "temp": None,
             "humidity": None,
@@ -218,8 +234,10 @@ def refresh(force: bool = False) -> dict | None:
             "wind_speed": None,
             "wind_direction": None,
             "wind_unit": "m/s",
+            "aqi": None,
             "ready": False,
         }
+        payload = _merge_aqi(payload, force=True)
         _CACHE["ts"] = now
         _CACHE["date"] = today
         _CACHE["payload"] = payload
@@ -246,8 +264,10 @@ def refresh(force: bool = False) -> dict | None:
         "wind_speed": wind_speed,
         "wind_direction": wind_direction,
         "wind_unit": wind_unit,
+        "aqi": None,
         "ready": temp is not None or bool(days),
     }
+    payload = _merge_aqi(payload, force=True)
     _CACHE["ts"] = now
     _CACHE["date"] = today
     _CACHE["payload"] = payload
@@ -346,9 +366,10 @@ def refresh_current(force: bool = False) -> dict | None:
                     "wind_direction": direction,
                     "wind_unit": wind_unit,
                 }
-                _CACHE["payload"] = cached
         except Exception:
             pass
+        cached = _merge_aqi(cached)
+        _CACHE["payload"] = cached
         return cached
 
     temp_hum = grab_temperature_and_humidity(force=force)
@@ -365,7 +386,7 @@ def refresh_current(force: bool = False) -> dict | None:
     base = cached if isinstance(cached, dict) else {}
     # On rate-limit / failed fetch, keep the previous ready reading.
     if temp is None and isinstance(base, dict) and base.get("ready") and base.get("temp") is not None:
-        return base
+        return _merge_aqi(base)
     days = list(base.get("days") or [])
     current_code = realtime_code or (days[0].get("weather_code") if days else None)
     payload = {
@@ -380,8 +401,10 @@ def refresh_current(force: bool = False) -> dict | None:
         "wind_speed": wind_speed,
         "wind_direction": wind_direction,
         "wind_unit": wind_unit,
+        "aqi": None,
         "ready": temp is not None or bool(days),
     }
+    payload = _merge_aqi(payload, force=True)
     _CACHE["ts"] = now
     _CACHE["date"] = today
     _CACHE["payload"] = payload
@@ -494,6 +517,12 @@ def tick_scheduled_refresh(
 def invalidate_cache() -> None:
     global _CACHE
     _CACHE = {"ts": 0.0, "payload": None, "date": None}
+    try:
+        from utilities.air_quality import invalidate_cache as invalidate_aqi
+
+        invalidate_aqi()
+    except Exception:
+        pass
 
 
 def refresh_for_location_change() -> dict | None:
