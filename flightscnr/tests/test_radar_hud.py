@@ -440,5 +440,137 @@ class RadarHudGeometryTests(unittest.TestCase):
         self.assertLess(w, arrow_px + speed_img.get_width())
 
 
+class HudVolumeControlTests(unittest.TestCase):
+    def test_master_gain_and_alert_link(self):
+        from display.round_touch import settings
+
+        with mock.patch.object(settings, "_save"), mock.patch.object(settings, "_rmw_save"):
+            settings._state["master_sound_enabled"] = True
+            settings._state["master_sound_volume"] = 50
+            settings._state["traffic_sfx_volume"] = 80
+            settings._state["military_sfx_volume"] = 20
+            self.assertEqual(settings.master_gain_factor(), 0.5)
+            self.assertEqual(settings.apply_master_gain(80), 40)
+            settings.set_master_sound_enabled(False)
+            self.assertEqual(settings.master_gain_factor(), 0.0)
+            self.assertEqual(settings.apply_master_gain(80), 0)
+
+            settings.set_alert_sfx_volume(55)
+            self.assertEqual(settings.traffic_sfx_volume(), 55)
+            self.assertEqual(settings.military_sfx_volume(), 55)
+            self.assertEqual(settings.alert_sfx_volume(), 55)
+
+    def test_channel_mute_preserves_volume(self):
+        from display.round_touch import settings
+
+        with mock.patch.object(settings, "_save"), mock.patch.object(settings, "_rmw_save"):
+            settings._state["master_sound_enabled"] = True
+            settings._state["master_sound_volume"] = 70
+            settings._state["hourly_chime_enabled"] = True
+            settings._state["hourly_chime_volume"] = 65
+            settings._state["traffic_sfx_enabled"] = True
+            settings._state["military_sfx_enabled"] = True
+            settings._state["traffic_sfx_volume"] = 40
+            settings._state["military_sfx_volume"] = 40
+            settings._state["atc_sound_enabled"] = True
+            settings._state["atc_volume"] = 85
+
+            for channel, vol_key, mute_fn in (
+                ("speaker", "master_sound_volume", settings.master_sound_enabled),
+                ("chime", "hourly_chime_volume", settings.hourly_chime_enabled),
+                ("alert", "traffic_sfx_volume", settings.alert_sfx_enabled),
+                ("atc", "atc_volume", settings.atc_sound_enabled),
+            ):
+                before = settings._state[vol_key]
+                self.assertFalse(settings.hud_channel_muted(channel))
+                settings.toggle_hud_channel_mute(channel)
+                self.assertTrue(settings.hud_channel_muted(channel))
+                self.assertEqual(settings._state[vol_key], before)
+                settings.toggle_hud_channel_mute(channel)
+                self.assertFalse(settings.hud_channel_muted(channel))
+                self.assertEqual(settings.hud_channel_volume(channel), before)
+
+    def test_popover_channel_routing(self):
+        import pygame
+        from display.round_touch import radar_hud, settings, theme
+
+        pygame.init()
+        try:
+            pygame.display.set_mode((1, 1))
+        except pygame.error:
+            pass
+
+        with mock.patch.object(settings, "_save"), mock.patch.object(settings, "_rmw_save"):
+            settings._state["radar_hud_enabled"] = True
+            settings._state["master_sound_volume"] = 33
+            settings._state["hourly_chime_volume"] = 44
+            settings._state["traffic_sfx_volume"] = 55
+            settings._state["military_sfx_volume"] = 55
+            settings._state["atc_volume"] = 66
+
+            radar_hud.close_volume_popover()
+            self.assertIsNone(radar_hud.volume_popover_channel())
+            self.assertEqual(radar_hud.open_volume_popover("chime"), "chime")
+            self.assertTrue(radar_hud.volume_popover_open())
+            self.assertEqual(radar_hud.volume_popover_channel(), "chime")
+            self.assertEqual(settings.hud_channel_volume("chime"), 44)
+
+            surf = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
+            with mock.patch.object(radar_hud, "_wx_snapshot", return_value=None):
+                radar_hud.draw_hud(surf, include_popover=True)
+            self.assertGreater(radar_hud._slider_track.width, 0)
+            mid_x = radar_hud._slider_track.centerx
+            value = radar_hud.apply_volume_at_x(mid_x, persist=False)
+            self.assertIsNotNone(value)
+            self.assertAlmostEqual(value, 50, delta=5)
+            self.assertEqual(settings.hourly_chime_volume(), value)
+
+            radar_hud.open_volume_popover("alert")
+            with mock.patch.object(radar_hud, "_wx_snapshot", return_value=None):
+                radar_hud.draw_hud(surf, include_popover=True)
+            value = radar_hud.apply_volume_at_x(
+                radar_hud._slider_track.x + radar_hud._slider_track.w, persist=False
+            )
+            self.assertEqual(value, 100)
+            self.assertEqual(settings.traffic_sfx_volume(), 100)
+            self.assertEqual(settings.military_sfx_volume(), 100)
+            radar_hud.close_volume_popover()
+
+    def test_tap_opens_popover_long_press_helper_mutes(self):
+        import pygame
+        from display.round_touch import radar_hud, settings, theme
+
+        pygame.init()
+        try:
+            pygame.display.set_mode((1, 1))
+        except pygame.error:
+            pass
+
+        with mock.patch.object(settings, "_save"), mock.patch.object(settings, "_rmw_save"):
+            settings._state["radar_hud_enabled"] = True
+            settings._state["radar_hud_layout_top"] = {}
+            settings._state["master_sound_enabled"] = True
+            settings._state["hourly_chime_enabled"] = True
+            settings._state["traffic_sfx_enabled"] = True
+            settings._state["military_sfx_enabled"] = True
+            settings._state["atc_sound_enabled"] = True
+            with mock.patch.object(settings, "radar_hud_layout", return_value={}):
+                with mock.patch.object(radar_hud, "_wx_snapshot", return_value=None):
+                    surf = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
+                    radar_hud.close_volume_popover()
+                    radar_hud.draw_hud(surf, include_popover=False)
+                    g = radar_hud._geometry()
+                    radar_hud._refresh_hit_targets(g)
+
+                    action = radar_hud.handle_tap(*g["speaker_c"])
+                    self.assertEqual(action, "speaker")
+                    self.assertEqual(radar_hud.volume_popover_channel(), "speaker")
+
+                    muted = radar_hud.handle_long_press_mute(*g["chime_c"])
+                    self.assertEqual(muted, "chime")
+                    self.assertFalse(settings.hourly_chime_enabled())
+                    self.assertEqual(radar_hud.volume_popover_channel(), "speaker")
+
+
 if __name__ == "__main__":
     unittest.main()

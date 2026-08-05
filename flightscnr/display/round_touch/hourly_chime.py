@@ -262,18 +262,32 @@ def play_file_async(
     *,
     thread_name: str = "sfx",
     volume_pct: int | None = None,
+    apply_master: bool = True,
 ) -> None:
     """Play any audio file asynchronously (mixes with ATC when possible)."""
     if not path or not os.path.isfile(path):
         logger.debug("SFX skipped (missing file): %s", path)
         return
-    if not settings.master_sound_enabled():
+    if apply_master and not settings.master_sound_enabled():
         logger.debug("SFX skipped (master mute): %s", os.path.basename(path))
+        return
+    if volume_pct is None:
+        effective = (
+            settings.apply_master_gain(settings.hourly_chime_volume())
+            if apply_master
+            else settings.hourly_chime_volume()
+        )
+    else:
+        effective = (
+            settings.apply_master_gain(volume_pct) if apply_master else int(volume_pct)
+        )
+    if effective <= 0:
+        logger.debug("SFX skipped (volume 0): %s", os.path.basename(path))
         return
 
     def _run():
         with _play_lock:
-            _play_file(path, volume_pct=volume_pct)
+            _play_file(path, volume_pct=effective)
 
     threading.Thread(target=_run, name=thread_name, daemon=True).start()
 

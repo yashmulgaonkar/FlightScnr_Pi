@@ -1165,9 +1165,11 @@ def _mpv_softvol(ui_percent: float | int) -> float:
 
 
 def _effective_atc_ui_volume(ui_percent: float | int | None = None) -> float:
-    """UI volume for mpv — 0 while the HUD master mute is on."""
+    """UI volume for mpv — 0 while master/ATC mute is on; else scaled by master gain."""
     settings = _settings()
     if not settings.master_sound_enabled():
+        return 0.0
+    if not settings.atc_sound_enabled():
         return 0.0
     if ui_percent is None:
         try:
@@ -1175,9 +1177,14 @@ def _effective_atc_ui_volume(ui_percent: float | int | None = None) -> float:
         except Exception:
             ui_percent = 100
     try:
-        return float(ui_percent)
+        ui = float(ui_percent)
     except (TypeError, ValueError):
-        return 100.0
+        ui = 100.0
+    try:
+        gain = float(settings.master_gain_factor())
+    except Exception:
+        gain = 1.0
+    return max(0.0, min(100.0, ui * gain))
 
 
 def set_volume(percent: int, *, persist: bool = True) -> int:

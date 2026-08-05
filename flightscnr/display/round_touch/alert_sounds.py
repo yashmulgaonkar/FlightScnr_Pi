@@ -56,10 +56,11 @@ def _play(
     thread_name: str,
     respect_off_hours: bool = True,
 ) -> None:
-    if volume_pct <= 0:
-        return
     if not settings.master_sound_enabled():
         logger.debug("Alert SFX skipped (master mute): %s", os.path.basename(path))
+        return
+    effective = settings.apply_master_gain(volume_pct)
+    if effective <= 0:
         return
     if respect_off_hours and _silenced():
         logger.debug("Alert SFX skipped (off-hours): %s", os.path.basename(path))
@@ -68,8 +69,12 @@ def _play(
         from display.round_touch import hourly_chime
 
         # Play even when ATC is off/stopped — same PipeWire mix path either way.
+        # Master gain already applied; skip a second master gate in play_file_async.
         hourly_chime.play_file_async(
-            path, thread_name=thread_name, volume_pct=volume_pct
+            path,
+            thread_name=thread_name,
+            volume_pct=effective,
+            apply_master=False,
         )
     except Exception:
         logger.debug("Alert SFX play failed", exc_info=True)

@@ -225,6 +225,11 @@ class RoundTouchDisplay:
         self._radar_hud_layout_drag = False
         self._hud_opacity_slider_active = False
         self._hud_volume_slider_kind: str | None = None
+        # Long-press mute on the right-side HUD icons (priority over map pan).
+        self._hud_mute_channel: str | None = None
+        self._hud_mute_down_at: float | None = None
+        self._hud_mute_fired = False
+        self._suppress_next_radar_tap = False
 
         radar._init_sweep()
         try:
@@ -1424,13 +1429,22 @@ class RoundTouchDisplay:
     def _apply_radar_hud_volume(self, x: int, *, persist: bool = True) -> bool:
         from utilities import atc_audio
 
-        value = radar_hud.volume_at_x(x)
-        if value is None:
+        channel = radar_hud.volume_popover_channel()
+        if not channel:
             return False
-        radar_hud.note_volume_activity()
-        if value == settings.atc_volume():
+        before = settings.hud_channel_volume(channel)
+        value = radar_hud.apply_volume_at_x(x, persist=persist)
+        if value is None or value == before:
             return False
-        atc_audio.set_volume(value, persist=persist)
+        # Master gain and ATC mute/volume affect the live mpv softvol path.
+        if channel in ("speaker", "atc"):
+            try:
+                if channel == "atc":
+                    atc_audio.set_volume(value, persist=persist)
+                else:
+                    atc_audio.reassert_output_levels()
+            except Exception:
+                pass
         return True
 
     def _update_radar_hud_volume_drag(self) -> bool:
@@ -1440,9 +1454,15 @@ class RoundTouchDisplay:
         if not self.input.is_dragging():
             if self._radar_hud_volume_drag:
                 self._radar_hud_volume_drag = False
-                from utilities import atc_audio
+                channel = radar_hud.volume_popover_channel()
+                if channel == "atc":
+                    from utilities import atc_audio
 
-                atc_audio.set_volume(settings.atc_volume(), persist=True)
+                    atc_audio.set_volume(settings.atc_volume(), persist=True)
+                elif channel:
+                    settings.set_hud_channel_volume(
+                        channel, settings.hud_channel_volume(channel), persist=True
+                    )
                 self.input.consume_scroll_drag()
                 return True
             return False
@@ -1807,10 +1827,79 @@ class RoundTouchDisplay:
 
     def _intentional_hold_active(self) -> bool:
         """Ghost filter: allow still finger during long-press candidate / pan."""
+        if self._hud_mute_channel is not None:
+            return self.input.max_travel() < float(
+                input_handler.gesture_threshold_px()
+            ) * long_press_pan.HOLD_TRAVEL_FRAC
         return self._long_press_pan.intentional_hold_active(
             travel_px=self.input.max_travel(),
             threshold_px=float(input_handler.gesture_threshold_px()),
         )
+
+    def _clear_hud_mute_hold(self) -> None:
+        self._hud_mute_channel = None
+        self._hud_mute_down_at = None
+        self._hud_mute_fired = False
+
+    def _begin_hud_mute_hold(self, x: int, y: int) -> bool:
+        """Start a long-press mute candidate when the finger is on a HUD icon."""
+        if (
+            self.screen != SCREEN_RADAR
+            or self._radar_modal_active()
+            or not settings.radar_hud_enabled()
+            or settings.radar_hud_arrange()
+        ):
+            self._clear_hud_mute_hold()
+            return False
+        channel = radar_hud.hit_right_icon(x, y)
+        if channel is None:
+            self._clear_hud_mute_hold()
+            return False
+        self._hud_mute_channel = channel
+        self._hud_mute_down_at = time.time()
+        self._hud_mute_fired = False
+        # HUD mute owns the hold — do not arm map pan.
+        self._long_press_pan.clear_candidate()
+        return True
+
+    def _tick_hud_mute_hold(self) -> bool:
+        """Fire mute after a still 500 ms hold on a HUD icon. Returns True if redraw."""
+        if self._hud_mute_channel is None or self._hud_mute_down_at is None:
+            return False
+        if (
+            self.screen != SCREEN_RADAR
+            or self._radar_modal_active()
+            or not self.input.is_dragging()
+        ):
+            if self._hud_mute_fired:
+                self._suppress_next_radar_tap = True
+                self.input.suppress_finish_result()
+            self._clear_hud_mute_hold()
+            return False
+        threshold = float(input_handler.gesture_threshold_px())
+        if self.input.max_travel() >= threshold * long_press_pan.HOLD_TRAVEL_FRAC:
+            # Finger moved — abandon mute hold (may become a swipe / pan).
+            self._clear_hud_mute_hold()
+            return False
+        if self._hud_mute_fired:
+            return False
+        if (time.time() - self._hud_mute_down_at) * 1000.0 < long_press_pan.HOLD_MS:
+            return False
+        channel = self._hud_mute_channel
+        settings.toggle_hud_channel_mute(channel)
+        if channel in ("speaker", "atc"):
+            try:
+                from utilities import atc_audio
+
+                atc_audio.set_volume(settings.atc_volume(), persist=False)
+            except Exception:
+                pass
+        self._hud_mute_fired = True
+        self.input.suppress_finish_result()
+        self._long_press_pan.clear_candidate()
+        radar.invalidate_frame_layer()
+        self._note_activity()
+        return True
 
     def _tick_long_press_pan(self) -> bool:
         """Arm map pan after a still hold on radar. Returns True if newly armed."""
@@ -1820,6 +1909,10 @@ class RoundTouchDisplay:
             and settings.radar_hud_enabled()
             and settings.radar_hud_arrange()
         ):
+            self._long_press_pan.clear_candidate()
+            return False
+        # HUD icon mute hold takes priority over map-pan long-press.
+        if self._hud_mute_channel is not None:
             self._long_press_pan.clear_candidate()
             return False
         second_finger = self.gestures.pinch.finger_count() > 1
@@ -2737,7 +2830,10 @@ class RoundTouchDisplay:
             self._note_activity()
             self._safe_draw()
         elif tap and self.screen == SCREEN_RADAR:
-            if self.pinch.should_suppress_tap():
+            if self._suppress_next_radar_tap:
+                self._suppress_next_radar_tap = False
+                tap = None
+            if tap and self.pinch.should_suppress_tap():
                 tap = None
             if tap and not self._radar_modal_active():
                 # Arrange mode: consume taps on HUD items so they don't open flights.
@@ -2761,10 +2857,13 @@ class RoundTouchDisplay:
                             self._note_activity()
                             if hud_action == "slider":
                                 self._apply_radar_hud_volume(tap[0], persist=True)
-                            elif hud_action == "atc":
-                                self._toggle_radar_hud_atc()
-                                radar.invalidate_frame_layer()
-                            elif hud_action in ("chime", "speaker", "alert", "dismiss"):
+                            elif hud_action in (
+                                "chime",
+                                "speaker",
+                                "alert",
+                                "atc",
+                                "dismiss",
+                            ):
                                 radar.invalidate_frame_layer()
                             self._safe_draw()
                         elif self._open_flight_or_fire_at(tap[0], tap[1]):
@@ -3346,6 +3445,7 @@ class RoundTouchDisplay:
                         ):
                             self._wake_for_off_hours_touch()
                         touch_debug.log_event(event)
+                        ptr_down = False
                         if self.screen == SCREEN_RADAR:
                             ptr_down = (
                                 not input_handler.use_finger_events()
@@ -3372,6 +3472,7 @@ class RoundTouchDisplay:
                                             self._long_press_pan.on_pointer_down()
                                     else:
                                         self._long_press_pan.clear_candidate()
+                                        self._clear_hud_mute_hold()
                                 else:
                                     self.gestures.on_pointer_down()
                                     if not self._radar_modal_active():
@@ -3379,6 +3480,10 @@ class RoundTouchDisplay:
                             elif ptr_up:
                                 self.gestures.on_pointer_up()
                                 self._long_press_pan.on_pointer_up()
+                                if self._hud_mute_fired:
+                                    self._suppress_next_radar_tap = True
+                                    self.input.suppress_finish_result()
+                                self._clear_hud_mute_hold()
                             elif (
                                 input_handler.use_finger_events()
                                 and event.type == pygame.MOUSEBUTTONUP
@@ -3388,7 +3493,20 @@ class RoundTouchDisplay:
                             ):
                                 self.gestures.on_pointer_up()
                                 self._long_press_pan.on_pointer_up()
+                                if self._hud_mute_fired:
+                                    self._suppress_next_radar_tap = True
+                                    self.input.suppress_finish_result()
+                                self._clear_hud_mute_hold()
                         self.gestures.handle_input_event(event)
+                        if (
+                            self.screen == SCREEN_RADAR
+                            and not self._radar_modal_active()
+                            and ptr_down
+                            and self.gestures.pinch.finger_count() <= 1
+                        ):
+                            pos = self.input.drag_pos()
+                            if pos is not None:
+                                self._begin_hud_mute_hold(*pos)
                         if (
                             self.screen == SCREEN_RADAR
                             and not self._radar_modal_active()
@@ -3399,6 +3517,7 @@ class RoundTouchDisplay:
                                 and self.gestures.pinch.finger_count() > 1
                             ):
                                 self._long_press_pan.clear_candidate()
+                                self._clear_hud_mute_hold()
                             scale_delta = self.gestures.handle_finger_event(event)
                             if scale_delta:
                                 self._apply_scale_step(scale_delta)
@@ -3406,7 +3525,7 @@ class RoundTouchDisplay:
                 _lt = self._loop_stage("loop_events", _lt)
                 _body_t = _lt
 
-                if self._tick_long_press_pan():
+                if self._tick_hud_mute_hold() or self._tick_long_press_pan():
                     self._safe_draw()
                     self._last_radar_draw = time.time()
 

@@ -23,6 +23,7 @@ from display.round_touch import draw as draw_mod, settings, theme
 _POPOVER_IDLE_S = 4.0
 
 _volume_popover = False
+_popover_channel: str | None = None
 _popover_until = 0.0
 _last_minute_key: str | None = None
 # Cached hit targets in logical coords (updated each draw).
@@ -32,6 +33,87 @@ _alert_rect = pygame.Rect(0, 0, 0, 0)
 _atc_rect = pygame.Rect(0, 0, 0, 0)
 _slider_track = pygame.Rect(0, 0, 0, 0)
 _hud_bounds = pygame.Rect(0, 0, 0, 0)
+
+_CHANNEL_LABELS = {
+    "speaker": "Master",
+    "chime": "Hourly Chime",
+    "alert": "Alert",
+    "atc": "ATC",
+}
+_CHANNEL_ICONS = {
+    "speaker": "volume",
+    "chime": "chime",
+    "alert": "alert",
+    "atc": "atc",
+}
+
+
+def volume_popover_open() -> bool:
+    return bool(_volume_popover)
+
+
+def volume_popover_channel() -> str | None:
+    return _popover_channel if _volume_popover else None
+
+
+def open_volume_popover(channel: str = "atc") -> str | None:
+    """Open (or switch) the HUD volume popover for ``channel``."""
+    global _volume_popover, _popover_channel, _popover_until
+    import time
+
+    key = str(channel or "").strip().lower()
+    if key not in settings.HUD_VOLUME_CHANNELS:
+        return None
+    _volume_popover = True
+    _popover_channel = key
+    _popover_until = time.time() + _POPOVER_IDLE_S
+    return key
+
+
+def close_volume_popover() -> None:
+    global _volume_popover, _popover_channel
+    _volume_popover = False
+    _popover_channel = None
+
+
+def note_volume_activity() -> None:
+    global _popover_until
+    import time
+
+    if _volume_popover:
+        _popover_until = time.time() + _POPOVER_IDLE_S
+
+
+def tick_popover_timeout() -> bool:
+    """Close popover on idle; return True if state changed."""
+    global _volume_popover, _popover_channel
+    import time
+
+    if not _volume_popover:
+        return False
+    if time.time() >= _popover_until:
+        _volume_popover = False
+        _popover_channel = None
+        return True
+    return False
+
+
+def hit_right_icon(x: int, y: int) -> str | None:
+    """Return the right-side HUD channel under ``(x, y)``, or None."""
+    if _speaker_rect.width <= 0:
+        g = _geometry(_wx_snapshot())
+        _refresh_hit_targets(g)
+    if hit_speaker(x, y):
+        return "speaker"
+    if hit_chime(x, y):
+        return "chime"
+    if hit_alert(x, y):
+        return "alert"
+    if hit_atc(x, y):
+        return "atc"
+    return None
+
+
 # Transparent HUD stamp (curved pill + icons). Blitted after the sweep so the
 # beam passes under the frost without a rectangular clip.
 _overlay: pygame.Surface | None = None
@@ -57,44 +139,6 @@ _ASSETS_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "assets")
 )
 _icon_cache: dict[tuple[str, int], pygame.Surface] = {}
-
-
-def volume_popover_open() -> bool:
-    return bool(_volume_popover)
-
-
-def open_volume_popover() -> None:
-    global _volume_popover, _popover_until
-    import time
-
-    _volume_popover = True
-    _popover_until = time.time() + _POPOVER_IDLE_S
-
-
-def close_volume_popover() -> None:
-    global _volume_popover
-    _volume_popover = False
-
-
-def note_volume_activity() -> None:
-    global _popover_until
-    import time
-
-    if _volume_popover:
-        _popover_until = time.time() + _POPOVER_IDLE_S
-
-
-def tick_popover_timeout() -> bool:
-    """Close popover on idle; return True if state changed."""
-    global _volume_popover
-    import time
-
-    if not _volume_popover:
-        return False
-    if time.time() >= _popover_until:
-        _volume_popover = False
-        return True
-    return False
 
 
 def minute_key(now: datetime | None = None) -> str:
@@ -1097,7 +1141,7 @@ def draw_hud(
             alpha=255 if settings.alert_sfx_enabled() else _OFF_ICON_ALPHA,
             light=light_icons,
         )
-        # ATC play/stop — full opacity while playing, dimmed when stopped.
+        # ATC play/stop — full opacity while playing, dimmed when stopped/muted.
         atc_playing = False
         try:
             from utilities import atc_audio
@@ -1105,7 +1149,12 @@ def draw_hud(
             atc_playing = bool(atc_audio.is_playing())
         except Exception:
             atc_playing = False
-        if not (master_on and settings.atc_volume() > 0):
+        atc_sound_on = (
+            master_on
+            and settings.atc_sound_enabled()
+            and settings.atc_volume() > 0
+        )
+        if not atc_sound_on:
             atc_alpha = _OFF_ICON_ALPHA
         else:
             atc_alpha = 255 if atc_playing else 120
@@ -1129,19 +1178,33 @@ def draw_hud(
             .inflate(theme.s(48), theme.s(24))
         )
     _slider_track = pygame.Rect(0, 0, 0, 0)
-    if include_popover and _volume_popover:
+    if include_popover and _volume_popover and _popover_channel:
         color, fill_rgba = _hud_chrome()
+        light_icons = settings.radar_hud_dark()
+        channel = _popover_channel
         track_w = theme.s(120)
         track_h = theme.s(10)
-        _slider_track = pygame.Rect(0, 0, track_w, track_h)
-        _slider_track.center = g["pop_c"]
+        label_font = draw_mod.load_font(max(8, theme.s(10)), bold=True)
+        pct_font = draw_mod.load_font(max(8, theme.s(10)), bold=True)
+        label = _CHANNEL_LABELS.get(channel, channel.title())
+        vol = settings.hud_channel_volume(channel)
+        label_img = label_font.render(label, True, color)
+        pct_img = pct_font.render(f"{vol}%", True, color)
+        icon_name = _CHANNEL_ICONS.get(channel, "volume")
+        pop_icon_px = theme.s(18)
+        gap = theme.s(8)
         pad = theme.s(12)
-        back = pygame.Rect(
-            _slider_track.x - pad,
-            _slider_track.y - pad,
-            _slider_track.w + pad * 2,
-            _slider_track.h + pad * 2,
+        header_h = max(pop_icon_px, label_img.get_height(), pct_img.get_height())
+        back_w = (
+            max(
+                track_w,
+                label_img.get_width() + gap + pct_img.get_width() + pop_icon_px + gap,
+            )
+            + pad * 2
         )
+        back_h = pad + header_h + gap + track_h + pad
+        back = pygame.Rect(0, 0, back_w, back_h)
+        back.center = g["pop_c"]
         pop = pygame.Surface((back.w * 2, back.h * 2), pygame.SRCALPHA)
         pygame.draw.rect(
             pop,
@@ -1162,9 +1225,31 @@ def draw_hud(
             border_radius=theme.s(16),
         )
         surface.blit(pygame.transform.smoothscale(pop, back.size), back.topleft)
+
+        header_y = back.y + pad + header_h // 2
+        icon_x = back.x + pad + pop_icon_px // 2
+        _blit_icon(
+            surface,
+            icon_name,
+            (icon_x, header_y),
+            pop_icon_px,
+            alpha=_OFF_ICON_ALPHA if settings.hud_channel_muted(channel) else 255,
+            light=light_icons,
+        )
+        label_x = icon_x + pop_icon_px // 2 + gap
+        surface.blit(
+            label_img,
+            label_img.get_rect(midleft=(label_x, header_y)),
+        )
+        surface.blit(
+            pct_img,
+            pct_img.get_rect(midright=(back.right - pad, header_y)),
+        )
+
+        _slider_track = pygame.Rect(0, 0, track_w, track_h)
+        _slider_track.midtop = (back.centerx, back.y + pad + header_h + gap)
         track_col = (70, 74, 80) if settings.radar_hud_dark() else (200, 205, 210)
         pygame.draw.rect(surface, track_col, _slider_track, border_radius=theme.s(4))
-        vol = settings.atc_volume()
         fill_w = int(_slider_track.w * max(0, min(100, vol)) / 100)
         if fill_w > 0:
             fill = pygame.Rect(_slider_track.x, _slider_track.y, fill_w, _slider_track.h)
@@ -1317,6 +1402,15 @@ def volume_at_x(x: int) -> int | None:
     return max(0, min(100, int(round(t * 100))))
 
 
+def apply_volume_at_x(x: int, *, persist: bool = True) -> int | None:
+    """Write the active popover channel from a slider x. Returns new volume or None."""
+    value = volume_at_x(x)
+    if value is None or not _popover_channel:
+        return None
+    note_volume_activity()
+    return settings.set_hud_channel_volume(_popover_channel, value, persist=persist)
+
+
 def handle_tap(x: int, y: int) -> str | None:
     """Handle a radar tap. Returns action name or None if not consumed."""
     if not settings.radar_hud_enabled():
@@ -1324,29 +1418,38 @@ def handle_tap(x: int, y: int) -> str | None:
     # Arrange mode: taps never fire controls (drag path owns the finger).
     if settings.radar_hud_arrange():
         return None
-    if hit_chime(x, y):
-        settings.toggle_hourly_chime_enabled()
-        return "chime"
-    if hit_alert(x, y):
-        settings.toggle_alert_sfx_enabled()
-        return "alert"
-    if hit_atc(x, y):
-        return "atc"
-    if hit_speaker(x, y):
-        # Volume icon = master sound on/off (ATC volume stays in Settings).
-        close_volume_popover()
-        settings.toggle_master_sound_enabled()
-        try:
-            from utilities import atc_audio
-
-            # Push effective volume to mpv immediately when muting/unmuting.
-            atc_audio.set_volume(settings.atc_volume(), persist=False)
-        except Exception:
-            pass
-        return "speaker"
+    channel = hit_right_icon(x, y)
+    if channel is not None:
+        # Tap opens / switches the volume popover for that channel.
+        if _volume_popover and _popover_channel == channel:
+            close_volume_popover()
+            return "dismiss"
+        open_volume_popover(channel)
+        return channel
     if hit_volume_slider(x, y):
         return "slider"
     if _volume_popover and not hit_hud(x, y):
         close_volume_popover()
         return "dismiss"
     return None
+
+
+def handle_long_press_mute(x: int, y: int) -> str | None:
+    """Toggle mute for the HUD icon under ``(x, y)``. Returns channel or None."""
+    if not settings.radar_hud_enabled():
+        return None
+    if settings.radar_hud_arrange():
+        return None
+    channel = hit_right_icon(x, y)
+    if channel is None:
+        return None
+    settings.toggle_hud_channel_mute(channel)
+    if channel in ("speaker", "atc"):
+        try:
+            from utilities import atc_audio
+
+            # Push effective volume immediately; mute never wipes saved levels.
+            atc_audio.set_volume(settings.atc_volume(), persist=False)
+        except Exception:
+            pass
+    return channel
