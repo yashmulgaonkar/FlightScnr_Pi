@@ -25,6 +25,7 @@ from utilities.route_enrichment import (
     needs_route_enrichment,
 )
 from display.round_touch import (
+    disclaimer_acceptance,
     draw,
     frame_debug,
     ghost_touch_filter,
@@ -87,6 +88,7 @@ FRAME_DEBUG = os.environ.get("FLIGHTSCNR_FRAME_DEBUG", "").lower() in ("1", "tru
 _HITCH_LOG = os.environ.get("FLIGHTSCNR_HITCH_LOG", "/tmp/flightscnr-hitch.log")
 _HITCH_GAP_S = float(os.environ.get("FLIGHTSCNR_HITCH_GAP_MS", "48")) / 1000.0
 BOOT_SPLASH_S = 3
+DISCLAIMER_AUTO_CONTINUE_S = 8
 AUTO_IDLE_MIN_RADAR_S = 5
 OFF_HOURS_TOUCH_WAKE_S = 300
 
@@ -241,11 +243,22 @@ class RoundTouchDisplay:
             logger.exception("Wi-Fi setup probe failed")
             enter_setup = False
         # Require Accept every boot (not skipped after a prior accept).
-        # No FR24/AIS/ATC/chime/maps until _accept_safety_disclaimer().
+        # No FR24/AIS/ATC/chime/maps/update-check until _accept_safety_disclaimer().
         self.screen = SCREEN_DISCLAIMER
+        self._disclaimer_remembered_boot = disclaimer_acceptance.is_remembered()
+        self._disclaimer_remember_checked = self._disclaimer_remembered_boot
+        self._disclaimer_deadline: float | None = None
+        self._disclaimer_countdown_armed = False
+        self._update_check_started = False
         self._pending_wifi_setup = enter_setup
         self._apply_brightness()
         self._safe_draw()
+
+    def _start_update_check_thread(self) -> None:
+        """Start periodic GitHub update checks (once, after disclaimer unlock)."""
+        if self._update_check_started:
+            return
+        self._update_check_started = True
         Thread(
             target=self._update_check_loop,
             name="update-check",
@@ -296,6 +309,8 @@ class RoundTouchDisplay:
     def _start_session_after_disclaimer(self) -> None:
         """Kick off deferred boot work only after Accept."""
         self._session_unlocked = True
+        self._disclaimer_deadline = None
+        self._start_update_check_thread()
         try:
             self.overhead.grab_data()
         except Exception:
@@ -391,13 +406,49 @@ class RoundTouchDisplay:
         wildfire_overlay.request_refresh(force=True)
         self._open_screen(SCREEN_RADAR)
 
-    def _accept_safety_disclaimer(self) -> None:
+    def _disclaimer_countdown_remaining(self) -> int | None:
+        """Whole seconds left on remembered auto-continue, or None if inactive."""
+        if self._disclaimer_deadline is None:
+            return None
+        return max(0, int(math.ceil(self._disclaimer_deadline - time.time())))
+
+    def _arm_disclaimer_countdown_if_needed(self) -> None:
+        """Start the auto-continue deadline once the disclaimer is visible after splash."""
+        if self._disclaimer_countdown_armed:
+            return
+        if time.time() < self._boot_until:
+            return
+        # Arm from the boot-time remember state; checkbox toggles during the
+        # countdown do not cancel or restart the timer.
+        if not self._disclaimer_remembered_boot:
+            return
+        self._disclaimer_countdown_armed = True
+        self._disclaimer_deadline = time.time() + DISCLAIMER_AUTO_CONTINUE_S
+
+    def _toggle_disclaimer_remember(self) -> None:
+        """Touch-only checkbox; during countdown, value is saved when the timer ends."""
+        self._disclaimer_remember_checked = not self._disclaimer_remember_checked
+        self._safe_draw()
+
+    def _accept_safety_disclaimer(self, *, from_auto: bool = False) -> None:
         """Continue past the boot disclaimer for this session only."""
         if self._session_unlocked:
             return
-        # Record acceptance for diagnostics; boot still re-shows every start.
-        settings.set_safety_disclaimer_accepted(True)
-        logger.info("Safety disclaimer accepted for this session")
+        # Persist CURRENT_VERSION only when the on-device checkbox is checked
+        # (manual Accept, or the checkbox state at countdown expiry).
+        if self._disclaimer_remember_checked:
+            disclaimer_acceptance.remember_current()
+            logger.info(
+                "Safety disclaimer accepted (remembered v%s)%s",
+                disclaimer_acceptance.CURRENT_VERSION,
+                " [auto]" if from_auto else "",
+            )
+        else:
+            disclaimer_acceptance.clear()
+            logger.info(
+                "Safety disclaimer accepted (not remembered)%s",
+                " [auto]" if from_auto else "",
+            )
         self._start_session_after_disclaimer()
         want_wifi = self._pending_wifi_setup
         self._pending_wifi_setup = False
@@ -416,6 +467,17 @@ class RoundTouchDisplay:
             wildfire_overlay.request_refresh(force=True)
             self._open_screen(SCREEN_RADAR)
         self._safe_draw()
+
+    def _tick_disclaimer(self) -> None:
+        """Arm / expire remembered auto-continue while the gate is up."""
+        if self.screen != SCREEN_DISCLAIMER or self._session_unlocked:
+            return
+        self._arm_disclaimer_countdown_if_needed()
+        if (
+            self._disclaimer_deadline is not None
+            and time.time() >= self._disclaimer_deadline
+        ):
+            self._accept_safety_disclaimer(from_auto=True)
 
     def _start_try_saved_wifi(self) -> None:
         """Tear down the AP and retry saved client profiles (off the UI thread)."""
@@ -440,7 +502,8 @@ class RoundTouchDisplay:
     def _tick_wifi_link(self) -> None:
         """If client Wi-Fi/ethernet stays down, reopen the setup hotspot after a grace."""
         if (
-            self._wifi_setup_mode
+            not self._session_unlocked
+            or self._wifi_setup_mode
             or self.screen in (SCREEN_WIFI_SETUP, SCREEN_DISCLAIMER)
         ):
             return
@@ -702,7 +765,11 @@ class RoundTouchDisplay:
 
         bezel_applied = False
         if self.screen == SCREEN_DISCLAIMER:
-            disclaimer.draw_disclaimer(self.surface)
+            disclaimer.draw_disclaimer(
+                self.surface,
+                remember_checked=self._disclaimer_remember_checked,
+                countdown_s=self._disclaimer_countdown_remaining(),
+            )
         elif self.screen == SCREEN_WIFI_SETUP:
             wifi_setup_screen.draw_wifi_setup(
                 self.surface, try_saved_busy=self._wifi_try_saved_busy
@@ -2693,10 +2760,17 @@ class RoundTouchDisplay:
         if time.time() < self._boot_until:
             return
         if self.screen == SCREEN_DISCLAIMER:
+            # Consume all gestures; only checkbox / Accept hit rects act.
+            # During a remembered countdown there is no Accept — wait it out.
             gesture = self.input.consume_gesture()
             if gesture and gesture[0] == "tap":
                 tap = gesture[1]
-                if disclaimer.hit_accept(tap[0], tap[1]):
+                if disclaimer.hit_remember(tap[0], tap[1]):
+                    self._toggle_disclaimer_remember()
+                elif (
+                    self._disclaimer_deadline is None
+                    and disclaimer.hit_accept(tap[0], tap[1])
+                ):
                     self._accept_safety_disclaimer()
             return
         if self.screen == SCREEN_WIFI_SETUP:
@@ -3735,7 +3809,14 @@ class RoundTouchDisplay:
                     self._safe_draw()
                     time.sleep(0.05)
                 elif self.screen == SCREEN_DISCLAIMER:
-                    if (now - self._last_static_draw) >= 1.0:
+                    self._tick_disclaimer()
+                    if self.screen != SCREEN_DISCLAIMER:
+                        continue
+                    # Redraw often enough for a visible Continuing in 8…1 countdown.
+                    redraw_iv = (
+                        0.2 if self._disclaimer_deadline is not None else 1.0
+                    )
+                    if (now - self._last_static_draw) >= redraw_iv:
                         self._safe_draw()
                         self._last_static_draw = now
                     time.sleep(0.05)

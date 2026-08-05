@@ -1453,6 +1453,30 @@ def bluetooth_route():
     return jsonify(result)
 
 
+@app.get("/disclaimer/json")
+def disclaimer_json():
+    """Status of on-device remembered disclaimer acceptance (read-only)."""
+    from display.round_touch import disclaimer_acceptance
+
+    return jsonify(disclaimer_acceptance.status())
+
+
+@app.post("/disclaimer/clear")
+def disclaimer_clear():
+    """Clear saved disclaimer acceptance (version 0). Portal cannot enable/remember."""
+    from display.round_touch import disclaimer_acceptance, settings
+
+    disclaimer_acceptance.clear()
+    settings.request_reload()
+    payload = disclaimer_acceptance.status()
+    payload["ok"] = True
+    payload["message"] = (
+        "Saved disclaimer acceptance cleared. "
+        "The next boot will wait for Accept (no countdown)."
+    )
+    return jsonify(payload)
+
+
 @app.post("/system/reboot")
 def system_reboot():
     from utilities import system_control

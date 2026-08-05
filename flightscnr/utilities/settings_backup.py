@@ -192,6 +192,11 @@ def apply_user_settings(
         if not isinstance(value, dict):
             skipped.append(filename)
             continue
+        # Never restore remembered disclaimer consent from a backup / portal upload.
+        if key == "round_touch_settings":
+            value = dict(value)
+            value["safety_disclaimer_version"] = 0
+            value.pop("safety_disclaimer_accepted", None)
         mode = 0o600 if key == "secrets" else 0o666
         _atomic_write_json(root / filename, value, mode=mode)
         written.append(filename)

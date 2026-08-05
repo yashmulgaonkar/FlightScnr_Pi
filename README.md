@@ -40,6 +40,7 @@ The UI is designed for a **4in round LCD with touch** (default layout: **720x720
 | **About / details**           | Swipe up from radar                         | Version, network, API status, portal URL                                                                |
 | **Settings**                  | Swipe left from About                       | Brightness, timeouts, color theme, facing direction, display options, ATC audio, system (multi-page)    |
 | **Wi-Fi setup**               | Automatic when offline                      | QR code to join the FlightScnr setup hotspot, then finish on your phone                                 |
+| **Safety disclaimer**         | Every boot (before radar)                   | Required Accept gate; optional on-device **Don't show again** enables an eight-second countdown (no Accept) on later boots |
 
 
 **Gestures and controls**
@@ -51,6 +52,7 @@ The UI is designed for a **4in round LCD with touch** (default layout: **720x720
 - **Footer buttons** on detail, tracked, and settings screens (PREV / NEXT / RADAR / PIN)
 - **Auto-return** to clock when no aircraft are visible (optional, portal setting)
 - **Off-hours** schedule can dim the panel, turn it off, or force the clock screen at night
+- **Safety disclaimer** — shown every boot. Operational features wait until Accept. On the physical display only, check **Don't show again** then tap Accept to remember the current disclaimer version. Matching boots show the checkbox plus a **Continuing in 8…1** countdown and **no Accept button** — the session unlocks when the timer ends, and whatever checkbox state you left is saved then (unchecked clears the saved choice for the next boot). Changing the disclaimer text bumps the version and invalidates the saved choice. The web portal's System card can also **Clear saved disclaimer acceptance**, but cannot enable or restore it.
 
 ![Radar screen](docs/images/flightscnrpi.jpg)
 
@@ -128,7 +130,7 @@ Open from any device on your LAN:
 | **Tracking**          | Track a callsign; **route search** (origin + destination) for live flights                               |
 | **API keys**          | FR24, Tomorrow.io, AirLabs, FlightAware / OpenSky (route fallback), aisstream.io, NASA FIRMS (wildfires outside USA/Canada) - save or save & restart |
 | **Updates**           | Check GitHub for new releases; **Update Now** runs `git pull` and re-syncs (git checkout required)       |
-| **System**            | **Reboot** or **Shutdown** the Pi remotely                                                               |
+| **System**            | Download/upload settings backup; **Clear saved disclaimer acceptance** (cannot enable remember from the portal); **Reboot** or **Shutdown** the Pi remotely |
 
 
 **Additional web pages**

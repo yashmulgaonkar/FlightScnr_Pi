@@ -654,6 +654,12 @@
             </div>
             <div id="export-status" class="status"></div>
             <hr style="border:none;border-top:1px solid var(--line, #333);margin:1rem 0">
+            <p class="hint">Safety disclaimer: always shown at boot. On the touchscreen you can check <strong>Don't show again</strong> then tap Accept to enable an eight-second countdown on later boots (no Accept during the countdown — the checkbox state is saved when the timer ends). The portal can only clear that saved choice — it cannot enable or restore it.</p>
+            <p id="disclaimer-status-line" class="hint" style="margin-top:.35rem">Disclaimer acceptance: …</p>
+            <div class="track-row" style="margin-top:.55rem">
+                <button class="btn" id="btn-disclaimer-clear" type="button">Clear saved disclaimer acceptance</button>
+            </div>
+            <hr style="border:none;border-top:1px solid var(--line, #333);margin:1rem 0">
             <p class="hint">Relaunch the app, or restart / power off this Raspberry Pi. Reboot and shutdown take the display and portal offline.</p>
             <div class="track-row" style="margin-top:.55rem" id="system-actions-row">
                 <button class="btn btn-primary" id="btn-restart-app" type="button">Relaunch app</button>
@@ -1033,6 +1039,10 @@ async function loadAll() {
 
     try {
         await loadBluetooth();
+    } catch (_) {}
+
+    try {
+        await loadDisclaimerStatus();
     } catch (_) {}
 
     try {
@@ -1617,6 +1627,8 @@ let pendingSystemAction = null;
 function showSystemConfirm(show, action) {
     $("system-confirm-row").classList.toggle("hidden", !show);
     $("system-actions-row").classList.toggle("hidden", show);
+    const clearBtn = $("btn-disclaimer-clear");
+    if (clearBtn) clearBtn.disabled = !!show;
     if (!show) {
         pendingSystemAction = null;
         return;
@@ -1624,14 +1636,17 @@ function showSystemConfirm(show, action) {
     pendingSystemAction = action;
     const msg = $("system-confirm-msg");
     const yes = $("btn-system-confirm-yes");
-    yes.classList.toggle("btn-danger", action === "shutdown");
-    yes.classList.toggle("btn-primary", action !== "shutdown");
+    yes.classList.toggle("btn-danger", action === "shutdown" || action === "clear-disclaimer");
+    yes.classList.toggle("btn-primary", action !== "shutdown" && action !== "clear-disclaimer");
     if (action === "restart-app") {
         msg.textContent = "Relaunch FlightScnr? The display and portal will reconnect in a few seconds.";
         yes.textContent = "Relaunch";
     } else if (action === "reboot") {
         msg.textContent = "Are you sure you want to reboot this Raspberry Pi?";
         yes.textContent = "Reboot";
+    } else if (action === "clear-disclaimer") {
+        msg.textContent = "Clear saved disclaimer acceptance? The next boot will wait for Accept with no countdown.";
+        yes.textContent = "Clear";
     } else {
         msg.textContent = "Are you sure you want to shut down this Raspberry Pi?";
         yes.textContent = "Shutdown";
@@ -1648,6 +1663,16 @@ async function confirmSystemAction() {
     if (!action) return;
     showSystemConfirm(false);
     clearStatus("system-status");
+    if (action === "clear-disclaimer") {
+        try {
+            const data = await jsonFetch("/disclaimer/clear", { method: "POST" });
+            showStatus("system-status", data.message || "Disclaimer acceptance cleared.");
+            await loadDisclaimerStatus();
+        } catch (e) {
+            showStatus("system-status", e.message, true);
+        }
+        return;
+    }
     setSystemButtonsDisabled(true);
     const labels = { reboot: "reboot", shutdown: "shut down", "restart-app": "relaunch" };
     const label = labels[action] || action;
@@ -1661,6 +1686,23 @@ async function confirmSystemAction() {
     } catch (e) {
         showStatus("system-status", e.message, true);
         setSystemButtonsDisabled(false);
+    }
+}
+
+async function loadDisclaimerStatus() {
+    const line = $("disclaimer-status-line");
+    if (!line) return;
+    try {
+        const st = await jsonFetch("/disclaimer/json");
+        if (st.remembered) {
+            line.textContent =
+                `Disclaimer acceptance: remembered (v${st.stored_version}) — next boot shows an eight-second countdown.`;
+        } else {
+            line.textContent =
+                "Disclaimer acceptance: not remembered — next boot waits for Accept.";
+        }
+    } catch (_) {
+        line.textContent = "Disclaimer acceptance: unavailable.";
     }
 }
 
@@ -1941,6 +1983,9 @@ $("btn-update-confirm-no").addEventListener("click", () => showUpdateConfirm(fal
 $("btn-restart-app").addEventListener("click", () => promptSystemAction("restart-app"));
 $("btn-reboot").addEventListener("click", () => promptSystemAction("reboot"));
 $("btn-shutdown").addEventListener("click", () => promptSystemAction("shutdown"));
+if ($("btn-disclaimer-clear")) {
+    $("btn-disclaimer-clear").addEventListener("click", () => promptSystemAction("clear-disclaimer"));
+}
 $("btn-system-confirm-yes").addEventListener("click", confirmSystemAction);
 $("btn-system-confirm-no").addEventListener("click", () => showSystemConfirm(false));
 

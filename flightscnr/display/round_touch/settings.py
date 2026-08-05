@@ -313,8 +313,9 @@ _defaults = {
     "bluetooth_speaker_name": "",
     # Active playback route for ATC / chime: "usb" | "bluetooth".
     "audio_route": "usb",
-    # First-run safety disclaimer (not for safety-critical / certified use).
-    "safety_disclaimer_accepted": False,
+    # Safety disclaimer "Don't show again" version (0 = not remembered).
+    # Matches disclaimer_acceptance.CURRENT_VERSION when opted in on-device.
+    "safety_disclaimer_version": 0,
 }
 
 # Live preview while calibrating facing (not persisted until save).
@@ -840,13 +841,22 @@ def _load():
         state["audio_route"] = route
     if "audio_route" not in data:
         migrated = True
-    if "safety_disclaimer_accepted" not in data:
-        state["safety_disclaimer_accepted"] = False
+    # Legacy boolean alone never counts as remembered; drop it for versioned key.
+    if "safety_disclaimer_accepted" in state:
+        del state["safety_disclaimer_accepted"]
         migrated = True
-    else:
-        state["safety_disclaimer_accepted"] = bool(
-            state.get("safety_disclaimer_accepted")
-        )
+    try:
+        version = int(state.get("safety_disclaimer_version", 0) or 0)
+    except (TypeError, ValueError):
+        version = 0
+    if version < 0:
+        version = 0
+    if (
+        "safety_disclaimer_version" not in data
+        or state.get("safety_disclaimer_version") != version
+    ):
+        migrated = True
+    state["safety_disclaimer_version"] = version
     if color_presets.migrate_theme_index(state):
         migrated = True
     if migrated:
@@ -941,7 +951,7 @@ def _settings_snapshot(state: dict) -> tuple:
         str(state.get("bluetooth_speaker_mac") or "").strip().upper(),
         str(state.get("bluetooth_speaker_name") or "").strip(),
         str(state.get("audio_route") or "usb").strip().lower(),
-        bool(state.get("safety_disclaimer_accepted", False)),
+        int(state.get("safety_disclaimer_version", 0) or 0),
     )
 
 
@@ -2405,15 +2415,39 @@ def set_audio_route(route: str) -> str:
     return value
 
 
+def safety_disclaimer_version() -> int:
+    """Persisted disclaimer acceptance version (0 = not remembered)."""
+    try:
+        value = int(_state.get("safety_disclaimer_version", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return value if value >= 0 else 0
+
+
+def set_safety_disclaimer_version(version: int) -> None:
+    """Persist disclaimer acceptance version via RMW (portal/display safe)."""
+    try:
+        value = int(version)
+    except (TypeError, ValueError):
+        value = 0
+    if value < 0:
+        value = 0
+    _rmw_save({"safety_disclaimer_version": value})
+
+
 def safety_disclaimer_accepted() -> bool:
-    """True if Accept was tapped at least once (diagnostic only; boot always shows)."""
-    return bool(_state.get("safety_disclaimer_accepted", False))
+    """True when a non-zero acceptance version is stored (diagnostic)."""
+    return safety_disclaimer_version() > 0
 
 
 def set_safety_disclaimer_accepted(accepted: bool) -> None:
-    """Record Accept for this session; does not skip the next boot disclaimer."""
-    _state["safety_disclaimer_accepted"] = bool(accepted)
-    _save(_state)
+    """Legacy helper: ``False`` clears; ``True`` does not write CURRENT_VERSION.
+
+    Only on-device ``disclaimer_acceptance.remember_current()`` may persist
+    remembered acceptance after the touchscreen checkbox + Accept.
+    """
+    if not accepted:
+        set_safety_disclaimer_version(0)
 
 
 def cycle_audio_route() -> str:
