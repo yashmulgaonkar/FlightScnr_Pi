@@ -1164,23 +1164,39 @@ def _mpv_softvol(ui_percent: float | int) -> float:
     return max(0.0, min(float(VOLUME_MAX), ui * float(SOFTVOL_GAIN)))
 
 
+def _effective_atc_ui_volume(ui_percent: float | int | None = None) -> float:
+    """UI volume for mpv — 0 while the HUD master mute is on."""
+    settings = _settings()
+    if not settings.master_sound_enabled():
+        return 0.0
+    if ui_percent is None:
+        try:
+            ui_percent = settings.atc_volume()
+        except Exception:
+            ui_percent = 100
+    try:
+        return float(ui_percent)
+    except (TypeError, ValueError):
+        return 100.0
+
+
 def set_volume(percent: int, *, persist: bool = True) -> int:
     """Clamp, optionally persist, and apply volume to a running mpv (if any)."""
     value = _settings().set_atc_volume(percent, persist=persist)
     # Keep OS mixer at full while ATC is in use; softvol handles finer gain.
     _ensure_system_output_volume(1.0)
-    _send_ipc(["set_property", "volume", _mpv_softvol(value)])
+    _send_ipc(
+        ["set_property", "volume", _mpv_softvol(_effective_atc_ui_volume(value))]
+    )
     return value
 
 
 def reassert_output_levels() -> None:
     """Re-raise PipeWire sink + mpv softvol (e.g. after Bluetooth reconnect)."""
     _ensure_system_output_volume(1.0)
-    try:
-        ui = float(_settings().atc_volume())
-    except Exception:
-        ui = 100.0
-    _send_ipc(["set_property", "volume", _mpv_softvol(ui)])
+    _send_ipc(
+        ["set_property", "volume", _mpv_softvol(_effective_atc_ui_volume())]
+    )
 
 
 def stop(*, clear_override: bool = True) -> dict:
@@ -1289,7 +1305,7 @@ def start(
             _last_error = "mpv not installed (sudo apt install mpv)"
         return status()
 
-    volume = settings.atc_volume()
+    volume = _effective_atc_ui_volume(settings.atc_volume())
     softvol = _mpv_softvol(volume)
     url = stream_url(feed)
     settings.set_atc_airport(icao)

@@ -58,6 +58,9 @@ def _play(
 ) -> None:
     if volume_pct <= 0:
         return
+    if not settings.master_sound_enabled():
+        logger.debug("Alert SFX skipped (master mute): %s", os.path.basename(path))
+        return
     if respect_off_hours and _silenced():
         logger.debug("Alert SFX skipped (off-hours): %s", os.path.basename(path))
         return

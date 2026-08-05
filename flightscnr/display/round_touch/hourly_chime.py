@@ -95,6 +95,8 @@ def should_chime(now: datetime | None = None) -> bool:
     """True once per local hour at :00 when chime is enabled and not silenced."""
     if not settings.hourly_chime_enabled():
         return False
+    if not settings.master_sound_enabled():
+        return False
     now = now or datetime.now()
     if now.minute != 0 or now.second > 2:
         return False
@@ -265,6 +267,9 @@ def play_file_async(
     if not path or not os.path.isfile(path):
         logger.debug("SFX skipped (missing file): %s", path)
         return
+    if not settings.master_sound_enabled():
+        logger.debug("SFX skipped (master mute): %s", os.path.basename(path))
+        return
 
     def _run():
         with _play_lock:
@@ -290,6 +295,9 @@ def tick(now: datetime | None = None) -> bool:
     mark_chimed(now)
     if silenced_by_schedule(now):
         logger.debug("Hourly chime skipped (quiet hours or off-hours)")
+        return False
+    if not settings.master_sound_enabled():
+        logger.debug("Hourly chime skipped (master mute)")
         return False
     play_chime_async()
     return True

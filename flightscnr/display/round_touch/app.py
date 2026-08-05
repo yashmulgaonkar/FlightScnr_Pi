@@ -2764,7 +2764,7 @@ class RoundTouchDisplay:
                             elif hud_action == "atc":
                                 self._toggle_radar_hud_atc()
                                 radar.invalidate_frame_layer()
-                            elif hud_action in ("chime", "speaker", "dismiss"):
+                            elif hud_action in ("chime", "speaker", "alert", "dismiss"):
                                 radar.invalidate_frame_layer()
                             self._safe_draw()
                         elif self._open_flight_or_fire_at(tap[0], tap[1]):

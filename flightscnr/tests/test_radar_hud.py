@@ -85,7 +85,7 @@ class RadarHudSettingsTests(unittest.TestCase):
                 settings.copy_radar_hud_layout_top_default(),
             )
             self.assertEqual(settings.radar_hud_layout_offset("wx_icon"), (-29, 31))
-            self.assertEqual(settings.radar_hud_layout_offset("temp"), (45, -31))
+            self.assertEqual(settings.radar_hud_layout_offset("temp"), (42, -29))
             self.assertEqual(settings.radar_hud_layout_offset("wind"), (14, -6))
             self.assertEqual(settings.radar_hud_layout_offset("clock"), (0, 0))
 
@@ -257,7 +257,9 @@ class RadarHudGeometryTests(unittest.TestCase):
                                         self.assertLess(g2["wind_c"][0], g2["clock_c"][0])
                                         self.assertLess(g2["clock_c"][0], g2["speaker_c"][0])
                                         self.assertLess(g2["speaker_c"][0], g2["chime_c"][0])
-                                        self.assertLess(g2["chime_c"][0], g2["atc_c"][0])
+                                        self.assertLess(g2["chime_c"][0], g2["alert_c"][0])
+                                        self.assertLess(g2["alert_c"][0], g2["atc_c"][0])
+                                        self.assertTrue(radar_hud.hit_alert(*g2["alert_c"]))
                                         # Clock stays at the arc midpoint (centered on N).
                                         self.assertAlmostEqual(
                                             g2["clock_c"][0], theme.CENTER_X, delta=2
@@ -269,8 +271,10 @@ class RadarHudGeometryTests(unittest.TestCase):
                                         self.assertGreater(g2["wx_icon_px"], g2["icon_px"])
                                         # Right icons are spaced evenly (equal center gaps).
                                         d_sc = g2["chime_c"][0] - g2["speaker_c"][0]
-                                        d_ca = g2["atc_c"][0] - g2["chime_c"][0]
+                                        d_ca = g2["alert_c"][0] - g2["chime_c"][0]
+                                        d_aa = g2["atc_c"][0] - g2["alert_c"][0]
                                         self.assertAlmostEqual(d_sc, d_ca, delta=theme.s(3))
+                                        self.assertAlmostEqual(d_ca, d_aa, delta=theme.s(3))
                                         wind_w, _, _ = radar_hud._wind_bits(
                                             wx, g2["arrow_px"], (0, 0, 0)
                                         )

@@ -28,6 +28,7 @@ _last_minute_key: str | None = None
 # Cached hit targets in logical coords (updated each draw).
 _chime_rect = pygame.Rect(0, 0, 0, 0)
 _speaker_rect = pygame.Rect(0, 0, 0, 0)
+_alert_rect = pygame.Rect(0, 0, 0, 0)
 _atc_rect = pygame.Rect(0, 0, 0, 0)
 _slider_track = pygame.Rect(0, 0, 0, 0)
 _hud_bounds = pygame.Rect(0, 0, 0, 0)
@@ -44,9 +45,11 @@ _CENTER_KEY = {
     "wx_icon": "wx_icon_c",
     "temp": "temp_c",
     "wind": "wind_c",
+    "aqi": "aqi_c",
     "clock": "clock_c",
     "speaker": "speaker_c",
     "chime": "chime_c",
+    "alert": "alert_c",
     "atc": "atc_c",
 }
 
@@ -230,8 +233,9 @@ def _aqi_bits(
     except Exception:
         value_rgb = color
     font = _ampm_font()
-    # On dark HUD chrome, keep the "AQI" caption readable; number uses band color.
-    label_img = font.render("AQI", True, color)
+    # Match wind-speed unit size for the "AQI" caption; number stays HUD body size.
+    label_font = draw_mod.load_font(max(7, theme.s(8)), bold=True)
+    label_img = label_font.render("AQI", True, color)
     value_img = font.render(str(aqi), True, value_rgb)
     w = max(label_img.get_width(), value_img.get_width())
     return w, label_img, value_img, value_rgb
@@ -241,7 +245,7 @@ def _geometry(wx: dict | None = None) -> dict:
     """Place HUD items along the curved pill arc with the clock centered.
 
     Left of clock: weather (icon+temp) · wind · AQI
-    Right of clock: volume · chime · ATC
+    Right of clock: volume · chime · alert · ATC
 
     The pill half-span is ``max(left, right)`` so the clock stays at ``mid``
     even when AQI widens the left cluster.
@@ -251,10 +255,12 @@ def _geometry(wx: dict | None = None) -> dict:
     mid = _mid_angle()
     band = theme.s(34)
     icon_r = max(6, int(band * 0.18))
-    icon_px = max(12, min(band - theme.s(16), icon_r * 2))
+    # ``slot_px`` sizes the arc budget; the drawn icons are enlarged inside that
+    # same budget below so bigger glyphs never widen the pill.
+    slot_px = max(12, min(band - theme.s(16), icon_r * 2))
     # Weather glyph larger than the control icons so it reads clearly on the arc.
-    wx_icon_px = max(icon_px + theme.s(8), int(band * 0.62))
-    arrow_px = max(10, int(icon_px * 0.85))
+    wx_icon_px = max(slot_px + theme.s(8), int(band * 0.62))
+    arrow_px = max(10, int(slot_px * 0.85))
     color = (28, 30, 34)
 
     wx_icon_w, temp_w, _, _ = _weather_bits(wx, wx_icon_px, color)
@@ -288,10 +294,10 @@ def _geometry(wx: dict | None = None) -> dict:
     if has_aqi:
         left_pieces.append(("aqi", aqi_w, major_gap))
 
+    right_names = ("speaker", "chime", "alert", "atc")
     right_pieces: list[tuple[str, int, int]] = [
-        ("speaker", icon_px, major_gap),
-        ("chime", icon_px, major_gap),
-        ("atc", icon_px, 0),
+        (name, slot_px, 0 if name == right_names[-1] else major_gap)
+        for name in right_names
     ]
 
     def ang(px: float) -> float:
@@ -312,6 +318,25 @@ def _geometry(wx: dict | None = None) -> dict:
     half_span = max(left_span, right_span) + clock_half + end_pad
     arc_a0 = mid - half_span
     arc_a1 = mid + half_span
+
+    # The last icon sits on the arc endpoint so it tucks into the pill's rounded
+    # cap; the cap radius (band/2) keeps the whole glyph inside the fill.
+    right_outer = half_span - ang(theme.s(2))
+    # Draw the control icons as large as the (already fixed) right budget allows,
+    # keeping a small clearance between neighbours so the pill never grows.
+    n_right = len(right_names)
+    n_gaps = max(1, n_right - 1)
+    clearance = theme.s(3)
+    run_px = (right_outer - clock_half - ang(major_gap)) * r_mid
+    icon_px = int(
+        max(
+            slot_px,
+            min(
+                int(band * 0.46),
+                (run_px - n_gaps * clearance) / (n_gaps + 0.5),
+            ),
+        )
+    )
 
     def polar(angle: float) -> tuple[int, int]:
         return (
@@ -338,15 +363,11 @@ def _geometry(wx: dict | None = None) -> dict:
             # Gap between further-left piece and this one is that piece's gap_after.
             cursor = cursor + left_step * ang(outward[i + 1][2])
 
-    # Right: walk was equal-gap packing; instead distribute volume/chime/ATC
-    # evenly across the right half of the (symmetric) pill so unused tip
-    # space is shared. Clock and left side stay fixed.
-    right_names = ("speaker", "chime", "atc")
+    # Right: distribute volume/chime/alert/ATC evenly across the right half.
     right_inner0 = clock_half + ang(major_gap) + ang(icon_px) * 0.5
-    right_inner1 = half_span - end_pad - ang(icon_px) * 0.5
+    right_inner1 = right_outer
     if right_inner1 < right_inner0:
         right_inner1 = right_inner0
-    n_right = len(right_names)
     for i, name in enumerate(right_names):
         t = i / (n_right - 1) if n_right > 1 else 0.0
         offset = right_inner0 + t * (right_inner1 - right_inner0)
@@ -383,6 +404,7 @@ def _geometry(wx: dict | None = None) -> dict:
     clock_c = centers["clock"]
     speaker_c = centers["speaker"]
     chime_c = centers["chime"]
+    alert_c = centers["alert"]
     atc_c = centers["atc"]
 
     # Defaults before top-layout offsets (used by arrange drag).
@@ -394,6 +416,7 @@ def _geometry(wx: dict | None = None) -> dict:
         "clock": clock_c,
         "speaker": speaker_c,
         "chime": chime_c,
+        "alert": alert_c,
         "atc": atc_c,
     }
     global _layout_base
@@ -417,6 +440,8 @@ def _geometry(wx: dict | None = None) -> dict:
             speaker_c = (bx + dx, by + dy)
         elif key == "chime":
             chime_c = (bx + dx, by + dy)
+        elif key == "alert":
+            alert_c = (bx + dx, by + dy)
         elif key == "atc":
             atc_c = (bx + dx, by + dy)
 
@@ -445,6 +470,7 @@ def _geometry(wx: dict | None = None) -> dict:
         "wind_c": wind_c,
         "aqi_c": aqi_c,
         "chime_c": chime_c,
+        "alert_c": alert_c,
         "atc_c": atc_c,
         "clock_c": clock_c,
         "speaker_c": speaker_c,
@@ -525,6 +551,10 @@ def _blit_icon(
         icon = icon.copy()
         icon.set_alpha(alpha)
     surface.blit(icon, icon.get_rect(center=center))
+
+
+# Dim alpha shared by every "sound path off" HUD icon (matches hourly chime).
+_OFF_ICON_ALPHA = 110
 
 
 def _icon_as_light(icon: pygame.Surface) -> pygame.Surface:
@@ -907,13 +937,22 @@ def _draw_curved_white_pill(
 
 
 def _refresh_hit_targets(g: dict) -> None:
-    global _chime_rect, _speaker_rect, _atc_rect, _hud_bounds, _layout_hit
+    global _chime_rect, _speaker_rect, _alert_rect, _atc_rect, _hud_bounds, _layout_hit
     ir = g["icon_r"]
-    hit = ir * 2 + theme.s(12)
+    icon_px = int(g.get("icon_px") or ir * 2)
+    # Pad around the glyph, but never so far that neighbouring icons overlap.
+    right_c = [g["speaker_c"], g["chime_c"], g["alert_c"], g["atc_c"]]
+    step = min(
+        (math.dist(a, b) for a, b in zip(right_c, right_c[1:])),
+        default=float(icon_px),
+    )
+    hit = int(max(ir * 2, min(icon_px + theme.s(10), step)))
     _chime_rect = pygame.Rect(0, 0, hit, hit)
     _chime_rect.center = g["chime_c"]
     _speaker_rect = pygame.Rect(0, 0, hit, hit)
     _speaker_rect.center = g["speaker_c"]
+    _alert_rect = pygame.Rect(0, 0, hit, hit)
+    _alert_rect.center = g["alert_c"]
     _atc_rect = pygame.Rect(0, 0, hit, hit)
     _atc_rect.center = g["atc_c"]
 
@@ -922,10 +961,13 @@ def _refresh_hit_targets(g: dict) -> None:
     items: list[tuple[str, tuple[int, int], int]] = [
         ("speaker", g["speaker_c"], hit),
         ("chime", g["chime_c"], hit),
+        ("alert", g["alert_c"], hit),
         ("atc", g["atc_c"], hit),
     ]
     if arrange or g.get("has_wind"):
         items.append(("wind", g["wind_c"], hit))
+    if arrange or g.get("has_aqi"):
+        items.append(("aqi", g["aqi_c"], hit))
     if arrange or g.get("has_wx_icon"):
         wx_hit = int(g.get("wx_icon_px") or hit) + theme.s(8)
         items.append(("wx_icon", g["wx_icon_c"], wx_hit))
@@ -939,6 +981,8 @@ def _refresh_hit_targets(g: dict) -> None:
         if not g.get("has_temp") and key == "temp":
             continue
         if not g.get("has_wind") and key == "wind":
+            continue
+        if not g.get("has_aqi") and key == "aqi":
             continue
         r = pygame.Rect(0, 0, size, size)
         r.center = center
@@ -959,9 +1003,10 @@ def draw_hud(
     global _slider_track, _hud_bounds
 
     if not settings.radar_hud_enabled():
-        global _chime_rect, _speaker_rect, _atc_rect, _layout_hit
+        global _chime_rect, _speaker_rect, _alert_rect, _atc_rect, _layout_hit
         _chime_rect = pygame.Rect(0, 0, 0, 0)
         _speaker_rect = pygame.Rect(0, 0, 0, 0)
+        _alert_rect = pygame.Rect(0, 0, 0, 0)
         _atc_rect = pygame.Rect(0, 0, 0, 0)
         _layout_hit = {}
         _slider_track = pygame.Rect(0, 0, 0, 0)
@@ -993,7 +1038,13 @@ def draw_hud(
             )
             _hud_bounds = bounds
         else:
-            pts = [g["clock_c"], g["speaker_c"], g["chime_c"], g["atc_c"]]
+            pts = [
+                g["clock_c"],
+                g["speaker_c"],
+                g["chime_c"],
+                g["alert_c"],
+                g["atc_c"],
+            ]
             if g.get("has_weather"):
                 pts.append(g["weather_c"])
             if g.get("has_wind"):
@@ -1020,17 +1071,30 @@ def draw_hud(
             _draw_aqi_cluster(surface, g["aqi_c"], color, wx)
         _draw_clock_cluster(surface, g["clock_c"], color)
 
-        vol_name = "mute" if settings.atc_volume() <= 0 else "volume"
+        # Off states are shown the same way as the hourly chime: dimmed glyph.
+        master_on = settings.master_sound_enabled()
         _blit_icon(
-            surface, vol_name, g["speaker_c"], icon_px, alpha=255, light=light_icons
+            surface,
+            "volume",
+            g["speaker_c"],
+            icon_px,
+            alpha=255 if master_on else _OFF_ICON_ALPHA,
+            light=light_icons,
         )
-        chime_alpha = 255 if settings.hourly_chime_enabled() else 110
         _blit_icon(
             surface,
             "chime",
             g["chime_c"],
             icon_px,
-            alpha=chime_alpha,
+            alpha=255 if settings.hourly_chime_enabled() else _OFF_ICON_ALPHA,
+            light=light_icons,
+        )
+        _blit_icon(
+            surface,
+            "alert",
+            g["alert_c"],
+            icon_px,
+            alpha=255 if settings.alert_sfx_enabled() else _OFF_ICON_ALPHA,
             light=light_icons,
         )
         # ATC play/stop — full opacity while playing, dimmed when stopped.
@@ -1041,20 +1105,29 @@ def draw_hud(
             atc_playing = bool(atc_audio.is_playing())
         except Exception:
             atc_playing = False
+        if not (master_on and settings.atc_volume() > 0):
+            atc_alpha = _OFF_ICON_ALPHA
+        else:
+            atc_alpha = 255 if atc_playing else 120
         _blit_icon(
             surface,
             "atc",
             g["atc_c"],
             icon_px,
-            alpha=255 if atc_playing else 120,
+            alpha=atc_alpha,
             light=light_icons,
         )
+
         if settings.radar_hud_arrange():
             _draw_arrange_chrome(surface, g)
     else:
         # Approximate bounds from hit targets when only drawing the popover.
-        _hud_bounds = _chime_rect.union(_speaker_rect).inflate(theme.s(48), theme.s(24))
-
+        _hud_bounds = (
+            _chime_rect.union(_speaker_rect)
+            .union(_alert_rect)
+            .union(_atc_rect)
+            .inflate(theme.s(48), theme.s(24))
+        )
     _slider_track = pygame.Rect(0, 0, 0, 0)
     if include_popover and _volume_popover:
         color, fill_rgba = _hud_chrome()
@@ -1187,6 +1260,10 @@ def hit_speaker(x: int, y: int) -> bool:
     return _speaker_rect.width > 0 and _speaker_rect.collidepoint(x, y)
 
 
+def hit_alert(x: int, y: int) -> bool:
+    return _alert_rect.width > 0 and _alert_rect.collidepoint(x, y)
+
+
 def hit_atc(x: int, y: int) -> bool:
     return _atc_rect.width > 0 and _atc_rect.collidepoint(x, y)
 
@@ -1250,13 +1327,22 @@ def handle_tap(x: int, y: int) -> str | None:
     if hit_chime(x, y):
         settings.toggle_hourly_chime_enabled()
         return "chime"
+    if hit_alert(x, y):
+        settings.toggle_alert_sfx_enabled()
+        return "alert"
     if hit_atc(x, y):
         return "atc"
     if hit_speaker(x, y):
-        if _volume_popover:
-            close_volume_popover()
-        else:
-            open_volume_popover()
+        # Volume icon = master sound on/off (ATC volume stays in Settings).
+        close_volume_popover()
+        settings.toggle_master_sound_enabled()
+        try:
+            from utilities import atc_audio
+
+            # Push effective volume to mpv immediately when muting/unmuting.
+            atc_audio.set_volume(settings.atc_volume(), persist=False)
+        except Exception:
+            pass
         return "speaker"
     if hit_volume_slider(x, y):
         return "slider"

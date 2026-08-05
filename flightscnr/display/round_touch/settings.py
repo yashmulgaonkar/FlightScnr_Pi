@@ -125,9 +125,11 @@ RADAR_HUD_LAYOUT_KEYS = (
     "wx_icon",
     "temp",
     "wind",
+    "aqi",
     "clock",
     "speaker",
     "chime",
+    "alert",
     "atc",
 )
 # Absolute px clamp so load works before display theme.s() is ready (~theme.s(48) @720).
@@ -138,17 +140,32 @@ RADAR_HUD_LAYOUT_TOP_DEFAULT = {
     "wx_icon": [-29, 31],
     "temp": [42, -29],
     "wind": [14, -6],
-    "chime": [10, 4],
-    "atc": [21, 14],
 }
 
 # Baked bottom-pill offsets (from device arrange pass, 2026-07-31).
 RADAR_HUD_LAYOUT_BOTTOM_DEFAULT = {
     "wx_icon": [2, -6],
     "wind": [4, 0],
-    "chime": [11, -5],
-    "atc": [18, -16],
 }
+
+# Offsets baked when the pill held three right-side icons. The HUD now spaces
+# volume/chime/alert/ATC evenly, so these stale nudges make spacing look uneven.
+_LEGACY_RIGHT_ICON_OFFSETS = {
+    "radar_hud_layout_top": {"chime": [10, 4], "atc": [21, 14]},
+    "radar_hud_layout_bottom": {"chime": [11, -5], "atc": [18, -16]},
+}
+
+
+def drop_legacy_right_icon_offsets(layout, state_key: str):
+    """Strip pre-alert-icon chime/ATC nudges so right icons space evenly."""
+    if not isinstance(layout, dict):
+        return layout
+    legacy = _LEGACY_RIGHT_ICON_OFFSETS.get(state_key, {})
+    out = dict(layout)
+    for key, value in legacy.items():
+        if key in out and list(out.get(key) or []) == value:
+            out.pop(key)
+    return out
 
 
 def clamp_radar_hud_layout_offset(value) -> int:
@@ -270,6 +287,8 @@ _defaults = {
     "traffic_sfx_volume": 80,
     "military_sfx_enabled": True,
     "military_sfx_volume": 80,
+    # Master mute for ATC / chime / alert SFX (radar HUD volume icon).
+    "master_sound_enabled": True,
     # Preferred Bluetooth A2DP speaker (paired via web portal).
     "bluetooth_speaker_mac": "",
     "bluetooth_speaker_name": "",
@@ -710,7 +729,11 @@ def _load():
         state["radar_hud_layout_top"] = copy_radar_hud_layout_top_default()
         migrated = True
     else:
-        layout = normalize_radar_hud_layout(state.get("radar_hud_layout_top"))
+        layout = normalize_radar_hud_layout(
+            drop_legacy_right_icon_offsets(
+                state.get("radar_hud_layout_top"), "radar_hud_layout_top"
+            )
+        )
         if state.get("radar_hud_layout_top") != layout:
             state["radar_hud_layout_top"] = layout
             migrated = True
@@ -718,7 +741,11 @@ def _load():
         state["radar_hud_layout_bottom"] = copy_radar_hud_layout_bottom_default()
         migrated = True
     else:
-        layout_b = normalize_radar_hud_layout(state.get("radar_hud_layout_bottom"))
+        layout_b = normalize_radar_hud_layout(
+            drop_legacy_right_icon_offsets(
+                state.get("radar_hud_layout_bottom"), "radar_hud_layout_bottom"
+            )
+        )
         if state.get("radar_hud_layout_bottom") != layout_b:
             state["radar_hud_layout_bottom"] = layout_b
             migrated = True
@@ -741,6 +768,7 @@ def _load():
     for _sfx_en_key, _sfx_en_default in (
         ("traffic_sfx_enabled", True),
         ("military_sfx_enabled", True),
+        ("master_sound_enabled", True),
     ):
         if _sfx_en_key not in data:
             state[_sfx_en_key] = _sfx_en_default
@@ -876,6 +904,7 @@ def _settings_snapshot(state: dict) -> tuple:
         clamp_sfx_volume(state.get("traffic_sfx_volume", 80)),
         bool(state.get("military_sfx_enabled", True)),
         clamp_sfx_volume(state.get("military_sfx_volume", 80)),
+        bool(state.get("master_sound_enabled", True)),
         str(state.get("bluetooth_speaker_mac") or "").strip().upper(),
         str(state.get("bluetooth_speaker_name") or "").strip(),
         str(state.get("audio_route") or "usb").strip().lower(),
@@ -2154,6 +2183,38 @@ def set_military_sfx_volume(value: int, *, persist: bool = True) -> int:
     else:
         _disk_synced = False
     return vol
+
+
+def alert_sfx_enabled() -> bool:
+    """True when either tracked-enter or military alert SFX is enabled."""
+    return traffic_sfx_enabled() or military_sfx_enabled()
+
+
+def set_alert_sfx_enabled(enabled: bool) -> None:
+    """Enable/disable both aircraft alert SFX together (HUD alert icon)."""
+    on = bool(enabled)
+    _state["traffic_sfx_enabled"] = on
+    _state["military_sfx_enabled"] = on
+    _rmw_save({"traffic_sfx_enabled": on, "military_sfx_enabled": on})
+
+
+def toggle_alert_sfx_enabled() -> bool:
+    set_alert_sfx_enabled(not alert_sfx_enabled())
+    return alert_sfx_enabled()
+
+
+def master_sound_enabled() -> bool:
+    return bool(_state.get("master_sound_enabled", True))
+
+
+def set_master_sound_enabled(enabled: bool) -> None:
+    _state["master_sound_enabled"] = bool(enabled)
+    _save(_state)
+
+
+def toggle_master_sound_enabled() -> bool:
+    set_master_sound_enabled(not master_sound_enabled())
+    return master_sound_enabled()
 
 
 def bluetooth_speaker_mac() -> str:
