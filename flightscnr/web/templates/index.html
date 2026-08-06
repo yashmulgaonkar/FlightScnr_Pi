@@ -314,6 +314,17 @@
         </div>
     </details>
 
+    <details class="card" open>
+        <summary><span class="ico">&#128225;</span>Route Sources<span class="sum">order &amp; fallback</span><span class="chev">&#9656;</span></summary>
+        <div class="body">
+            <label for="route_source_order">Route lookup order</label>
+            <input id="route_source_order" type="text" autocomplete="off" placeholder="airlabs,flightaware,opensky">
+            <p class="hint">Comma-separated: airlabs, flightaware, opensky — tried in this order, first match per field wins, gaps filled by the next. Omit an entry to disable it entirely. Example for a fully free/open-source lookup with no paid API ever called: <code>opensky</code>. Leave blank for the default order (airlabs,flightaware,opensky).</p>
+            <button class="btn btn-primary" id="btn-route-source-order" style="margin-top:.7rem" type="button">Save route order</button>
+            <div id="route-source-order-status" class="status"></div>
+        </div>
+    </details>
+
     <details class="card">
         <summary><span class="ico">&#9888;</span>Alerts<span class="sum">flight #, type, registration</span><span class="chev">&#9656;</span></summary>
         <div class="body">
@@ -1064,7 +1075,11 @@ async function loadAll() {
         if ($("use-opensky-api")) {
             $("use-opensky-api").checked = toggles.USE_OPENSKY_API !== false;
         }
-        const faUsage = keys.flightaware_usage;
+                const rso = keys.route_source_order || {};
+        if ($("route_source_order")) {
+            $("route_source_order").value = rso.ROUTE_SOURCE_ORDER || "";
+        }
+	const faUsage = keys.flightaware_usage;
         if ($("flightaware-usage") && faUsage) {
             $("flightaware-usage").textContent =
                 `FlightAware this month: $${Number(faUsage.spend_usd || 0).toFixed(2)} / $${Number(faUsage.monthly_limit_usd || 4.5).toFixed(2)} (${faUsage.calls || 0} calls)`;
@@ -1226,6 +1241,29 @@ async function saveDump1090() {
         await loadAll();
     } catch (e) {
         showStatus("dump1090-status", e.message, true);
+    }
+}
+
+async function saveRouteSourceOrder() {
+    clearStatus("route-source-order-status");
+    try {
+        const raw = $("route_source_order") ? $("route_source_order").value.trim() : "";
+        await jsonFetch("/api-keys", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                route_source_order: raw,
+            }),
+        });
+        showStatus(
+            "route-source-order-status",
+            raw
+                ? `Route order saved: ${raw}`
+                : "Route order reset to default (airlabs,flightaware,opensky)."
+        );
+        await loadAll();
+    } catch (e) {
+        showStatus("route-source-order-status", e.message, true);
     }
 }
 
@@ -2033,6 +2071,7 @@ $("btn-import-settings").addEventListener("click", async () => {
 });
 $("btn-radar").addEventListener("click", saveRadar);
 $("btn-dump1090").addEventListener("click", saveDump1090);
+$("btn-route-source-order").addEventListener("click", saveRouteSourceOrder);
 $("btn-save-reload").addEventListener("click", saveAndReloadSettings);
 $("btn-offhours").addEventListener("click", saveOffHours);
 $("btn-weather").addEventListener("click", saveWeather);

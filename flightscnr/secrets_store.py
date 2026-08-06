@@ -70,6 +70,7 @@ TOGGLE_KEYS = (
 SOURCE_SETTING_KEYS = (
     "DUMP1090_ENABLED",
     "DUMP1090_URL",
+    "ROUTE_SOURCE_ORDER",
 )
 
 
@@ -254,6 +255,29 @@ def apply_dump1090_to_runtime(enabled: bool, url: str) -> None:
         pass
 
 
+def route_source_order_setting() -> dict:
+    """Current ROUTE_SOURCE_ORDER portal value (raw string, as typed by the user)."""
+    bootstrap_secrets()
+    file_vals = load_secrets_json()
+    if "ROUTE_SOURCE_ORDER" in file_vals:
+        raw = str(file_vals.get("ROUTE_SOURCE_ORDER") or "").strip()
+    else:
+        raw = os.environ.get("ROUTE_SOURCE_ORDER", "").strip()
+    return {"ROUTE_SOURCE_ORDER": raw}
+
+
+def apply_route_source_order_to_runtime(raw: str) -> None:
+    """Update process env + config module so the next lookup picks this up."""
+    raw = (raw or "").strip()
+    os.environ["ROUTE_SOURCE_ORDER"] = raw
+    try:
+        import config as cfg
+
+        cfg.ROUTE_SOURCE_ORDER = cfg._parse_route_source_order(raw)
+    except Exception:
+        pass
+
+
 def mask_secret(value: str) -> str:
     value = (value or "").strip()
     if not value:
@@ -290,6 +314,7 @@ def secrets_status() -> dict:
     status["config_h_path"] = CONFIG_H_PATH
     status["secrets_json_path"] = SECRETS_JSON_PATH
     status["dump1090"] = dump1090_settings()
+    status["route_source_order"] = route_source_order_setting()
     try:
         from utilities.flightaware_client import usage_status
 
@@ -374,6 +399,11 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         updated["DUMP1090_ENABLED"] = "True" if enabled else "False"
         updated["DUMP1090_URL"] = url
         apply_dump1090_to_runtime(enabled, url)
+
+    if "route_source_order" in payload:
+        raw = str(payload.get("route_source_order") or "").strip()
+        updated["ROUTE_SOURCE_ORDER"] = raw
+        apply_route_source_order_to_runtime(raw)
 
     os.makedirs(DATA_DIR, exist_ok=True)
     tmp = SECRETS_JSON_PATH + ".tmp"
