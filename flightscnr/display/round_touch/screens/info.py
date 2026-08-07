@@ -40,7 +40,7 @@ except ImportError:
         name = (hostname or "raspberrypi").split(".")[0].strip() or "raspberrypi"
         return f"http://{name}.local"
 
-from display.round_touch import draw, nav, settings, theme
+from display.round_touch import alert_prefs, draw, nav, settings, theme
 
 PAGE_MAIN = 0
 PAGE_ATC = 1
@@ -103,7 +103,7 @@ OPTIONS_ACTIONS = (
     "map_style",
     "vfr_opacity",
 )
-# Overlay toggles + traffic mode on their own settings page (no scroll required).
+# Overlay toggles + traffic mode + alert filters (may need a light swipe).
 LAYERS_ACTIONS = (
     "traffic",
     "precipitation",
@@ -112,6 +112,9 @@ LAYERS_ACTIONS = (
     "airport_icons",
     "ground_vehicles",
     "idle_clock",
+    "alert_military",
+    "alert_emergency",
+    "alert_hide_non_alerted",
 )
 # LiveATC playback — page 1 (no scroll): stream select + Play/Stop.
 ATC_ACTIONS = (
@@ -1607,6 +1610,9 @@ def _layers_row_labels() -> list[str]:
         "Show Airport Icons",
         "Show Ground Vehicles",
         "Auto Idle Clock",
+        "Alert on military aircraft",
+        "Alert on emergency squawk (7700/7600/7500)",
+        "Hide non-alerted aircraft on radar",
     ]
 
 
@@ -1623,6 +1629,9 @@ _TOGGLE_ROW_STATE = {
     "airport_icons": settings.show_airport_icons,
     "ground_vehicles": settings.show_ground_vehicles,
     "idle_clock": settings.auto_idle_clock_enabled,
+    "alert_military": alert_prefs.military_enabled,
+    "alert_emergency": alert_prefs.emergency_enabled,
+    "alert_hide_non_alerted": alert_prefs.hide_non_alerted,
     "enabled": settings.atc_enabled,
     "quiet": settings.atc_quiet_hours_enabled,
 }

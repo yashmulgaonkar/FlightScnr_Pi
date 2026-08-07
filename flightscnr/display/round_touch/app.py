@@ -272,21 +272,27 @@ class RoundTouchDisplay:
             logger.debug("Install re-sync arm failed", exc_info=True)
 
     def _update_check_loop(self) -> None:
-        """Force-check GitHub for updates about three times per day."""
+        """Force-check GitHub once after boot, then about three times per day."""
         from utilities import updater
 
         # Let the boot splash finish before the first network check.
         time.sleep(max(0.5, BOOT_SPLASH_S + 1.0))
+        first = True
         while True:
             try:
-                wait_s = float(updater.seconds_until_next_check())
-                if wait_s > 0:
-                    time.sleep(min(wait_s, updater.CHECK_INTERVAL_S))
-                    continue
+                # Always re-query once after boot so a newer release is not
+                # hidden behind a recent last_check_ts / dismiss for an older tip.
+                if not first:
+                    wait_s = float(updater.seconds_until_next_check())
+                    if wait_s > 0:
+                        time.sleep(min(wait_s, updater.CHECK_INTERVAL_S))
+                        continue
+                first = False
                 updater.check_for_update(force=True)
                 update_bubble.invalidate_cache()
             except Exception:
                 logger.debug("Periodic update check failed", exc_info=True)
+                first = False
                 time.sleep(300.0)
                 continue
             time.sleep(updater.CHECK_INTERVAL_S)
@@ -1321,6 +1327,21 @@ class RoundTouchDisplay:
             return
         elif action == "idle_clock":
             settings.toggle_auto_idle_clock()
+        elif action == "alert_military":
+            from display.round_touch import alert_prefs
+
+            alert_prefs.toggle_military_enabled()
+            radar.invalidate_frame_layer()
+        elif action == "alert_emergency":
+            from display.round_touch import alert_prefs
+
+            alert_prefs.toggle_emergency_enabled()
+            radar.invalidate_frame_layer()
+        elif action == "alert_hide_non_alerted":
+            from display.round_touch import alert_prefs
+
+            alert_prefs.toggle_hide_non_alerted()
+            radar.invalidate_frame_layer()
         elif action == "radar_hud":
             settings.toggle_radar_hud_enabled()
             radar.invalidate_frame_layer()
