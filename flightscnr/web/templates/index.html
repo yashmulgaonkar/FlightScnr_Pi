@@ -195,6 +195,10 @@
                 <label for="show_range_rings">Show range rings</label>
                 <span class="switch"><input id="show_range_rings" type="checkbox"><span class="track"></span></span>
             </div>
+            <div class="chk">
+                <label for="color_by_altitude">Color aircraft by altitude</label>
+                <span class="switch"><input id="color_by_altitude" type="checkbox"><span class="track"></span></span>
+            </div>
             <label for="traffic_labels">Traffic labels</label>
             <select id="traffic_labels">
                 <option value="aircraft">Aircraft Only</option>
@@ -1007,6 +1011,7 @@ async function loadAll() {
         }
         $("show_compass").checked = !!r.show_compass_rose;
         if ($("show_range_rings")) $("show_range_rings").checked = r.show_range_rings !== false;
+        if ($("color_by_altitude")) $("color_by_altitude").checked = !!r.color_by_altitude;
         if ($("traffic_labels")) $("traffic_labels").value = r.traffic_labels || (r.show_aircraft_tag === false ? "off" : "both");
         $("facing_deg").value = String(Math.round(Number(r.facing_deg) || 0) % 360);
         $("show_sweep").checked = !!r.show_sweep_line;
@@ -1236,6 +1241,7 @@ async function saveRadar() {
                 runway_darkmap_rgb: readRgbInputs("runway"),
                 show_compass_rose: $("show_compass").checked,
                 show_range_rings: $("show_range_rings") ? $("show_range_rings").checked : true,
+                color_by_altitude: $("color_by_altitude") ? $("color_by_altitude").checked : false,
                 traffic_labels: $("traffic_labels") ? $("traffic_labels").value : "both",
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,
@@ -1301,6 +1307,7 @@ async function saveAndReloadSettings() {
                 runway_darkmap_rgb: readRgbInputs("runway"),
                 show_compass_rose: $("show_compass").checked,
                 show_range_rings: $("show_range_rings") ? $("show_range_rings").checked : true,
+                color_by_altitude: $("color_by_altitude") ? $("color_by_altitude").checked : false,
                 traffic_labels: $("traffic_labels") ? $("traffic_labels").value : "both",
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,

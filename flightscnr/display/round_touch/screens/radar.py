@@ -810,6 +810,10 @@ def _flight_icon_color(flight, *, compact: bool):
             return _overlay_color_for_basemap(theme.AIRCRAFT_UNKNOWN)
     except Exception:
         pass
+    if settings.color_by_altitude():
+        from display.round_touch import altitude_color
+
+        return altitude_color.color_for_altitude(flight.get("altitude"))
     return _overlay_color_for_basemap(theme.AIRCRAFT)
 
 

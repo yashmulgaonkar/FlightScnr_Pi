@@ -234,6 +234,7 @@ _defaults = {
     "distance_units": "km",
     "unit_preset": "km_kph",
     "show_compass_rose": True,
+    "color_by_altitude": False,
     "show_range_rings": True,
     # Legacy bool kept in sync with traffic_labels for older readers.
     "show_aircraft_tag": True,
@@ -889,6 +890,7 @@ def _settings_snapshot(state: dict) -> tuple:
         tuple(color_presets.normalize_rgb(state.get("runway_darkmap_rgb"))),
         state.get("show_compass_rose"),
         state.get("show_range_rings"),
+        state.get("color_by_altitude"),
         state.get("show_aircraft_tag"),
         state.get("traffic_labels"),
         _normalize_facing(state.get("facing_deg", 0)),
@@ -1501,6 +1503,20 @@ def toggle_compass_rose():
 
 def set_show_compass_rose(enabled: bool):
     _state["show_compass_rose"] = bool(enabled)
+    _save(_state)
+
+
+def color_by_altitude():
+    return bool(_state.get("color_by_altitude", False))
+
+
+def toggle_color_by_altitude():
+    _state["color_by_altitude"] = not color_by_altitude()
+    _save(_state)
+
+
+def set_color_by_altitude(enabled: bool):
+    _state["color_by_altitude"] = bool(enabled)
     _save(_state)
 
 
