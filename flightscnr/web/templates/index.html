@@ -314,7 +314,7 @@
         </div>
     </details>
 
-    <details class="card" open>
+    <details class="card">
         <summary><span class="ico">&#128225;</span>Route Sources<span class="sum">order &amp; fallback</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <label for="route_source_order">Route lookup order</label>
@@ -1075,7 +1075,7 @@ async function loadAll() {
         if ($("use-opensky-api")) {
             $("use-opensky-api").checked = toggles.USE_OPENSKY_API !== false;
         }
-                const rso = keys.route_source_order || {};
+        const rso = keys.route_source_order || {};
         if ($("route_source_order")) {
             $("route_source_order").value = rso.ROUTE_SOURCE_ORDER || "";
         }
@@ -1248,19 +1248,20 @@ async function saveRouteSourceOrder() {
     clearStatus("route-source-order-status");
     try {
         const raw = $("route_source_order") ? $("route_source_order").value.trim() : "";
-        await jsonFetch("/api-keys", {
+        const resp = await jsonFetch("/api-keys", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 route_source_order: raw,
             }),
         });
-        showStatus(
-            "route-source-order-status",
-            raw
-                ? `Route order saved: ${raw}`
-                : "Route order reset to default (airlabs,flightaware,opensky)."
-        );
+	//Show the *effective (parse(filtered) order, not just what was typed
+	//unknown or misspelled entries are silently dropped, so this is the only way to notice a typo actually did something
+        const effective =
+            (resp.keys && resp.keys.route_source_order &&
+                resp.keys.route_source_order.ROUTE_SOURCE_ORDER_EFFECTIVE) ||
+            "airlabs,flightaware,opensky";
+	showStatus("route-source-order-status", `Saved — effective order: ${effective}`);
         await loadAll();
     } catch (e) {
         showStatus("route-source-order-status", e.message, true);
