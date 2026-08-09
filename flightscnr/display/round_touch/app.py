@@ -264,23 +264,35 @@ class RoundTouchDisplay:
             name="update-check",
             daemon=True,
         ).start()
+        try:
+            from utilities import updater
+
+            updater.maybe_auto_install_resync()
+        except Exception:
+            logger.debug("Install re-sync arm failed", exc_info=True)
 
     def _update_check_loop(self) -> None:
-        """Force-check GitHub for updates about three times per day."""
+        """Force-check GitHub once after boot, then about three times per day."""
         from utilities import updater
 
         # Let the boot splash finish before the first network check.
         time.sleep(max(0.5, BOOT_SPLASH_S + 1.0))
+        first = True
         while True:
             try:
-                wait_s = float(updater.seconds_until_next_check())
-                if wait_s > 0:
-                    time.sleep(min(wait_s, updater.CHECK_INTERVAL_S))
-                    continue
+                # Always re-query once after boot so a newer release is not
+                # hidden behind a recent last_check_ts / dismiss for an older tip.
+                if not first:
+                    wait_s = float(updater.seconds_until_next_check())
+                    if wait_s > 0:
+                        time.sleep(min(wait_s, updater.CHECK_INTERVAL_S))
+                        continue
+                first = False
                 updater.check_for_update(force=True)
                 update_bubble.invalidate_cache()
             except Exception:
                 logger.debug("Periodic update check failed", exc_info=True)
+                first = False
                 time.sleep(300.0)
                 continue
             time.sleep(updater.CHECK_INTERVAL_S)
@@ -430,24 +442,54 @@ class RoundTouchDisplay:
         self._disclaimer_remember_checked = not self._disclaimer_remember_checked
         self._safe_draw()
 
-    def _accept_safety_disclaimer(self, *, from_auto: bool = False) -> None:
+    def _try_keyboard_accept_disclaimer(self) -> bool:
+        """Accept via Return when the hidden keyboard window is open.
+
+        Keyboard accept never remembers ("Don't show again" is cleared).
+        Returns True when the key was consumed.
+        """
+        if self.screen != SCREEN_DISCLAIMER or self._session_unlocked:
+            return False
+        if time.time() < self._boot_until:
+            return False
+        # Remembered countdown has no Accept control — keyboard must not skip it.
+        if self._disclaimer_deadline is not None:
+            return False
+        if not disclaimer_acceptance.keyboard_accept_allowed():
+            return False
+        self._disclaimer_remember_checked = False
+        self._accept_safety_disclaimer(from_keyboard=True)
+        return True
+
+    def _accept_safety_disclaimer(
+        self, *, from_auto: bool = False, from_keyboard: bool = False
+    ) -> None:
         """Continue past the boot disclaimer for this session only."""
         if self._session_unlocked:
             return
+        # Keyboard accept never persists remember — force clear even if the
+        # checkbox was checked on screen.
+        if from_keyboard:
+            self._disclaimer_remember_checked = False
         # Persist CURRENT_VERSION only when the on-device checkbox is checked
         # (manual Accept, or the checkbox state at countdown expiry).
+        how = ""
+        if from_keyboard:
+            how = " [keyboard]"
+        elif from_auto:
+            how = " [auto]"
         if self._disclaimer_remember_checked:
             disclaimer_acceptance.remember_current()
             logger.info(
                 "Safety disclaimer accepted (remembered v%s)%s",
                 disclaimer_acceptance.CURRENT_VERSION,
-                " [auto]" if from_auto else "",
+                how,
             )
         else:
             disclaimer_acceptance.clear()
             logger.info(
                 "Safety disclaimer accepted (not remembered)%s",
-                " [auto]" if from_auto else "",
+                how,
             )
         self._start_session_after_disclaimer()
         want_wifi = self._pending_wifi_setup
@@ -1315,6 +1357,21 @@ class RoundTouchDisplay:
             return
         elif action == "idle_clock":
             settings.toggle_auto_idle_clock()
+        elif action == "alert_military":
+            from display.round_touch import alert_prefs
+
+            alert_prefs.toggle_military_enabled()
+            radar.invalidate_frame_layer()
+        elif action == "alert_emergency":
+            from display.round_touch import alert_prefs
+
+            alert_prefs.toggle_emergency_enabled()
+            radar.invalidate_frame_layer()
+        elif action == "alert_hide_non_alerted":
+            from display.round_touch import alert_prefs
+
+            alert_prefs.toggle_hide_non_alerted()
+            radar.invalidate_frame_layer()
         elif action == "radar_hud":
             settings.toggle_radar_hud_enabled()
             radar.invalidate_frame_layer()
@@ -1336,7 +1393,7 @@ class RoundTouchDisplay:
         elif action == "enabled":
             from utilities import atc_audio
 
-            atc_audio.apply_enabled(not settings.atc_enabled())
+            atc_audio.toggle_power()
             info.invalidate_atc_labels()
         elif action == "volume":
             return
@@ -1544,6 +1601,20 @@ class RoundTouchDisplay:
             self._radar_hud_volume_drag = True
             # Don't let this drag become a screen-change swipe on release.
             self.input.suppress_finish_result()
+        elif not radar_hud.volume_slider_drag_band(x, y):
+            # Left the vertical band — stop sticky X→volume mapping.
+            self._radar_hud_volume_drag = False
+            channel = radar_hud.volume_popover_channel()
+            if channel == "atc":
+                from utilities import atc_audio
+
+                atc_audio.set_volume(settings.atc_volume(), persist=True)
+            elif channel:
+                settings.set_hud_channel_volume(
+                    channel, settings.hud_channel_volume(channel), persist=True
+                )
+            self.input.consume_scroll_drag()
+            return True
         changed = self._apply_radar_hud_volume(x, persist=False)
         self.input.consume_scroll_drag()
         return changed
@@ -1632,6 +1703,11 @@ class RoundTouchDisplay:
             if not info.hud_opacity_slider_at(x, y, self._scroll.offset):
                 return False
             self._hud_opacity_slider_active = True
+        elif not info.hud_opacity_slider_drag_band(x, y, self._scroll.offset):
+            self._hud_opacity_slider_active = False
+            settings.set_radar_hud_opacity(settings.radar_hud_opacity(), persist=True)
+            self.input.consume_scroll_drag()
+            return True
         changed = self._apply_hud_opacity_slider(x, persist=False)
         self.input.consume_scroll_drag()
         return changed
@@ -1699,6 +1775,17 @@ class RoundTouchDisplay:
             if not hit:
                 return False
             self._hud_volume_slider_kind = hit
+        elif not info.hud_volume_slider_drag_band(
+            self._hud_volume_slider_kind, x, y, self._scroll.offset
+        ):
+            kind = self._hud_volume_slider_kind
+            self._hud_volume_slider_kind = None
+            meta = info._hud_volume_meta(kind)  # noqa: SLF001
+            if meta is not None:
+                _label, getter, setter = meta
+                setter(getter(), persist=True)
+            self.input.consume_scroll_drag()
+            return True
         changed = self._apply_hud_volume_slider(
             self._hud_volume_slider_kind, x, persist=False
         )
@@ -1726,34 +1813,35 @@ class RoundTouchDisplay:
             if not info.atc_volume_slider_at(x, y, self._scroll.offset):
                 return False
             self._atc_volume_slider_active = True
+        elif not info.atc_volume_slider_drag_band(x, y, self._scroll.offset):
+            self._atc_volume_slider_active = False
+            from utilities import atc_audio
+
+            atc_audio.set_volume(settings.atc_volume(), persist=True)
+            self.input.consume_scroll_drag()
+            return True
         changed = self._apply_atc_volume_slider(x, persist=False)
         self.input.consume_scroll_drag()
         return changed
 
     def _execute_atc_action(self, action: str) -> None:
+        """Legacy Play/Stop actions — both map to the single ATC power switch."""
         from utilities import atc_audio
 
         if action == "play":
-            if not settings.atc_enabled():
-                atc_audio.apply_enabled(True)
-            atc_audio.start(override=True)
+            atc_audio.apply_enabled(True)
             info.invalidate_atc_labels()
         elif action == "stop":
-            atc_audio.stop()
+            atc_audio.apply_enabled(False)
             info.invalidate_atc_labels()
 
     def _toggle_radar_hud_atc(self) -> None:
-        """HUD ATC icon: stop if playing, otherwise start (quiet-hours override)."""
+        """HUD ATC long-press: same enable/disable as Settings → ATC Audio."""
         from utilities import atc_audio
 
-        if atc_audio.is_playing():
-            atc_audio.stop()
-            info.invalidate_atc_labels()
-            return
-        if not settings.atc_enabled():
-            atc_audio.apply_enabled(True)
-        atc_audio.start(override=True)
+        atc_audio.toggle_power()
         info.invalidate_atc_labels()
+        radar.invalidate_frame_layer()
 
     def _begin_facing_calibrate(self):
         """Enter radar facing-calibrate mode (circular drag = dial analogue)."""
@@ -1973,14 +2061,17 @@ class RoundTouchDisplay:
         if (time.time() - self._hud_mute_down_at) * 1000.0 < long_press_pan.HOLD_MS:
             return False
         channel = self._hud_mute_channel
-        settings.toggle_hud_channel_mute(channel)
-        if channel in ("speaker", "atc"):
-            try:
-                from utilities import atc_audio
+        if channel == "atc":
+            self._toggle_radar_hud_atc()
+        else:
+            settings.toggle_hud_channel_mute(channel)
+            if channel == "speaker":
+                try:
+                    from utilities import atc_audio
 
-                atc_audio.set_volume(settings.atc_volume(), persist=False)
-            except Exception:
-                pass
+                    atc_audio.set_volume(settings.atc_volume(), persist=False)
+                except Exception:
+                    pass
         self._hud_mute_fired = True
         self.input.suppress_finish_result()
         self._long_press_pan.clear_candidate()
@@ -2608,6 +2699,18 @@ class RoundTouchDisplay:
             group, channel = hit
             self._rgb_slider_group = group
             self._rgb_slider_channel = channel
+        elif not info.theme_slider_drag_band(
+            self._rgb_slider_group or info.RGB_GROUP_THEME,
+            self._rgb_slider_channel,
+            x,
+            y,
+            self._scroll.offset,
+        ):
+            settings.persist_theme_settings()
+            self._rgb_slider_channel = None
+            self._rgb_slider_group = None
+            self.input.consume_scroll_drag()
+            return True
         changed = self._apply_theme_slider(
             self._rgb_slider_group or info.RGB_GROUP_THEME,
             self._rgb_slider_channel,
@@ -2637,6 +2740,11 @@ class RoundTouchDisplay:
             if not info.brightness_slider_at(x, y, self._scroll.offset):
                 return False
             self._brightness_slider_active = True
+        elif not info.brightness_slider_drag_band(x, y, self._scroll.offset):
+            self._brightness_slider_active = False
+            settings.set_brightness_percent(settings.brightness_percent(), persist=True)
+            self.input.consume_scroll_drag()
+            return True
         changed = self._apply_brightness_slider(x, persist=False)
         self.input.consume_scroll_drag()
         return changed
@@ -2672,6 +2780,11 @@ class RoundTouchDisplay:
             if not info.vfr_opacity_slider_at(x, y, self._scroll.offset):
                 return False
             self._vfr_opacity_slider_active = True
+        elif not info.vfr_opacity_slider_drag_band(x, y, self._scroll.offset):
+            self._vfr_opacity_slider_active = False
+            settings.set_vfr_map_opacity(settings.vfr_map_opacity(), persist=True)
+            self.input.consume_scroll_drag()
+            return True
         changed = self._apply_vfr_opacity_slider(x, persist=False)
         self.input.consume_scroll_drag()
         return changed
@@ -2991,6 +3104,9 @@ class RoundTouchDisplay:
                         self._note_activity()
                         radar.invalidate_frame_layer()
                         self._safe_draw()
+                    elif bubble_action == "progress":
+                        # In-progress bubble is not dismissible; ignore underlying taps.
+                        self._note_activity()
                     else:
                         hud_action = radar_hud.handle_tap(tap[0], tap[1])
                         if hud_action is not None:
@@ -3568,6 +3684,12 @@ class RoundTouchDisplay:
                         logger.debug("Window focus lost — raising display")
                         self._reassert_fullscreen()
                         continue
+                    if event.type == pygame.KEYDOWN and event.key in (
+                        pygame.K_RETURN,
+                        pygame.K_KP_ENTER,
+                    ):
+                        if self._try_keyboard_accept_disclaimer():
+                            continue
                     # Do not recreate the display on WINDOWEXPOSED / FOCUSGAINED —
                     # that races the render loop and can black-screen the kiosk.
                     if gesture_handler.RadarGestureHandler.is_touch_event(event):

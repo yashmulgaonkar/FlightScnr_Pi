@@ -510,6 +510,43 @@ class PlayerTests(unittest.TestCase):
         self.assertFalse(st["playing"])
         self.assertIn("disabled", (st.get("error") or "").lower())
 
+    def test_apply_enabled_on_starts_and_sets_want_playing(self):
+        from utilities import atc_audio
+
+        proc = self._fake_proc()
+        with mock.patch.object(atc_audio, "in_quiet_hours", return_value=False), mock.patch(
+            "utilities.atc_audio.subprocess.Popen", return_value=proc
+        ), mock.patch("utilities.atc_audio.time.sleep"):
+            st = atc_audio.apply_enabled(True)
+        self.assertTrue(st["playing"])
+        self.settings.set_atc_enabled.assert_called_with(True)
+        self.settings.set_atc_want_playing.assert_called_with(True)
+
+    def test_apply_enabled_off_stops_and_clears_want_playing(self):
+        from utilities import atc_audio
+
+        proc = self._fake_proc()
+        with mock.patch.object(atc_audio, "in_quiet_hours", return_value=False), mock.patch(
+            "utilities.atc_audio.subprocess.Popen", return_value=proc
+        ), mock.patch("utilities.atc_audio.time.sleep"), mock.patch(
+            "utilities.atc_audio.os.killpg"
+        ):
+            atc_audio.start(override=True)
+            st = atc_audio.apply_enabled(False)
+        self.assertFalse(st["playing"])
+        self.settings.set_atc_enabled.assert_called_with(False)
+        self.settings.set_atc_want_playing.assert_called_with(False)
+
+    def test_toggle_power_flips_enabled(self):
+        from utilities import atc_audio
+
+        self.settings.atc_enabled.return_value = False
+        with mock.patch.object(
+            atc_audio, "apply_enabled", return_value={"playing": True}
+        ) as apply:
+            atc_audio.toggle_power()
+        apply.assert_called_once_with(True, override=True)
+
     def test_stop_kills_process_group(self):
         from utilities import atc_audio
 
@@ -769,7 +806,7 @@ class PlayerTests(unittest.TestCase):
         popen.assert_called_once()
 
     def test_on_radar_center_changed_no_autostart_when_stopped(self):
-        """Explicit Stop (want_playing cleared) only updates selection."""
+        """Disabled ATC (want_playing cleared) only updates selection."""
         from utilities import atc_audio
 
         self.settings.atc_enabled.return_value = True

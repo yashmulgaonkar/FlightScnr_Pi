@@ -105,6 +105,22 @@ class TestDisclaimerAcceptance(_SettingsTempMixin, unittest.TestCase):
         settings._state = loaded
         self.assertFalse(disclaimer_acceptance.is_remembered())
 
+    def test_keyboard_accept_allowed_until_cutoff(self):
+        from datetime import date
+
+        self.assertTrue(
+            disclaimer_acceptance.keyboard_accept_allowed(date(2026, 8, 31))
+        )
+        self.assertTrue(
+            disclaimer_acceptance.keyboard_accept_allowed(date(2026, 8, 7))
+        )
+        self.assertFalse(
+            disclaimer_acceptance.keyboard_accept_allowed(date(2026, 9, 1))
+        )
+        self.assertEqual(
+            disclaimer_acceptance.KEYBOARD_ACCEPT_UNTIL, date(2026, 8, 31)
+        )
+
 
 class TestDisclaimerBootFlow(unittest.TestCase):
     def _bare(self) -> app_mod.RoundTouchDisplay:
@@ -252,6 +268,84 @@ class TestDisclaimerBootFlow(unittest.TestCase):
         with mock.patch.object(d, "_accept_safety_disclaimer") as accept:
             d._tick_disclaimer()
         accept.assert_called_once_with(from_auto=True)
+
+    def test_keyboard_accept_clears_remember_even_if_checked(self):
+        d = self._bare()
+        d._disclaimer_remember_checked = True
+        with mock.patch.object(
+            disclaimer_acceptance, "keyboard_accept_allowed", return_value=True
+        ), mock.patch.object(
+            disclaimer_acceptance, "remember_current"
+        ) as remember, mock.patch.object(
+            disclaimer_acceptance, "clear"
+        ) as clear, mock.patch.object(
+            d, "_start_session_after_disclaimer"
+        ) as start, mock.patch(
+            "display.round_touch.app.wifi_setup_util.should_enter_setup_at_boot",
+            return_value=False,
+        ), mock.patch(
+            "display.round_touch.app.map_bg.request_background"
+        ), mock.patch(
+            "display.round_touch.app.map_bg.prewarm_all_scales"
+        ), mock.patch(
+            "display.round_touch.app.rainviewer_overlay.request_overlay"
+        ), mock.patch(
+            "display.round_touch.app.wildfire_overlay.request_refresh"
+        ):
+            self.assertTrue(d._try_keyboard_accept_disclaimer())
+        self.assertFalse(d._disclaimer_remember_checked)
+        remember.assert_not_called()
+        clear.assert_called_once()
+        start.assert_called_once()
+
+    def test_keyboard_accept_ignored_after_cutoff(self):
+        d = self._bare()
+        d._disclaimer_remember_checked = True
+        with mock.patch.object(
+            disclaimer_acceptance, "keyboard_accept_allowed", return_value=False
+        ), mock.patch.object(
+            d, "_accept_safety_disclaimer"
+        ) as accept:
+            self.assertFalse(d._try_keyboard_accept_disclaimer())
+        accept.assert_not_called()
+        self.assertTrue(d._disclaimer_remember_checked)
+
+    def test_keyboard_accept_ignored_during_countdown(self):
+        d = self._bare()
+        d._disclaimer_deadline = time.time() + 5
+        with mock.patch.object(
+            disclaimer_acceptance, "keyboard_accept_allowed", return_value=True
+        ), mock.patch.object(
+            d, "_accept_safety_disclaimer"
+        ) as accept:
+            self.assertFalse(d._try_keyboard_accept_disclaimer())
+        accept.assert_not_called()
+
+    def test_touch_accept_still_remembers_when_checked(self):
+        """Regression: touch Accept with checkbox checked still persists."""
+        d = self._bare()
+        d._disclaimer_remember_checked = True
+        with mock.patch.object(
+            disclaimer_acceptance, "remember_current"
+        ) as remember, mock.patch.object(
+            disclaimer_acceptance, "clear"
+        ) as clear, mock.patch.object(
+            d, "_start_session_after_disclaimer"
+        ), mock.patch(
+            "display.round_touch.app.wifi_setup_util.should_enter_setup_at_boot",
+            return_value=False,
+        ), mock.patch(
+            "display.round_touch.app.map_bg.request_background"
+        ), mock.patch(
+            "display.round_touch.app.map_bg.prewarm_all_scales"
+        ), mock.patch(
+            "display.round_touch.app.rainviewer_overlay.request_overlay"
+        ), mock.patch(
+            "display.round_touch.app.wildfire_overlay.request_refresh"
+        ):
+            d._accept_safety_disclaimer()
+        remember.assert_called_once()
+        clear.assert_not_called()
 
 
 class TestDisclaimerLayout(unittest.TestCase):

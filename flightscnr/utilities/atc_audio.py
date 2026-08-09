@@ -1165,11 +1165,9 @@ def _mpv_softvol(ui_percent: float | int) -> float:
 
 
 def _effective_atc_ui_volume(ui_percent: float | int | None = None) -> float:
-    """UI volume for mpv — 0 while master/ATC mute is on; else scaled by master gain."""
+    """UI volume for mpv — 0 while master mute is on; else scaled by master gain."""
     settings = _settings()
     if not settings.master_sound_enabled():
-        return 0.0
-    if not settings.atc_sound_enabled():
         return 0.0
     if ui_percent is None:
         try:
@@ -1304,7 +1302,7 @@ def start(
     quiet = in_quiet_hours()
     if quiet and not override:
         with _lock:
-            _last_error = "Quiet hours — use Play to override"
+            _last_error = "Quiet hours — enable ATC to override"
         return status()
 
     if shutil.which("mpv") is None:
@@ -1408,24 +1406,33 @@ def start(
     return status()
 
 
-def apply_enabled(enabled: bool) -> dict:
-    """Persist enable flag; stop playback when disabling.
+def apply_enabled(enabled: bool, *, override: bool = True) -> dict:
+    """Single ATC power switch shared by HUD, settings, and the web portal.
 
-    Disabling does **not** clear ``atc_want_playing`` — that flag is only cleared
-    by explicit Stop — so turning ATC Audio back on can resume after a restart
-    or a toggle, matching NVS intent.
+    On: persist enabled, set ``atc_want_playing``, and start the stream (quiet
+    hours are overridden by default — same as the old Play button). Idempotent
+    when already playing so Save / preference sync does not retune.
+
+    Off: clear ``atc_want_playing`` and stop playback (same as the old Stop).
     """
     settings = _settings()
-    settings.set_atc_enabled(enabled)
-    if not enabled:
-        return stop(clear_override=False)
-    if settings.atc_want_playing():
-        quiet = in_quiet_hours()
-        forced = settings.atc_quiet_override()
-        if quiet and not forced:
+    on = bool(enabled)
+    if on:
+        settings.set_atc_enabled(True)
+        settings.set_atc_want_playing(True)
+        if is_playing():
             return status()
-        return start(override=bool(forced))
-    return status()
+        quiet = in_quiet_hours()
+        if quiet and not override:
+            return status()
+        return start(override=bool(override))
+    settings.set_atc_enabled(False)
+    return stop(clear_override=True)
+
+
+def toggle_power(*, override: bool = True) -> dict:
+    """Flip ATC enable/disable — HUD long-press and settings switch use this."""
+    return apply_enabled(not _settings().atc_enabled(), override=override)
 
 
 def maybe_resume_when_speaker_ready() -> dict:
@@ -1528,11 +1535,11 @@ def maybe_resume_after_boot(
 ) -> dict:
     """Resume ATC after app restart/reboot if it was playing when we stopped.
 
-    ``atc_want_playing`` is persisted on Play and cleared only on explicit Stop,
+    ``atc_want_playing`` is set when ATC is enabled and cleared when disabled,
     so a reboot/service restart restores audio. Retries for a while after boot
     because PipeWire/network/LiveATC are often not ready on the first try.
 
-    Honors quiet hours unless the user previously forced Play (quiet override).
+    Honors quiet hours unless the user previously forced playback (quiet override).
     Skips mpv entirely when no USB/Bluetooth speaker is present (watch resumes later).
     """
     global _last_error
@@ -1675,11 +1682,10 @@ def on_radar_center_changed() -> dict:
 
     When the previously selected airport leaves the visible area (map moved to a
     completely different location), select the nearest airport that has feeds
-    (else nearest) and default the channel to Tower. If ATC is enabled and
-    playback was active or intended (``want_playing``), retune/start that Tower
-    so audio keeps following the map. If ATC was off or explicitly Stopped,
-    only update the selection. Stop only when continuing playback but the new
-    area has nothing to tune to.
+    (else nearest) and default the channel to Tower. If ATC is enabled
+    (``want_playing``), retune/start that Tower so audio keeps following the map.
+    If ATC is disabled, only update the selection. Stop only when continuing
+    playback but the new area has nothing to tune to.
     Also kick off a background prefetch of feed lists for airports in range.
     """
     settings = _settings()

@@ -115,10 +115,16 @@ def _draw_version_overlay(surface) -> tuple[int, int, pygame.font.Font]:
 
 
 def _update_notice_text() -> str | None:
-    """Return 'Update available vX.Y…' or None when the banner is hidden."""
+    """Return progress / available notice, or None when nothing to show."""
     try:
-        from utilities.updater import remote_release_label, should_show_update_banner
+        from utilities.updater import (
+            remote_release_label,
+            should_show_update_banner,
+            update_running,
+        )
 
+        if update_running():
+            return "Update in progress — do not turn off"
         if not should_show_update_banner():
             return None
         remote = remote_release_label()

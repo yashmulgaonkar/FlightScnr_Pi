@@ -284,9 +284,9 @@ _defaults = {
     "atc_quiet_hours_enabled": True,
     "atc_quiet_start": "",
     "atc_quiet_end": "",
-    # Resume after app restart / reboot if True when Stop was not pressed.
+    # Resume after app restart / reboot when ATC was left enabled.
     "atc_want_playing": False,
-    # User pressed Play during quiet hours — resume may keep overriding.
+    # User enabled ATC during quiet hours — resume may keep overriding.
     "atc_quiet_override": False,
     # Radar clock HUD (Option A glass pill).
     "radar_hud_enabled": True,
@@ -802,6 +802,21 @@ def _load():
             migrated = True
         else:
             state[_sfx_en_key] = bool(state.get(_sfx_en_key))
+    # Single ATC power switch: enabled and want_playing must stay in sync.
+    # Only keep ATC on when both legacy flags were true (gate + Play intent).
+    on = bool(state.get("atc_enabled", False)) and bool(
+        state.get("atc_want_playing", False)
+    )
+    if bool(state.get("atc_enabled", False)) != on or bool(
+        state.get("atc_want_playing", False)
+    ) != on:
+        state["atc_enabled"] = on
+        state["atc_want_playing"] = on
+        migrated = True
+    # Soft-mute layer removed — keep legacy key frozen unmuted.
+    if not bool(state.get("atc_sound_enabled", True)):
+        state["atc_sound_enabled"] = True
+        migrated = True
     for _sfx_vol_key in ("traffic_sfx_volume", "military_sfx_volume"):
         try:
             if _sfx_vol_key not in data:
@@ -2316,17 +2331,26 @@ def apply_master_gain(volume_pct: int | float) -> int:
 
 
 def atc_sound_enabled() -> bool:
-    return bool(_state.get("atc_sound_enabled", True))
+    """Deprecated soft-mute flag — ATC power is ``atc_enabled`` only.
+
+    Kept for settings schema compatibility; mirrors ``atc_enabled``.
+    """
+    return atc_enabled()
 
 
 def set_atc_sound_enabled(enabled: bool) -> None:
-    _state["atc_sound_enabled"] = bool(enabled)
+    """Deprecated — soft mute removed; keep legacy key frozen unmuted."""
+    del enabled  # unused; mute layer no longer exists
+    _state["atc_sound_enabled"] = True
     _save(_state)
 
 
 def toggle_atc_sound_enabled() -> bool:
-    set_atc_sound_enabled(not atc_sound_enabled())
-    return atc_sound_enabled()
+    """Deprecated — prefer ``utilities.atc_audio.toggle_power`` from UI handlers."""
+    from utilities import atc_audio
+
+    atc_audio.toggle_power()
+    return atc_enabled()
 
 
 def hud_channel_volume(channel: str) -> int:
@@ -2369,7 +2393,7 @@ def hud_channel_muted(channel: str) -> bool:
     if key == "alert":
         return not alert_sfx_enabled()
     if key == "atc":
-        return not atc_sound_enabled() or atc_volume() <= 0
+        return not atc_enabled() or atc_volume() <= 0
     return True
 
 
@@ -2383,7 +2407,11 @@ def toggle_hud_channel_mute(channel: str) -> bool:
     if key == "alert":
         return toggle_alert_sfx_enabled()
     if key == "atc":
-        return toggle_atc_sound_enabled()
+        # Same power switch as Settings → ATC Audio (start/stop mpv).
+        from utilities import atc_audio
+
+        atc_audio.toggle_power()
+        return atc_enabled()
     return False
 
 

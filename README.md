@@ -197,6 +197,16 @@ Also included: wildfire markers (CAL FIRE / NIFC / NASA FIRMS), alert mode, faci
 | Updating from the portal | [Updates](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Updates) |
 | Credits and license details | [Credits and License](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Credits-and-License) |
 
+**Upgrading from older builds:** one **Update Now** is enough. If an OTA pulled a newer installer but could not run it (pre-re-exec path), the device **auto-finishes** install steps after restart — or use **Finish install** in the portal. Then **reboot** if LightDM switched to X11.
+
+**Stuck on `2026.8.5.x` (Update fails silently):** an older install step flipped permissions on `scripts/release.sh`, which used to block the update pull. That file is now frozen upstream, so pressing **Update Now** once more in the portal should work — no terminal needed. If it still fails (other local edits, corrupted git store), run on the Pi:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yashmulgaonkar/FlightScnr_Pi/main/scripts/repair-ota.sh | bash
+```
+
+Use `| bash -s -- --hard` only if other local edits also block the pull.
+
 ---
 
 ## Quick install
@@ -209,6 +219,8 @@ git clone https://github.com/yashmulgaonkar/FlightScnr_Pi.git ~/FlightScnr_Pi
 cd ~/FlightScnr_Pi
 sudo bash install-pi.sh
 ```
+
+The installer also enables the enclosure cooling fan via the kernel `gpio-fan` overlay (**GPIO 14**, on at **60°C**). Reboot once after first install so the overlay loads.
 
 3. Open the web portal at `http://<hostname>.local` and add API keys.
 

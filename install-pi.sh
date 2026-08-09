@@ -2,6 +2,8 @@
 # install-pi.sh — Install or update FlightScnr Pi on a Raspberry Pi.
 #
 # Requires: Raspberry Pi OS with desktop (X11 on :0), round touch LCD, network.
+# Fresh installs prefer the X11 session (rpd-x) over labwc/Wayland so SDL gets
+# real multi-touch (pinch-to-zoom). SDL_VIDEODRIVER=x11 stays as today.
 #
 # First install (after clone):
 #   git clone https://github.com/yashmulgaonkar/FlightScnr_Pi.git ~/FlightScnr_Pi
@@ -10,6 +12,10 @@
 #
 # Update (git pull + re-sync, skips apt for speed):
 #   bash ~/FlightScnr_Pi/install-pi.sh update
+#
+# After an OTA from builds that still ran install in-process (pre-re-exec),
+# the app auto-re-syncs install-pi.sh once (stamp mismatch) so users do not
+# need a second Update click. Reboot if LightDM switched to rpd-x.
 #
 # Usage:
 #   sudo bash install-pi.sh [install] [--no-start] [--skip-apt]
@@ -36,6 +42,10 @@ VENV_DIR=""
 REPO_OWNER=""
 REPO_OWNER_HOME=""
 REPO_OWNER_UID=""
+BOOT_CONFIG=""
+BOOT_CMDLINE=""
+# Set by prefer_x11_session when LightDM was switched off labwc/Wayland.
+NEED_REBOOT_FOR_X11=0
 
 setup_paths() {
     REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -104,6 +114,138 @@ install_apt_packages() {
     log_ok "System packages ready"
 }
 
+resolve_boot_paths() {
+    # Prefer Bookworm firmware partition layout.
+    BOOT_CONFIG=""
+    BOOT_CMDLINE=""
+    if [ -f /boot/firmware/config.txt ]; then
+        BOOT_CONFIG="/boot/firmware/config.txt"
+        BOOT_CMDLINE="/boot/firmware/cmdline.txt"
+    elif [ -f /boot/config.txt ]; then
+        BOOT_CONFIG="/boot/config.txt"
+        BOOT_CMDLINE="/boot/cmdline.txt"
+    fi
+}
+
+configure_display_720x720() {
+    # Waveshare 4″ DSI (C) is natively 720×720. Persist that mode for labwc
+    # (kanshi) and X11 (dispsetup.sh). Never abort install if outputs differ.
+    local mode="720x720"
+    local kanshi_body
+    local dispsetup
+    local home_dir owner
+    local applied=0
+
+    log_step "Display resolution ${mode}"
+
+    kanshi_body=$(cat <<EOF
+# Managed by FlightScnr install-pi.sh — round Waveshare DSI panel.
+profile {
+    output DSI-1 enable mode ${mode} position 0,0 scale 1
+}
+profile {
+    output DSI-2 enable mode ${mode} position 0,0 scale 1
+}
+EOF
+)
+
+    for owner in "$REPO_OWNER" pi root; do
+        home_dir="$(getent passwd "$owner" | cut -d: -f6)"
+        [ -n "$home_dir" ] || continue
+        mkdir -p "${home_dir}/.config/kanshi"
+        if printf '%s\n' "$kanshi_body" > "${home_dir}/.config/kanshi/config"; then
+            chown -R "$owner:$owner" "${home_dir}/.config/kanshi" 2>/dev/null || true
+            applied=1
+        else
+            log_warn "Could not write ${home_dir}/.config/kanshi/config (continuing)"
+        fi
+    done
+
+    # System fallback used by greeter / first boot before a user config exists.
+    if mkdir -p /etc/xdg/kanshi 2>/dev/null; then
+        if printf '%s\n' "$kanshi_body" > /etc/xdg/kanshi/config 2>/dev/null; then
+            applied=1
+        fi
+    fi
+
+    # Raspberry Pi Desktop X11 screen layout hook (Screen Configuration / arandr).
+    dispsetup="/usr/share/dispsetup.sh"
+    if cat > "$dispsetup" <<EOF
+#!/bin/sh
+# Managed by FlightScnr install-pi.sh — force round panel mode on X11.
+for out in DSI-1 DSI-2; do
+    xrandr --output "\$out" --mode ${mode} --primary 2>/dev/null || true
+done
+exit 0
+EOF
+    then
+        chmod 0755 "$dispsetup" 2>/dev/null || true
+        applied=1
+    else
+        log_warn "Could not write $dispsetup (continuing)"
+    fi
+
+    # Best-effort apply to a live session (no failure if compositor is down).
+    if command -v wlr-randr >/dev/null 2>&1; then
+        for sock_dir in /run/user/*; do
+            [ -d "$sock_dir" ] || continue
+            for wd in wayland-1 wayland-0; do
+                [ -S "${sock_dir}/${wd}" ] || continue
+                for out in DSI-1 DSI-2; do
+                    env XDG_RUNTIME_DIR="$sock_dir" WAYLAND_DISPLAY="$wd" \
+                        wlr-randr --output "$out" --mode "$mode" >/dev/null 2>&1 || true
+                done
+            done
+        done
+    fi
+    if [ -n "${DISPLAY:-}" ] || [ -S /tmp/.X11-unix/X0 ]; then
+        for out in DSI-1 DSI-2; do
+            DISPLAY="${DISPLAY:-:0}" XAUTHORITY="${XAUTHORITY:-${REPO_OWNER_HOME}/.Xauthority}" \
+                xrandr --output "$out" --mode "$mode" --primary >/dev/null 2>&1 || true
+        done
+    fi
+
+    if [ "$applied" -eq 1 ]; then
+        log_ok "Configured ${mode} via kanshi + dispsetup.sh (DSI-1/DSI-2 when present)"
+    else
+        log_warn "Could not persist ${mode} display config (continuing)"
+    fi
+}
+
+install_gpio_fan() {
+    # Kernel gpio-fan: on/off on the control wire when SoC hits the threshold.
+    # Matches the official Pi case-fan wiring (GPIO 14). temp is millidegrees C.
+    # Writes must not abort portal OTA under set -e (vfat remount-ro / full boot
+    # partition) — same class of guard as Bluetooth panel edits (5fdb6d4).
+    local fan_line="dtoverlay=gpio-fan,gpiopin=14,temp=60000"
+
+    log_step "Case fan (gpio-fan overlay)"
+
+    resolve_boot_paths
+    if [ -z "$BOOT_CONFIG" ]; then
+        log_warn "Could not find config.txt — skipped gpio-fan overlay"
+        return 0
+    fi
+    if [ ! -w "$BOOT_CONFIG" ]; then
+        log_warn "config.txt not writable ($BOOT_CONFIG) — skipped gpio-fan overlay"
+        return 0
+    fi
+
+    if grep -qE '^\s*dtoverlay=gpio-fan' "$BOOT_CONFIG"; then
+        if sed -i "s|^[[:space:]]*dtoverlay=gpio-fan.*|${fan_line}|" "$BOOT_CONFIG"; then
+            log_ok "Updated gpio-fan overlay ($BOOT_CONFIG): GPIO 14 @ 60°C"
+        else
+            log_warn "Could not update gpio-fan overlay in $BOOT_CONFIG (continuing)"
+        fi
+    else
+        if printf '\n# FlightScnr Pi — case fan (GPIO 14 @ 60°C)\n%s\n' "$fan_line" >> "$BOOT_CONFIG"; then
+            log_ok "Installed gpio-fan overlay ($BOOT_CONFIG): GPIO 14 @ 60°C"
+        else
+            log_warn "Could not write gpio-fan overlay to $BOOT_CONFIG (continuing)"
+        fi
+    fi
+}
+
 install_boot_splash() {
     # Custom Plymouth splash + desktop wallpaper + hide firmware rainbow splash.
     local src="$APP_DIR/assets/boot/splash.png"
@@ -111,8 +253,6 @@ install_boot_splash() {
     local pix_splash="$pix_dir/splash.png"
     local wall_dir="/usr/share/rpd-wallpaper"
     local wall_splash="$wall_dir/flightscnr.png"
-    local config=""
-    local cmdline=""
     local tmp_splash=""
 
     log_step "Boot splash & wallpaper (FlightScnr)"
@@ -122,14 +262,7 @@ install_boot_splash() {
         return 0
     fi
 
-    # Prefer Bookworm firmware partition layout.
-    if [ -f /boot/firmware/config.txt ]; then
-        config="/boot/firmware/config.txt"
-        cmdline="/boot/firmware/cmdline.txt"
-    elif [ -f /boot/config.txt ]; then
-        config="/boot/config.txt"
-        cmdline="/boot/cmdline.txt"
-    fi
+    resolve_boot_paths
 
     # Pi panel is usually rotated vs the art (DISPLAY_ROTATION); Plymouth / the
     # desktop greeter have no FlightScnr rotation, so bake a 90° CW copy once.
@@ -168,39 +301,78 @@ PYROT
     fi
 
     # Desktop wallpaper — same image as Plymouth.
+    # labwc's /usr/bin/pcmanfm-pi runs `pcmanfm --desktop` with no -p flag, so the
+    # active profile is "default" (not LXDE-pi). Updating only LXDE-pi left
+    # /etc/xdg/pcmanfm/default on sunrise.jpg and the desktop never changed.
     if [ -d "$wall_dir" ] || mkdir -p "$wall_dir" 2>/dev/null; then
         install -m 0644 "$tmp_splash" "$wall_splash"
-        local conf
-        for conf in \
-            /etc/xdg/pcmanfm/LXDE-pi/desktop-items-0.conf \
-            /home/pi/.config/pcmanfm/LXDE-pi/desktop-items-0.conf
-        do
+
+        _set_pcmanfm_wallpaper_conf() {
+            local conf="$1"
             mkdir -p "$(dirname "$conf")"
             if [ -f "$conf" ]; then
                 if grep -qE '^\s*wallpaper=' "$conf"; then
-                    sed -i "s|^[[:space:]]*wallpaper=.*|wallpaper=$wall_splash|" "$conf"
+                    sed -i "s|^[[:space:]]*wallpaper=.*|wallpaper=$wall_splash|" "$conf" || return 0
                 else
-                    printf 'wallpaper=%s\n' "$wall_splash" >> "$conf"
+                    printf 'wallpaper=%s\n' "$wall_splash" >> "$conf" || return 0
                 fi
                 if ! grep -qE '^\s*wallpaper_mode=' "$conf"; then
-                    printf 'wallpaper_mode=crop\n' >> "$conf"
+                    printf 'wallpaper_mode=crop\n' >> "$conf" || true
                 fi
             else
-                printf '[*]\nwallpaper_mode=crop\nwallpaper_common=1\nwallpaper=%s\n' "$wall_splash" > "$conf"
+                printf '[*]\nwallpaper_mode=crop\nwallpaper_common=1\nwallpaper=%s\n' \
+                    "$wall_splash" > "$conf" || true
             fi
-            if [[ "$conf" == /home/pi/* ]]; then
-                chown -R pi:pi "$(dirname "$conf")" 2>/dev/null || true
-            fi
-        done
-        # Refresh live desktop if a session is up (best-effort).
-        if id pi >/dev/null 2>&1; then
-            local pi_uid
-            pi_uid="$(id -u pi)"
-            sudo -u pi env DISPLAY="${DISPLAY:-:0}" \
-                XDG_RUNTIME_DIR="/run/user/$pi_uid" \
+        }
+
+        _refresh_pcmanfm_wallpaper() {
+            local desk_user="$1"
+            local desk_uid
+            id "$desk_user" >/dev/null 2>&1 || return 0
+            desk_uid="$(id -u "$desk_user")"
+            sudo -u "$desk_user" env DISPLAY="${DISPLAY:-:0}" \
+                XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$desk_uid}" \
                 pcmanfm --set-wallpaper="$wall_splash" --wallpaper-mode=crop \
                 >/dev/null 2>&1 || true
+            sudo -u "$desk_user" env DISPLAY="${DISPLAY:-:0}" \
+                XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$desk_uid}" \
+                pcmanfm --reconfigure >/dev/null 2>&1 || true
+        }
+
+        local profile home_dir owner
+        for profile in default LXDE-pi; do
+            _set_pcmanfm_wallpaper_conf \
+                "/etc/xdg/pcmanfm/${profile}/desktop-items-0.conf"
+            if [ -f "/etc/xdg/pcmanfm/${profile}/desktop-items-1.conf" ]; then
+                _set_pcmanfm_wallpaper_conf \
+                    "/etc/xdg/pcmanfm/${profile}/desktop-items-1.conf"
+            fi
+            for owner in "$REPO_OWNER" pi root; do
+                home_dir="$(getent passwd "$owner" | cut -d: -f6)"
+                [ -n "$home_dir" ] || continue
+                _set_pcmanfm_wallpaper_conf \
+                    "${home_dir}/.config/pcmanfm/${profile}/desktop-items-0.conf"
+                if [ -f "${home_dir}/.config/pcmanfm/${profile}/desktop-items-1.conf" ]; then
+                    _set_pcmanfm_wallpaper_conf \
+                        "${home_dir}/.config/pcmanfm/${profile}/desktop-items-1.conf"
+                fi
+                chown -R "$owner:$owner" "${home_dir}/.config/pcmanfm" 2>/dev/null || true
+            done
+        done
+
+        _refresh_pcmanfm_wallpaper "${REPO_OWNER:-pi}"
+        # Some images autologin the graphical session as root.
+        if [ "$(id -u)" -eq 0 ]; then
+            env DISPLAY="${DISPLAY:-:0}" \
+                XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/0}" \
+                pcmanfm --set-wallpaper="$wall_splash" --wallpaper-mode=crop \
+                >/dev/null 2>&1 || true
+            env DISPLAY="${DISPLAY:-:0}" \
+                XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/0}" \
+                pcmanfm --reconfigure >/dev/null 2>&1 || true
         fi
+
+        unset -f _set_pcmanfm_wallpaper_conf _refresh_pcmanfm_wallpaper
         log_ok "Desktop wallpaper set to FlightScnr splash ($wall_splash)"
     else
         log_warn "Could not create $wall_dir — skipped wallpaper install"
@@ -208,25 +380,25 @@ PYROT
 
     rm -f "$tmp_splash"
 
-    if [ -n "$config" ]; then
-        if grep -qE '^\s*disable_splash=' "$config"; then
-            sed -i 's/^\s*disable_splash=.*/disable_splash=1/' "$config"
+    if [ -n "$BOOT_CONFIG" ]; then
+        if grep -qE '^\s*disable_splash=' "$BOOT_CONFIG"; then
+            sed -i 's/^\s*disable_splash=.*/disable_splash=1/' "$BOOT_CONFIG"
         else
-            printf '\n# FlightScnr Pi — hide firmware rainbow splash\ndisable_splash=1\n' >> "$config"
+            printf '\n# FlightScnr Pi — hide firmware rainbow splash\ndisable_splash=1\n' >> "$BOOT_CONFIG"
         fi
-        log_ok "Firmware splash disabled ($config)"
+        log_ok "Firmware splash disabled ($BOOT_CONFIG)"
     else
         log_warn "Could not find config.txt — firmware splash unchanged"
     fi
 
-    if [ -n "$cmdline" ] && [ -f "$cmdline" ]; then
+    if [ -n "$BOOT_CMDLINE" ] && [ -f "$BOOT_CMDLINE" ]; then
         # Keep quiet splash for Plymouth; add if missing.
-        if ! grep -qw splash "$cmdline"; then
+        if ! grep -qw splash "$BOOT_CMDLINE"; then
             # cmdline is a single line
-            sed -i 's/$/ splash/' "$cmdline"
+            sed -i 's/$/ splash/' "$BOOT_CMDLINE"
         fi
-        if ! grep -qw quiet "$cmdline"; then
-            sed -i 's/$/ quiet/' "$cmdline"
+        if ! grep -qw quiet "$BOOT_CMDLINE"; then
+            sed -i 's/$/ quiet/' "$BOOT_CMDLINE"
         fi
         log_ok "Kernel cmdline keeps quiet splash"
     fi
@@ -243,10 +415,14 @@ install_ui_fonts() {
         tmp=$(mktemp -d)
         if curl -fsSL -o "$tmp/Inter.zip" \
             "https://github.com/yashmulgaonkar/inter/releases/download/v4.1/Inter-4.1.zip"; then
-            unzip -qo -j "$tmp/Inter.zip" \
+            if unzip -qo -j "$tmp/Inter.zip" \
                 "extras/ttf/Inter-Regular.ttf" "extras/ttf/Inter-Bold.ttf" \
                 -d "$inter_dir"
-            log_ok "Inter fonts ready"
+            then
+                log_ok "Inter fonts ready"
+            else
+                log_warn "Could not extract Inter fonts — UI may fall back to DejaVu"
+            fi
         else
             log_warn "Could not download Inter fonts — UI may fall back to DejaVu"
         fi
@@ -329,9 +505,13 @@ extract_logos() {
 
     if [ ! -d "$logo_dir" ] || [ "$logo_zip" -nt "$logo_dir" ]; then
         log_step "Extracting airline logos"
-        unzip -qo "$logo_zip" -d "$REPO_ROOT"
-        chmod -R a+r "$logo_dir"
-        log_ok "Logos extracted to logo/"
+        # unzip exit 2 = zip format error; must not abort portal OTA (set -e).
+        if unzip -qo "$logo_zip" -d "$REPO_ROOT"; then
+            chmod -R a+r "$logo_dir"
+            log_ok "Logos extracted to logo/"
+        else
+            log_warn "Could not extract logo.zip (continuing)"
+        fi
     fi
 
     rm -f "$logos_link"
@@ -348,7 +528,10 @@ setup_venv() {
         log_ok "Using existing $VENV_DIR"
     fi
 
-    "$VENV_DIR/bin/python" -m pip install --upgrade pip setuptools wheel >/dev/null
+    # pip uses exit 2 for UNKNOWN_ERROR — do not let a self-upgrade flake abort OTA.
+    if ! "$VENV_DIR/bin/python" -m pip install --upgrade pip setuptools wheel >/dev/null; then
+        log_warn "pip self-upgrade failed (continuing with existing pip)"
+    fi
     "$VENV_DIR/bin/python" -m pip install -r "$REPO_ROOT/requirements.txt"
     log_ok "Python dependencies installed"
 }
@@ -392,15 +575,107 @@ setup_config_h() {
     log_ok "Created config.h from config.h.example"
 }
 
+lightdm_session_is_wayland() {
+    # Prefer LightDM config over $XDG_SESSION_TYPE — installs over SSH are often
+    # tty and would miss a labwc autologin session.
+    local conf="${1:-/etc/lightdm/lightdm.conf}"
+    [ -f "$conf" ] || return 1
+    grep -qE '^[[:space:]]*(user-session|autologin-session)=(rpd-labwc|labwc|LXDE-pi-labwc|rpd-wayland)[[:space:]]*$' "$conf"
+}
+
+# True when the *live* desktop is still labwc/Xwayland (config may already say X11
+# if the machine was never rebooted after prefer_x11_session).
+wayland_desktop_still_running() {
+    pgrep -x labwc >/dev/null 2>&1 || pgrep -x Xwayland >/dev/null 2>&1
+}
+
+prefer_x11_session() {
+    # Bookworm defaults to labwc/Wayland. FlightScnr is an SDL X11 client on :0;
+    # under Xwayland touch is pointer-emulated (MOUSE* only) so pinch cannot work
+    # (issue #21). Mirror raspi-config "W1 X11" so fresh installs get real Xorg
+    # multi-touch. Leaves SDL_VIDEODRIVER=x11 unchanged (env + unit already set it).
+    local conf="/etc/lightdm/lightdm.conf"
+    local xsession wsession xgsession
+    local accounts=""
+
+    log_step "Desktop session (X11 for multi-touch / pinch-zoom)"
+
+    if [ ! -f "$conf" ]; then
+        log_ok "No LightDM config — skipping session preference"
+        return 0
+    fi
+
+    if [ -f /usr/share/xsessions/rpd-x.desktop ] \
+        || [ -f /usr/share/wayland-sessions/rpd-labwc.desktop ]; then
+        xsession=rpd-x
+        wsession=rpd-labwc
+        xgsession=pi-greeter-x
+    elif [ -f /usr/share/xsessions/LXDE-pi-x.desktop ]; then
+        xsession=LXDE-pi-x
+        wsession=LXDE-pi-labwc
+        xgsession=pi-greeter
+    else
+        log_warn "No Pi X11 session desktop file found — leave LightDM as-is"
+        log_warn "Pinch-to-zoom needs real X11 (not Xwayland); see GitHub issue #21"
+        return 0
+    fi
+
+    if [ ! -f "/usr/share/xsessions/${xsession}.desktop" ]; then
+        log_warn "X11 session '${xsession}' missing — leave LightDM as-is"
+        return 0
+    fi
+
+    if ! lightdm_session_is_wayland "$conf"; then
+        if grep -qE "^[[:space:]]*user-session=${xsession}[[:space:]]*$" "$conf" \
+            && grep -qE "^[[:space:]]*autologin-session=${xsession}[[:space:]]*$" "$conf"; then
+            if wayland_desktop_still_running; then
+                # Config was switched earlier but this boot is still labwc/Xwayland.
+                NEED_REBOOT_FOR_X11=1
+                log_warn "LightDM is set to X11 (${xsession}) but labwc/Xwayland is still running"
+                log_warn "Reboot required before pinch-to-zoom will work (issue #21)"
+                return 0
+            fi
+            log_ok "LightDM already on X11 (${xsession}) — pinch multi-touch path OK"
+            return 0
+        fi
+        log_ok "LightDM not on labwc/Wayland — leaving session unchanged"
+        return 0
+    fi
+
+    sed -i -e "s/^#\\?user-session.*/user-session=${xsession}/" "$conf"
+    sed -i -e "s/^#\\?autologin-session.*/autologin-session=${xsession}/" "$conf"
+    if [ -f "/usr/share/xgreeters/${xgsession}.desktop" ] \
+        || [ -f "/usr/share/lightdm/greeters/${xgsession}.desktop" ]; then
+        sed -i -e "s/^#\\?greeter-session.*/greeter-session=${xgsession}/" "$conf"
+    fi
+    sed -i -e "s/^fallback-test.*/#fallback-test=/" "$conf"
+    sed -i -e "s/^fallback-session.*/#fallback-session=/" "$conf"
+    sed -i -e "s/^fallback-greeter.*/#fallback-greeter=/" "$conf"
+
+    accounts="/var/lib/AccountsService/users/${REPO_OWNER}"
+    if [ -f "$accounts" ]; then
+        sed -i -e "s/^XSession=.*/XSession=${xsession}/" "$accounts" || true
+    fi
+
+    NEED_REBOOT_FOR_X11=1
+    log_ok "Switched LightDM to X11 (${xsession}; was ${wsession}) for pinch-to-zoom"
+    log_warn "Reboot required before the X11 session (and pinch) take effect"
+    return 0
+}
+
 setup_env_file() {
     if [ -f "$ENV_DEST" ]; then
         log_ok "$ENV_DEST already exists — keeping current configuration"
         # Bookworm labwc/Xwayland pointer-emulates touch (MOUSE* only). An old
         # TOUCH_USE_FINGER_EVENTS=True install silently drops every tap (#14).
+        # Detect via LightDM config too — SSH installs often have no WAYLAND_*.
         if grep -qE '^[[:space:]]*TOUCH_USE_FINGER_EVENTS=(True|true|1|yes|on)[[:space:]]*$' "$ENV_DEST"; then
-            if [ "${XDG_SESSION_TYPE:-}" = "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+            if [ "${XDG_SESSION_TYPE:-}" = "wayland" ] \
+                || [ -n "${WAYLAND_DISPLAY:-}" ] \
+                || lightdm_session_is_wayland \
+                || [ "${NEED_REBOOT_FOR_X11:-0}" -eq 1 ]; then
                 sed -i 's/^[[:space:]]*TOUCH_USE_FINGER_EVENTS=.*/TOUCH_USE_FINGER_EVENTS=False/' "$ENV_DEST"
-                log_ok "Set TOUCH_USE_FINGER_EVENTS=False for Wayland/Xwayland touch (issue #14)"
+                log_ok "Set TOUCH_USE_FINGER_EVENTS=False for safe taps (issue #14)"
             else
                 log_warn "TOUCH_USE_FINGER_EVENTS is True — if taps do nothing under Xwayland, set it False in $ENV_DEST"
             fi
@@ -470,7 +745,11 @@ PY
     # from popping "Connected"/battery toasts over fullscreen FlightScnr.
     local wf_ini="${REPO_OWNER_HOME}/.config/wf-panel-pi.ini"
     mkdir -p "$(dirname "$wf_ini")"
-    if python3 - "$wf_ini" <<'PY'
+    # Prefer stdout markers over sys.exit(2): that code became portal
+    # "Update failed (exit 2)" whenever set -e / $? handling missed it (#77).
+    local wf_rc=0
+    local wf_out=""
+    wf_out="$(python3 - "$wf_ini" 2>/dev/null <<'PY'
 import pathlib, re, sys
 
 FALLBACK_RIGHT = (
@@ -523,20 +802,22 @@ text = set_key(text, "widgets_right", without_bluetooth(current.group(1) if curr
 text = set_key(text, "notify_enable", "false")
 
 if text == original:
-    sys.exit(2)
-path.write_text(text, encoding="utf-8")
+    print("UNCHANGED")
+else:
+    path.write_text(text, encoding="utf-8")
+    print("UPDATED")
 PY
-    then
+)" || wf_rc=$?
+    if [ "$wf_rc" -eq 0 ] && [ "$wf_out" = "UPDATED" ]; then
         if [ -n "${REPO_OWNER:-}" ]; then
             chown "$REPO_OWNER:$REPO_OWNER" "$wf_ini" 2>/dev/null || true
         fi
         changed=1
         log_ok "Disabled bluetooth widget + panel notifications in $wf_ini"
+    elif [ "$wf_rc" -eq 0 ]; then
+        log_ok "wf-panel-pi already has bluetooth widget + notifications disabled"
     else
-        case "$?" in
-            2) log_ok "wf-panel-pi already has bluetooth widget + notifications disabled" ;;
-            *) log_warn "Could not update $wf_ini (continuing)" ;;
-        esac
+        log_warn "Could not update $wf_ini (continuing)"
     fi
 
     if [ "$changed" -eq 1 ]; then
@@ -584,8 +865,29 @@ fix_repo_permissions() {
     find "$REPO_ROOT" -type f -exec chmod 644 {} +
     chmod 755 "$REPO_ROOT/install-pi.sh"
     chmod 755 "$SETUP_DIR/portal-update.sh" 2>/dev/null || true
+    # Preserve +x on release helpers — a blanket chmod 644 leaves git "dirty"
+    # (mode 100755→100644) and blocks the next `git pull --ff-only` OTA.
+    if [ -d "$REPO_ROOT/scripts" ]; then
+        find "$REPO_ROOT/scripts" -type f \( -name '*.sh' -o -name '*.cmd' \) \
+            -exec chmod 755 {} + 2>/dev/null || true
+    fi
     chmod 755 "$VENV_DIR/bin/"* 2>/dev/null || true
     log_ok "Repo owned by $REPO_OWNER"
+}
+
+# Drop install-induced dirt that would abort `git pull --ff-only` (notably
+# scripts/release.sh executable-bit flips from older fix_repo_permissions).
+prepare_repo_for_pull() {
+    local git_safe=("$@")
+    local rel
+    for rel in scripts/release.sh scripts/release.cmd scripts/dev-release.sh scripts/repair-ota.sh; do
+        if "${git_safe[@]}" status --porcelain -- "$rel" 2>/dev/null | grep -q .; then
+            log_step "Clearing local changes that block pull ($rel)"
+            "${git_safe[@]}" restore --source=HEAD --staged --worktree -- "$rel" 2>/dev/null \
+                || "${git_safe[@]}" checkout HEAD -- "$rel" 2>/dev/null \
+                || true
+        fi
+    done
 }
 
 start_service() {
@@ -602,6 +904,29 @@ start_service() {
         echo "    ✗ Service failed to start. Check: sudo journalctl -u $SERVICE_NAME -n 30" >&2
         return 1
     fi
+}
+
+write_install_stamp() {
+    # Record which install-pi.sh body last completed successfully so the app
+    # can auto-re-sync after OTAs that pulled a newer installer but ran the
+    # old in-memory one (pre-re-exec update path).
+    local stamp="$DATA_DIR/install-script.sha256"
+    local script="$REPO_ROOT/install-pi.sh"
+    mkdir -p "$DATA_DIR"
+    if [ ! -f "$script" ]; then
+        log_warn "install stamp skipped — missing $script"
+        return 0
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$script" | awk '{print $1}' >"$stamp"
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$script" | awk '{print $1}' >"$stamp"
+    else
+        log_warn "install stamp skipped — no sha256sum/shasum"
+        return 0
+    fi
+    chmod 644 "$stamp" 2>/dev/null || true
+    log_ok "Wrote install stamp ($(tr -d '[:space:]' <"$stamp" | cut -c1-12)…)"
 }
 
 install_update_sudoers() {
@@ -656,19 +981,24 @@ cmd_install() {
     else
         log_ok "Skipped apt packages (--skip-apt)"
     fi
+    # Before splash/UI assets so the panel is in native mode as early as possible.
+    configure_display_720x720
     install_ui_fonts
     install_weather_icons
     install_aircraft_icons
     install_boot_splash
+    install_gpio_fan
     extract_logos
     setup_venv
     verify_python_deps || true
     setup_data_dir
+    prefer_x11_session
     setup_env_file
     suppress_desktop_bluetooth_popups
     install_systemd_service
     install_update_sudoers
     fix_repo_permissions
+    write_install_stamp
 
     if [ "$no_start" -eq 0 ]; then
         start_service
@@ -686,7 +1016,13 @@ cmd_install() {
     echo "  Config:    nano $REPO_ROOT/config.h"
     echo "             OR web portal → API Keys (http://raspberrypi.local)"
     echo "             (advanced: sudo nano $ENV_DEST)"
-    echo "  Reboot:    starts automatically (systemctl is-enabled flightscnr)"
+    if [ "${NEED_REBOOT_FOR_X11:-0}" -eq 1 ]; then
+        echo "  Reboot:    REQUIRED now — switched desktop to X11 for pinch-to-zoom"
+        echo "             (sudo reboot). Afterward: pinch on radar should change range."
+    else
+        echo "  Reboot:    starts automatically (systemctl is-enabled flightscnr)"
+    fi
+    echo "  Fan:       gpio-fan on GPIO 14 @ 60°C (reboot once if this install just added it)"
     echo "  Update:    bash $REPO_ROOT/install-pi.sh update"
     echo ""
 }
@@ -714,26 +1050,33 @@ cmd_update() {
     fi
 
     log_step "Pulling latest changes"
+    # Match utilities/updater.py: always pass safe.directory so root-run portal
+    # updates can read a pi-owned checkout (Git 2.35+ dubious-ownership checks).
+    local git_safe=(git -c "safe.directory=${REPO_ROOT}" -C "$REPO_ROOT")
+    prepare_repo_for_pull "${git_safe[@]}"
     if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
-        sudo -u "$SUDO_USER" git -C "$REPO_ROOT" pull --ff-only
+        sudo -u "$SUDO_USER" "${git_safe[@]}" pull --ff-only
     elif [ "$(id -u)" -eq 0 ]; then
-        sudo -u "$REPO_OWNER" git -C "$REPO_ROOT" pull --ff-only
+        sudo -u "$REPO_OWNER" "${git_safe[@]}" pull --ff-only
     else
-        git -C "$REPO_ROOT" pull --ff-only
+        "${git_safe[@]}" pull --ff-only
     fi
-    log_ok "Git pull complete ($(git -C "$REPO_ROOT" log --oneline -1))"
+    log_ok "Git pull complete ($("${git_safe[@]}" log --oneline -1 2>/dev/null || true))"
 
     local install_args=(--skip-apt)
     if [ "$no_start" -eq 1 ]; then
         install_args+=(--no-start)
     fi
 
+    # Always re-exec the post-pull install-pi.sh. Calling cmd_install in-process
+    # would keep running the *pre-pull* script still loaded in memory — so OTA
+    # from an old build would skip new steps (X11 session, 720x720, fan guards).
+    echo ""
+    echo "Re-syncing with updated installer..."
     if [ "$(id -u)" -ne 0 ]; then
-        echo ""
-        echo "Re-syncing install (needs root)..."
         exec sudo bash "$REPO_ROOT/install-pi.sh" install "${install_args[@]}"
     else
-        cmd_install "${install_args[@]}"
+        exec bash "$REPO_ROOT/install-pi.sh" install "${install_args[@]}"
     fi
 }
 

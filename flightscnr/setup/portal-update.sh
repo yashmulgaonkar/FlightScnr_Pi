@@ -1,6 +1,10 @@
 #!/bin/bash
-# Portal-triggered update: git pull, refresh deps, then restart flightscnr.service.
+# Portal-triggered update or install re-sync, then restart flightscnr.service.
 # User presets live outside the repo (/var/lib/flightscnr, /etc/flightscnr.env).
+#
+# Modes:
+#   (default)  git pull via install-pi.sh update --no-start
+#   resync     re-run install-pi.sh install --skip-apt --no-start (no pull)
 #
 # Restart is deferred (systemd-run / sleep fallback) so this script can write
 # update-status.json + drop the lock BEFORE systemctl restart. Restarting the
@@ -16,12 +20,23 @@ LOCK_FILE="$DATA_DIR/update.lock"
 LOG_FILE="$DATA_DIR/update.log"
 RESTART_DELAY_S="${FLIGHTSCNR_UPDATE_RESTART_DELAY_S:-2}"
 
+UPDATE_MODE="${1:-update}"
+case "$UPDATE_MODE" in
+    update|resync) ;;
+    *)
+        echo "Unknown mode: $UPDATE_MODE (use update|resync)" >&2
+        exit 1
+        ;;
+esac
+
 # Detach from the web portal process (new session / nohup). Still stays in the
 # flightscnr.service cgroup — deferred restart below is what avoids self-kill.
+# stdout/stderr go only to LOG_FILE here; the worker must not also tee -a the
+# same file or every line is duplicated (issue #77 user logs).
 if [ -z "${FLIGHTSCNR_PORTAL_UPDATE:-}" ]; then
     export FLIGHTSCNR_PORTAL_UPDATE=1
     mkdir -p "$DATA_DIR"
-    nohup "$0" >>"$LOG_FILE" 2>&1 </dev/null &
+    nohup "$0" "$UPDATE_MODE" >>"$LOG_FILE" 2>&1 </dev/null &
     exit 0
 fi
 
@@ -60,16 +75,16 @@ schedule_service_restart() {
             --on-active="${RESTART_DELAY_S}s" \
             /bin/systemctl restart flightscnr.service
         then
-            echo "Scheduled flightscnr restart in ${RESTART_DELAY_S}s ($unit)" | tee -a "$LOG_FILE"
+            echo "Scheduled flightscnr restart in ${RESTART_DELAY_S}s ($unit)"
             return 0
         fi
-        echo "systemd-run scheduling failed — falling back to background sleep" | tee -a "$LOG_FILE"
+        echo "systemd-run scheduling failed — falling back to background sleep"
     fi
     # Fallback still works for portal status (already written) even if this
     # sleeper is later swept by KillMode=mixed during the restart.
     nohup bash -c "sleep ${RESTART_DELAY_S}; systemctl restart flightscnr.service" \
         >>"$LOG_FILE" 2>&1 </dev/null &
-    echo "Scheduled flightscnr restart in ${RESTART_DELAY_S}s (sleep fallback, pid $!)" | tee -a "$LOG_FILE"
+    echo "Scheduled flightscnr restart in ${RESTART_DELAY_S}s (sleep fallback, pid $!)"
 }
 
 fail_cleanup() {
@@ -77,6 +92,10 @@ fail_cleanup() {
     trap - EXIT
     write_status "failed" "Update failed (exit $code). See $LOG_FILE"
     release_lock
+    # git pull may already have advanced VERSION on disk while install aborted.
+    # Restart so the splash matches the checkout; auto-resync can finish install
+    # steps on the next boot of the service (issue #77 exit-2 reports).
+    schedule_service_restart || true
     exit "$code"
 }
 
@@ -90,27 +109,32 @@ fi
 echo $$ >"$LOCK_FILE"
 trap fail_cleanup EXIT
 
-{
-    echo ""
-    echo "==> Portal update $(date -Iseconds)"
-    echo "    Repo: $REPO_ROOT"
-} | tee -a "$LOG_FILE"
+echo ""
+echo "==> Portal ${UPDATE_MODE} $(date -Iseconds)"
+echo "    Repo: $REPO_ROOT"
 
-write_status "running" "Pulling latest changes…"
-
-if [ ! -x "$REPO_ROOT/install-pi.sh" ]; then
-    echo "install-pi.sh not found" | tee -a "$LOG_FILE"
+if [ ! -f "$REPO_ROOT/install-pi.sh" ]; then
+    echo "install-pi.sh not found"
     exit 1
 fi
 
 # Sync code/deps/unit without restarting from inside this cgroup.
 # FLIGHTSCNR_SKIP_RESTART is a belt-and-suspenders guard for start_service().
 export FLIGHTSCNR_SKIP_RESTART=1
-bash "$REPO_ROOT/install-pi.sh" update --no-start 2>&1 | tee -a "$LOG_FILE"
+
+if [ "$UPDATE_MODE" = "resync" ]; then
+    write_status "running" "Finishing install (re-sync)… Do not turn off."
+    bash "$REPO_ROOT/install-pi.sh" install --skip-apt --no-start
+    success_msg="Install re-sync finished. Restarting display…"
+else
+    write_status "running" "Pulling latest changes…"
+    bash "$REPO_ROOT/install-pi.sh" update --no-start
+    success_msg="Update finished successfully. Restarting display…"
+fi
 
 # Status + lock must be cleared before restart can kill this cgroup member.
 trap - EXIT
-write_status "success" "Update finished successfully. Restarting display…"
+write_status "success" "$success_msg"
 release_lock
 schedule_service_restart
 exit 0

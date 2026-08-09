@@ -15,8 +15,8 @@
     },
     "medium-jet": {
       "file": "medium-jet.png",
-      "description": "Narrow-body commercial jets (A320, B737)",
-      "examples": ["A320", "A321", "A319", "B737", "B738", "B739", "B757", "MD80"]
+      "description": "Narrow-body commercial jets (A320, B737, 737 MAX)",
+      "examples": ["A320", "A321", "A319", "B737", "B738", "B739", "B38M", "B757", "MD80"]
     },
     "regional-jet": {
       "file": "regional-jet.png",
