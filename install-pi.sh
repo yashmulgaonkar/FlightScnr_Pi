@@ -150,7 +150,7 @@ EOF
 )
 
     for owner in "$REPO_OWNER" pi root; do
-        home_dir="$(getent passwd "$owner" | cut -d: -f6)"
+        home_dir="$(getent passwd "$owner" | cut -d: -f6)" || true
         [ -n "$home_dir" ] || continue
         mkdir -p "${home_dir}/.config/kanshi"
         if printf '%s\n' "$kanshi_body" > "${home_dir}/.config/kanshi/config"; then
@@ -348,7 +348,7 @@ PYROT
                     "/etc/xdg/pcmanfm/${profile}/desktop-items-1.conf"
             fi
             for owner in "$REPO_OWNER" pi root; do
-                home_dir="$(getent passwd "$owner" | cut -d: -f6)"
+                home_dir="$(getent passwd "$owner" | cut -d: -f6)" || true
                 [ -n "$home_dir" ] || continue
                 _set_pcmanfm_wallpaper_conf \
                     "${home_dir}/.config/pcmanfm/${profile}/desktop-items-0.conf"
