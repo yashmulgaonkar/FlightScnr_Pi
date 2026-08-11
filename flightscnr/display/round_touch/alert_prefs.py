@@ -147,6 +147,21 @@ def hide_non_alerted() -> bool:
     return bool(_state.get("alert_hide_non_alerted", False))
 
 
+def toggle_military_enabled() -> bool:
+    update(alert_military=not military_enabled())
+    return military_enabled()
+
+
+def toggle_emergency_enabled() -> bool:
+    update(alert_emergency=not emergency_enabled())
+    return emergency_enabled()
+
+
+def toggle_hide_non_alerted() -> bool:
+    update(alert_hide_non_alerted=not hide_non_alerted())
+    return hide_non_alerted()
+
+
 def watch_callsigns() -> list[str]:
     return list(_watch)
 

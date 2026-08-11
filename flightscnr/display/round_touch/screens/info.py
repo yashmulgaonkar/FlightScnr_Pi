@@ -40,7 +40,7 @@ except ImportError:
         name = (hostname or "raspberrypi").split(".")[0].strip() or "raspberrypi"
         return f"http://{name}.local"
 
-from display.round_touch import draw, nav, settings, theme
+from display.round_touch import alert_prefs, draw, nav, settings, theme
 
 PAGE_MAIN = 0
 PAGE_ATC = 1
@@ -103,7 +103,7 @@ OPTIONS_ACTIONS = (
     "map_style",
     "vfr_opacity",
 )
-# Overlay toggles + traffic mode on their own settings page (no scroll required).
+# Overlay toggles + traffic mode + alert filters (may need a light swipe).
 LAYERS_ACTIONS = (
     "traffic",
     "precipitation",
@@ -112,8 +112,11 @@ LAYERS_ACTIONS = (
     "airport_icons",
     "ground_vehicles",
     "idle_clock",
+    "alert_military",
+    "alert_emergency",
+    "alert_hide_non_alerted",
 )
-# LiveATC playback — page 1 (no scroll): stream select + Play/Stop.
+# LiveATC playback — page 1: enable + stream select (single power switch).
 ATC_ACTIONS = (
     "enabled",
     "volume",
@@ -128,10 +131,6 @@ ATC_QUIET_ACTIONS = (
     "quiet_start",
     "quiet_end",
 )
-ATC_BUTTON_ACTIONS = (
-    "play",
-    "stop",
-)
 # Power / service controls (portal System section equivalent).
 SYSTEM_ACTIONS = (
     "restart",
@@ -139,7 +138,6 @@ SYSTEM_ACTIONS = (
     "shutdown",
 )
 
-_atc_buttons: list[tuple[str, pygame.Rect]] = []
 # ATC status/bluetooth/feed lookups are too heavy for every timeout-ring frame.
 # Cache labels briefly so the perimeter countdown stays smooth like other pages.
 _ATC_LABEL_TTL_S = 0.4
@@ -148,7 +146,7 @@ _atc_picker_cache: dict[str, tuple[float, tuple[tuple[str, str, bool], ...]]] = 
 
 
 def invalidate_atc_labels() -> None:
-    """Drop ATC row/picker caches after a user change (play, airport, …)."""
+    """Drop ATC row/picker caches after a user change (enable, airport, …)."""
     global _atc_rows_cache
     _atc_rows_cache = None
     _atc_picker_cache.clear()
@@ -280,10 +278,7 @@ def next_page(page: int) -> int | None:
 
 
 def atc_action_at(x: int, y: int) -> str | None:
-    """Hit-test Play / Stop buttons on the ATC page."""
-    for action, rect in _atc_buttons:
-        if rect.collidepoint(x, y):
-            return action
+    """Hit-test legacy ATC transport buttons (removed — always None)."""
     return None
 
 
@@ -832,6 +827,15 @@ def theme_slider_at(x: int, y: int, scroll_offset: int = 0) -> tuple[str, int] |
     return None
 
 
+def theme_slider_drag_band(
+    group: str, channel: int, x: int, y: int, scroll_offset: int = 0
+) -> bool:
+    rows = _theme_slider_geometry(scroll_offset, group=group)
+    if channel < 0 or channel >= len(rows):
+        return False
+    return slider_drag_band_contains(rows[channel][0], y)
+
+
 def theme_slider_value_at(
     x: int, channel: int, scroll_offset: int = 0, *, group: str = RGB_GROUP_THEME
 ) -> int | None:
@@ -892,6 +896,20 @@ def _display_layout(page: int, scroll_offset: int = 0) -> tuple[int, int, int]:
 def _in_settings_body(y: int) -> bool:
     """True when y sits inside the scrolling body band rows are clipped to."""
     return nav.content_top_y(has_dots=True) <= y <= nav.content_bottom_y()
+
+
+def slider_drag_band_contains(
+    hit: pygame.Rect, y: int, *, pad_y: int | None = None
+) -> bool:
+    """True while a sticky horizontal drag should keep mapping screen X.
+
+    After a slider arms, X may leave the track (clamped to 0–100%); leaving this
+    vertical band cancels the drag so taps elsewhere on the screen cannot steal
+    the value (ATC volume / brightness sticky-X bug).
+    """
+    if pad_y is None:
+        pad_y = theme.s(28)
+    return (hit.top - pad_y) <= y <= (hit.bottom + pad_y)
 
 
 def display_row_at(x: int, y: int, page: int, scroll_offset: int = 0) -> int | None:
@@ -974,6 +992,13 @@ def brightness_slider_at(x: int, y: int, scroll_offset: int = 0) -> bool:
     return hit.collidepoint(x, y)
 
 
+def brightness_slider_drag_band(x: int, y: int, scroll_offset: int = 0) -> bool:
+    geom = _brightness_slider_geometry(scroll_offset)
+    if geom is None:
+        return False
+    return slider_drag_band_contains(geom[0], y)
+
+
 def brightness_slider_value_at(x: int, scroll_offset: int = 0) -> int | None:
     """Map screen x on the brightness track to BRIGHTNESS_MIN–100."""
     geom = _brightness_slider_geometry(scroll_offset)
@@ -1023,6 +1048,13 @@ def hud_opacity_slider_at(x: int, y: int, scroll_offset: int = 0) -> bool:
     if geom is None or not _in_settings_body(y):
         return False
     return geom[0].collidepoint(x, y)
+
+
+def hud_opacity_slider_drag_band(x: int, y: int, scroll_offset: int = 0) -> bool:
+    geom = _hud_opacity_slider_geometry(scroll_offset)
+    if geom is None:
+        return False
+    return slider_drag_band_contains(geom[0], y)
 
 
 def hud_opacity_slider_value_at(x: int, scroll_offset: int = 0) -> int | None:
@@ -1178,6 +1210,15 @@ def hud_volume_slider_at(x: int, y: int, scroll_offset: int = 0) -> str | None:
     return None
 
 
+def hud_volume_slider_drag_band(
+    action: str, x: int, y: int, scroll_offset: int = 0
+) -> bool:
+    geom = _hud_volume_slider_geometry(action, scroll_offset)
+    if geom is None:
+        return False
+    return slider_drag_band_contains(geom[0], y)
+
+
 def hud_sound_toggle_at(x: int, y: int, scroll_offset: int = 0) -> str | None:
     """Return the sound toggle action whose switch was hit, or None."""
     if not _in_settings_body(y):
@@ -1266,6 +1307,13 @@ def vfr_opacity_slider_at(x: int, y: int, scroll_offset: int = 0) -> bool:
     return hit.collidepoint(x, y)
 
 
+def vfr_opacity_slider_drag_band(x: int, y: int, scroll_offset: int = 0) -> bool:
+    geom = _vfr_opacity_slider_geometry(scroll_offset)
+    if geom is None:
+        return False
+    return slider_drag_band_contains(geom[0], y)
+
+
 def vfr_opacity_slider_value_at(x: int, scroll_offset: int = 0) -> int | None:
     """Map screen x on the VFR opacity track to VFR_OPACITY_MIN–100."""
     geom = _vfr_opacity_slider_geometry(scroll_offset)
@@ -1320,10 +1368,17 @@ def _atc_volume_slider_geometry(scroll_offset: int = 0) -> tuple[pygame.Rect, in
 
 def atc_volume_slider_at(x: int, y: int, scroll_offset: int = 0) -> bool:
     geom = _atc_volume_slider_geometry(scroll_offset)
-    if geom is None:
+    if geom is None or not _in_settings_body(y):
         return False
     hit, _, _ = geom
     return hit.collidepoint(x, y)
+
+
+def atc_volume_slider_drag_band(x: int, y: int, scroll_offset: int = 0) -> bool:
+    geom = _atc_volume_slider_geometry(scroll_offset)
+    if geom is None:
+        return False
+    return slider_drag_band_contains(geom[0], y)
 
 
 def atc_volume_slider_value_at(x: int, scroll_offset: int = 0) -> int | None:
@@ -1482,71 +1537,18 @@ def _draw_atc_volume_slider_row(surface, ry: int, focused: bool) -> None:
     )
 
 
-def _draw_atc_button(surface, x: int, y: int, action: str, btn_w: int, btn_h: int) -> pygame.Rect:
-    label = "Play" if action == "play" else "Stop"
-    font = draw.load_font(theme.s(11), bold=True)
-    rect = pygame.Rect(x, y, btn_w, btn_h)
-    pygame.draw.rect(surface, _SYSTEM_BTN_FILL, rect, border_radius=max(theme.s(6), btn_h // 3))
-    pygame.draw.rect(
-        surface,
-        _SYSTEM_BTN_BORDER,
-        rect,
-        width=max(1, theme.s(2)),
-        border_radius=max(theme.s(6), btn_h // 3),
-    )
-    rendered = font.render(label, True, theme.LABEL)
-    surface.blit(rendered, rendered.get_rect(center=rect.center))
-    return rect
-
-
-def _atc_action_button_metrics() -> tuple[int, int, int]:
-    """Return (btn_w, btn_h, gap) for side-by-side Play/Stop."""
-    font = draw.load_font(theme.s(11), bold=True)
-    pad_x = theme.s(10)
-    pad_y = theme.s(5)
-    btn_h = font.get_height() + pad_y * 2
-    gap = theme.s(8)
-    # Fit both buttons inside the circle at their row.
-    half = draw.circle_half_width_at_row(theme.CENTER_Y, btn_h)
-    available = max(theme.s(120), half * 2 - theme.s(24))
-    btn_w = max(theme.s(64), min(theme.s(96), (available - gap) // 2))
-    # Ensure label fits.
-    for label in ("Play", "Stop"):
-        btn_w = max(btn_w, font.size(label)[0] + pad_x * 2)
-    btn_w = min(btn_w, (available - gap) // 2)
-    return btn_w, btn_h, gap
-
-
 def _draw_atc_page(surface, scroll_offset: int, display_focus: int, top: int, bottom: int) -> int:
-    """Draw ATC rows with sticky Play/Stop so controls stay visible; returns max_scroll."""
-    global _atc_buttons
-    _atc_buttons = []
-    body_font = _display_font()
-    row_h = body_font.get_height() + theme.s(6)
-    rows = _atc_row_labels()
-    btn_w, btn_h, gap = _atc_action_button_metrics()
-    # Keep Play/Stop pinned above the footer; scroll rows in the space above.
-    btn_pad = theme.s(6)
-    btn_y = bottom - btn_h - theme.s(2)
-    rows_bottom = max(top + theme.s(40), btn_y - btn_pad)
-    max_scroll_rows = _draw_settings_rows(
+    """Draw ATC settings rows (enable switch replaces Play/Stop); returns max_scroll."""
+    return _draw_settings_rows(
         surface,
-        rows,
+        _atc_row_labels(),
         scroll_offset,
         display_focus,
         top,
-        rows_bottom,
+        bottom,
         actions=ATC_ACTIONS,
         draw_atc_volume_slider=True,
     )
-    total_w = btn_w * 2 + gap
-    x0 = theme.CENTER_X - total_w // 2
-    for i, action in enumerate(ATC_BUTTON_ACTIONS):
-        x = x0 + i * (btn_w + gap)
-        rect = _draw_atc_button(surface, int(x), int(btn_y), action, btn_w, btn_h)
-        _atc_buttons.append((action, rect.copy()))
-    total_h = theme.s(4) + len(rows) * row_h + theme.s(4)
-    return max(max_scroll_rows, max(0, total_h - (rows_bottom - top)))
 
 
 def _display_row_labels() -> list[str]:
@@ -1607,6 +1609,9 @@ def _layers_row_labels() -> list[str]:
         "Show Airport Icons",
         "Show Ground Vehicles",
         "Auto Idle Clock",
+        "Alert on military aircraft",
+        "Alert on emergency squawk (7700/7600/7500)",
+        "Hide non-alerted aircraft on radar",
     ]
 
 
@@ -1623,6 +1628,9 @@ _TOGGLE_ROW_STATE = {
     "airport_icons": settings.show_airport_icons,
     "ground_vehicles": settings.show_ground_vehicles,
     "idle_clock": settings.auto_idle_clock_enabled,
+    "alert_military": alert_prefs.military_enabled,
+    "alert_emergency": alert_prefs.emergency_enabled,
+    "alert_hide_non_alerted": alert_prefs.hide_non_alerted,
     "enabled": settings.atc_enabled,
     "quiet": settings.atc_quiet_hours_enabled,
 }

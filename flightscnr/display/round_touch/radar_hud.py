@@ -1141,7 +1141,7 @@ def draw_hud(
             alpha=255 if settings.alert_sfx_enabled() else _OFF_ICON_ALPHA,
             light=light_icons,
         )
-        # ATC play/stop — full opacity while playing, dimmed when stopped/muted.
+        # ATC enable — full opacity while playing, mid when enabled/stopped, dim when off.
         atc_playing = False
         try:
             from utilities import atc_audio
@@ -1149,12 +1149,12 @@ def draw_hud(
             atc_playing = bool(atc_audio.is_playing())
         except Exception:
             atc_playing = False
-        atc_sound_on = (
+        atc_on = (
             master_on
-            and settings.atc_sound_enabled()
+            and settings.atc_enabled()
             and settings.atc_volume() > 0
         )
-        if not atc_sound_on:
+        if not atc_on:
             atc_alpha = _OFF_ICON_ALPHA
         else:
             atc_alpha = 255 if atc_playing else 120
@@ -1360,6 +1360,14 @@ def hit_volume_slider(x: int, y: int) -> bool:
     return _slider_track.inflate(pad, pad * 2).collidepoint(x, y)
 
 
+def volume_slider_drag_band(x: int, y: int) -> bool:
+    """True while a sticky HUD volume drag should keep mapping screen X."""
+    if not _volume_popover or _slider_track.width <= 0:
+        return False
+    pad_y = theme.s(28)
+    return (_slider_track.top - pad_y) <= y <= (_slider_track.bottom + pad_y)
+
+
 def hit_hud(x: int, y: int) -> bool:
     return _hud_bounds.width > 0 and _hud_bounds.collidepoint(x, y)
 
@@ -1435,7 +1443,10 @@ def handle_tap(x: int, y: int) -> str | None:
 
 
 def handle_long_press_mute(x: int, y: int) -> str | None:
-    """Toggle mute for the HUD icon under ``(x, y)``. Returns channel or None."""
+    """Toggle mute/power for the HUD icon under ``(x, y)``. Returns channel or None.
+
+    ATC uses the same enable/disable as Settings → ATC Audio (not a soft mute).
+    """
     if not settings.radar_hud_enabled():
         return None
     if settings.radar_hud_arrange():
@@ -1444,7 +1455,7 @@ def handle_long_press_mute(x: int, y: int) -> str | None:
     if channel is None:
         return None
     settings.toggle_hud_channel_mute(channel)
-    if channel in ("speaker", "atc"):
+    if channel == "speaker":
         try:
             from utilities import atc_audio
 

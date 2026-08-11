@@ -1270,6 +1270,20 @@ def updates_apply():
     return jsonify(updater.start_update())
 
 
+@app.post("/updates/resync")
+def updates_resync():
+    from utilities import updater
+
+    return jsonify(updater.start_install_resync())
+
+
+@app.post("/updates/repair")
+def updates_repair():
+    from utilities import updater
+
+    return jsonify(updater.start_ota_repair())
+
+
 @app.get("/atc/airports")
 def atc_airports():
     from utilities import atc_audio
@@ -1327,14 +1341,13 @@ def atc_save():
         settings.set_atc_quiet_end(str(data.get("quiet_end") or ""))
 
     action = str(data.get("action") or "").strip().lower()
+    # Legacy Play/Stop map onto the single enable switch.
     if action == "play":
-        if not settings.atc_enabled():
-            atc_audio.apply_enabled(True)
-        result = atc_audio.start(override=True)
+        result = atc_audio.apply_enabled(True)
         settings.request_reload()
         return jsonify(result)
     if action == "stop":
-        result = atc_audio.stop()
+        result = atc_audio.apply_enabled(False)
         settings.request_reload()
         return jsonify(result)
 

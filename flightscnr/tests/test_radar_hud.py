@@ -472,21 +472,40 @@ class HudVolumeControlTests(unittest.TestCase):
             settings._state["military_sfx_enabled"] = True
             settings._state["traffic_sfx_volume"] = 40
             settings._state["military_sfx_volume"] = 40
-            settings._state["atc_sound_enabled"] = True
+            settings._state["atc_enabled"] = True
             settings._state["atc_volume"] = 85
+
+            def _flip_atc_enabled(**_kwargs):
+                settings._state["atc_enabled"] = not bool(
+                    settings._state.get("atc_enabled", False)
+                )
 
             for channel, vol_key, mute_fn in (
                 ("speaker", "master_sound_volume", settings.master_sound_enabled),
                 ("chime", "hourly_chime_volume", settings.hourly_chime_enabled),
                 ("alert", "traffic_sfx_volume", settings.alert_sfx_enabled),
-                ("atc", "atc_volume", settings.atc_sound_enabled),
+                ("atc", "atc_volume", settings.atc_enabled),
             ):
                 before = settings._state[vol_key]
                 self.assertFalse(settings.hud_channel_muted(channel))
-                settings.toggle_hud_channel_mute(channel)
+                if channel == "atc":
+                    with mock.patch(
+                        "utilities.atc_audio.toggle_power",
+                        side_effect=_flip_atc_enabled,
+                    ):
+                        settings.toggle_hud_channel_mute(channel)
+                else:
+                    settings.toggle_hud_channel_mute(channel)
                 self.assertTrue(settings.hud_channel_muted(channel))
                 self.assertEqual(settings._state[vol_key], before)
-                settings.toggle_hud_channel_mute(channel)
+                if channel == "atc":
+                    with mock.patch(
+                        "utilities.atc_audio.toggle_power",
+                        side_effect=_flip_atc_enabled,
+                    ):
+                        settings.toggle_hud_channel_mute(channel)
+                else:
+                    settings.toggle_hud_channel_mute(channel)
                 self.assertFalse(settings.hud_channel_muted(channel))
                 self.assertEqual(settings.hud_channel_volume(channel), before)
 
@@ -553,7 +572,7 @@ class HudVolumeControlTests(unittest.TestCase):
             settings._state["hourly_chime_enabled"] = True
             settings._state["traffic_sfx_enabled"] = True
             settings._state["military_sfx_enabled"] = True
-            settings._state["atc_sound_enabled"] = True
+            settings._state["atc_enabled"] = True
             with mock.patch.object(settings, "radar_hud_layout", return_value={}):
                 with mock.patch.object(radar_hud, "_wx_snapshot", return_value=None):
                     surf = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
@@ -569,6 +588,17 @@ class HudVolumeControlTests(unittest.TestCase):
                     muted = radar_hud.handle_long_press_mute(*g["chime_c"])
                     self.assertEqual(muted, "chime")
                     self.assertFalse(settings.hourly_chime_enabled())
+                    self.assertEqual(radar_hud.volume_popover_channel(), "speaker")
+
+                    with mock.patch(
+                        "utilities.atc_audio.toggle_power",
+                        side_effect=lambda **_k: settings._state.__setitem__(
+                            "atc_enabled", False
+                        ),
+                    ):
+                        powered = radar_hud.handle_long_press_mute(*g["atc_c"])
+                    self.assertEqual(powered, "atc")
+                    self.assertFalse(settings.atc_enabled())
                     self.assertEqual(radar_hud.volume_popover_channel(), "speaker")
 
 

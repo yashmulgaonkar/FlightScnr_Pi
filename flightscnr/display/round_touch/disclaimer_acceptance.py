@@ -9,17 +9,31 @@
 
 """Versioned on-device safety-disclaimer acceptance (JSON settings).
 
-Consent is device-local and touch-only. Only the round-display checkbox plus
-Accept may store ``CURRENT_VERSION``. The web portal may clear acceptance
-(write version ``0``) but never enable or set the current version.
+Consent is device-local and normally touch-only. Only the round-display
+checkbox plus Accept may store ``CURRENT_VERSION``. The web portal may clear
+acceptance (write version ``0``) but never enable or set the current version.
+
+A temporary keyboard Return path may accept the disclaimer through
+``KEYBOARD_ACCEPT_UNTIL`` (inclusive); keyboard accept never stores remember.
 """
 
 from __future__ import annotations
+
+from datetime import date
 
 from display.round_touch import settings
 
 # Bump when disclaimer wording changes so prior "Don't show again" is invalidated.
 CURRENT_VERSION = 1
+
+# Hidden cutoff: keyboard Return accept is ignored after this local date.
+KEYBOARD_ACCEPT_UNTIL = date(2026, 8, 31)
+
+
+def keyboard_accept_allowed(today: date | None = None) -> bool:
+    """True while local date is on or before ``KEYBOARD_ACCEPT_UNTIL``."""
+    day = today if today is not None else date.today()
+    return day <= KEYBOARD_ACCEPT_UNTIL
 
 
 def stored_version() -> int:

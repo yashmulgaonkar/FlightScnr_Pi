@@ -1,3 +1,7 @@
-# Allow the repo owner to run portal updates without a password.
+# Allow the repo owner to run portal updates / install re-sync without a password.
 # Installed by install-pi.sh as /etc/sudoers.d/flightscnr-update
+# Args: bare script, "resync", or via /bin/bash (matches utilities/updater.py).
 __REPO_OWNER__ ALL=(root) NOPASSWD: __UPDATE_SCRIPT__
+__REPO_OWNER__ ALL=(root) NOPASSWD: __UPDATE_SCRIPT__ resync
+__REPO_OWNER__ ALL=(root) NOPASSWD: /bin/bash __UPDATE_SCRIPT__
+__REPO_OWNER__ ALL=(root) NOPASSWD: /bin/bash __UPDATE_SCRIPT__ resync
