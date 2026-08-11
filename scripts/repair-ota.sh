@@ -69,8 +69,6 @@ resolve_repo() {
     fi
     for d in \
         "${HOME:+$HOME/FlightScnr_Pi}" \
-        /home/pi/FlightScnr_Pi \
-        /home/jason/FlightScnr_Pi \
         "$(pwd)"
     do
         [ -n "$d" ] || continue
@@ -79,7 +77,7 @@ resolve_repo() {
             return 0
         fi
     done
-    # Last resort: shallow search under /home (typical Pi layouts).
+    # Last resort: shallow search under /home (any Imager username).
     while IFS= read -r candidate; do
         d="$(dirname "$candidate")"
         if [ -d "$d/.git" ]; then
@@ -99,7 +97,11 @@ REPO_ROOT="$(resolve_repo)" || {
 echo "Repo: $REPO_ROOT"
 cd "$REPO_ROOT"
 
-OWNER="$(stat -c '%U' "$REPO_ROOT" 2>/dev/null || echo pi)"
+OWNER="$(stat -c '%U' "$REPO_ROOT" 2>/dev/null || true)"
+if [ -z "$OWNER" ] || ! id -u "$OWNER" >/dev/null 2>&1; then
+    echo "Could not resolve repo owner for $REPO_ROOT." >&2
+    exit 1
+fi
 git_safe=(git -c "safe.directory=${REPO_ROOT}" -C "$REPO_ROOT")
 
 run_as_owner() {

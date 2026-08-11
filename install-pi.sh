@@ -59,8 +59,17 @@ setup_paths() {
         REPO_OWNER="$(stat -c '%U' "$REPO_ROOT")"
     fi
 
-    REPO_OWNER_HOME="$(getent passwd "$REPO_OWNER" | cut -d: -f6)"
+    if ! id -u "$REPO_OWNER" >/dev/null 2>&1; then
+        echo "Could not resolve install owner '$REPO_OWNER' (SUDO_USER or repo ownership)." >&2
+        exit 1
+    fi
+    # Fail clearly if the owner has no passwd home (do not abort with bare exit 2).
+    REPO_OWNER_HOME="$(getent passwd "$REPO_OWNER" | cut -d: -f6 || true)"
     REPO_OWNER_UID="$(id -u "$REPO_OWNER")"
+    if [ -z "$REPO_OWNER_HOME" ]; then
+        echo "Could not resolve home directory for install owner '$REPO_OWNER'." >&2
+        exit 1
+    fi
 }
 
 require_root() {
@@ -133,7 +142,6 @@ configure_display_720x720() {
     local mode="720x720"
     local kanshi_body
     local dispsetup
-    local home_dir owner
     local applied=0
 
     log_step "Display resolution ${mode}"
@@ -149,17 +157,16 @@ profile {
 EOF
 )
 
-    for owner in "$REPO_OWNER" pi root; do
-        home_dir="$(getent passwd "$owner" | cut -d: -f6)"
-        [ -n "$home_dir" ] || continue
-        mkdir -p "${home_dir}/.config/kanshi"
-        if printf '%s\n' "$kanshi_body" > "${home_dir}/.config/kanshi/config"; then
-            chown -R "$owner:$owner" "${home_dir}/.config/kanshi" 2>/dev/null || true
+    # Per-user kanshi for the install owner.
+    if [ -n "${REPO_OWNER_HOME:-}" ]; then
+        mkdir -p "${REPO_OWNER_HOME}/.config/kanshi"
+        if printf '%s\n' "$kanshi_body" > "${REPO_OWNER_HOME}/.config/kanshi/config"; then
+            chown -R "$REPO_OWNER:" "${REPO_OWNER_HOME}/.config/kanshi" 2>/dev/null || true
             applied=1
         else
-            log_warn "Could not write ${home_dir}/.config/kanshi/config (continuing)"
+            log_warn "Could not write ${REPO_OWNER_HOME}/.config/kanshi/config (continuing)"
         fi
-    done
+    fi
 
     # System fallback used by greeter / first boot before a user config exists.
     if mkdir -p /etc/xdg/kanshi 2>/dev/null; then
@@ -339,7 +346,7 @@ PYROT
                 pcmanfm --reconfigure >/dev/null 2>&1 || true
         }
 
-        local profile home_dir owner
+        local profile
         for profile in default LXDE-pi; do
             _set_pcmanfm_wallpaper_conf \
                 "/etc/xdg/pcmanfm/${profile}/desktop-items-0.conf"
@@ -347,20 +354,20 @@ PYROT
                 _set_pcmanfm_wallpaper_conf \
                     "/etc/xdg/pcmanfm/${profile}/desktop-items-1.conf"
             fi
-            for owner in "$REPO_OWNER" pi root; do
-                home_dir="$(getent passwd "$owner" | cut -d: -f6)"
-                [ -n "$home_dir" ] || continue
+            # Per-user pcmanfm for the install owner.
+            if [ -n "${REPO_OWNER_HOME:-}" ]; then
                 _set_pcmanfm_wallpaper_conf \
-                    "${home_dir}/.config/pcmanfm/${profile}/desktop-items-0.conf"
-                if [ -f "${home_dir}/.config/pcmanfm/${profile}/desktop-items-1.conf" ]; then
+                    "${REPO_OWNER_HOME}/.config/pcmanfm/${profile}/desktop-items-0.conf"
+                if [ -f "${REPO_OWNER_HOME}/.config/pcmanfm/${profile}/desktop-items-1.conf" ]; then
                     _set_pcmanfm_wallpaper_conf \
-                        "${home_dir}/.config/pcmanfm/${profile}/desktop-items-1.conf"
+                        "${REPO_OWNER_HOME}/.config/pcmanfm/${profile}/desktop-items-1.conf"
                 fi
-                chown -R "$owner:$owner" "${home_dir}/.config/pcmanfm" 2>/dev/null || true
-            done
+                chown -R "$REPO_OWNER:" \
+                    "${REPO_OWNER_HOME}/.config/pcmanfm" 2>/dev/null || true
+            fi
         done
 
-        _refresh_pcmanfm_wallpaper "${REPO_OWNER:-pi}"
+        _refresh_pcmanfm_wallpaper "$REPO_OWNER"
         # Some images autologin the graphical session as root.
         if [ "$(id -u)" -eq 0 ]; then
             env DISPLAY="${DISPLAY:-:0}" \
@@ -550,7 +557,7 @@ setup_data_dir() {
     log_step "Runtime data directory"
     install -d -m 0755 "$DATA_DIR"
     install -d -m 0755 "$DATA_DIR/maps"
-    chown -R "$REPO_OWNER:$REPO_OWNER" "$DATA_DIR"
+    chown -R "$REPO_OWNER:" "$DATA_DIR"
     log_ok "$DATA_DIR ready (owned by $REPO_OWNER)"
 }
 
@@ -570,7 +577,7 @@ setup_config_h() {
 
     log_step "Creating config.h from template"
     cp "$example" "$dest"
-    chown "$REPO_OWNER:$REPO_OWNER" "$dest"
+    chown "$REPO_OWNER:" "$dest"
     chmod 0644 "$dest"
     log_ok "Created config.h from config.h.example"
 }
@@ -810,7 +817,7 @@ PY
 )" || wf_rc=$?
     if [ "$wf_rc" -eq 0 ] && [ "$wf_out" = "UPDATED" ]; then
         if [ -n "${REPO_OWNER:-}" ]; then
-            chown "$REPO_OWNER:$REPO_OWNER" "$wf_ini" 2>/dev/null || true
+            chown "$REPO_OWNER:" "$wf_ini" 2>/dev/null || true
         fi
         changed=1
         log_ok "Disabled bluetooth widget + panel notifications in $wf_ini"
@@ -860,7 +867,7 @@ install_systemd_service() {
 
 fix_repo_permissions() {
     log_step "Repository permissions"
-    chown -R "$REPO_OWNER:$REPO_OWNER" "$REPO_ROOT"
+    chown -R "$REPO_OWNER:" "$REPO_ROOT"
     find "$REPO_ROOT" -type d -exec chmod 755 {} +
     find "$REPO_ROOT" -type f -exec chmod 644 {} +
     chmod 755 "$REPO_ROOT/install-pi.sh"
