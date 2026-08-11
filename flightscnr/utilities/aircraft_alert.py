@@ -29,6 +29,8 @@ _RIM_REFLASH_S = 4.0
 _attention_until = 0.0
 _ATTENTION_HOLD_S = 20.0
 _rim_flash_military = False
+_rim_flash_watch = False
+_rim_flash_emergency = False
 
 # ICAO types listed under military-* icon categories (e.g. Q9 → military-drone).
 _ICON_MAPPING_PATH = os.path.join(
@@ -566,11 +568,11 @@ def on_watchlist_type(flight: dict) -> bool:
 def should_alert(flight: dict) -> bool:
     if flight.get("kind") == "vessel":
         return False
-    if alert_prefs.military_enabled() and is_military(flight):
-        return True
     if alert_prefs.emergency_enabled() and is_emergency_squawk(flight):
         return True
     if on_watchlist(flight):
+        return True
+    if alert_prefs.military_enabled() and is_military(flight):
         return True
     return False
 
@@ -601,12 +603,12 @@ def alert_color(flight: dict):
     """Icon fill: military → red; emergency / watch → blue."""
     from display.round_touch import theme
 
+    if alert_prefs.emergency_enabled() and is_emergency_squawk(flight):
+        return theme.ALERT_EMERGENCY
+    if on_watchlist(flight):
+        return theme.ALERT_WATCH
     if alert_prefs.military_enabled() and is_military(flight):
         return theme.ALERT_MILITARY
-    if alert_prefs.emergency_enabled() and is_emergency_squawk(flight):
-        return theme.ALERT_OTHER
-    if on_watchlist(flight):
-        return theme.ALERT_OTHER
     return theme.AIRCRAFT
 
 
@@ -626,14 +628,16 @@ def is_in_range(flight: dict) -> bool:
     return geo.local_offset_km(lat, lon)[2] <= geo.inner_ring_max_km()
 
 
-def start_rim_flash(*, military: bool = False, duration: float | None = None) -> None:
+def start_rim_flash(*, military: bool = False, watch: bool = False, emergency: bool = False, duration: float | None = None) -> None:
     """Begin (or restart) the attention rim flash."""
-    global _rim_flash_until, _attention_until, _rim_flash_military
+    global _rim_flash_until, _attention_until, _rim_flash_military, _rim_flash_watch, _rim_flash_emergency
     now = time.time()
     dur = _RIM_FLASH_S if duration is None else float(duration)
     _rim_flash_until = now + dur
     _attention_until = now + max(dur, _ATTENTION_HOLD_S)
     _rim_flash_military = bool(military)
+    _rim_flash_watch = bool(watch)
+    _rim_flash_emergency = bool(emergency)
 
 
 def active_alert_flights(flights: list[dict]) -> list[dict]:
@@ -654,7 +658,9 @@ def reflash_for_visible_alerts(flights: list[dict]) -> bool:
     if not active:
         return False
     military = any(is_military(f) for f in active)
-    start_rim_flash(military=military, duration=_RIM_REFLASH_S)
+    watch = any(on_watchlist(f) for f in active)
+    emergency = any(is_emergency_squawk(f) for f in active)
+    start_rim_flash(military=military, watch=watch, emergency=emergency, duration=_RIM_REFLASH_S)
     return True
 
 
@@ -670,6 +676,8 @@ def check_new_aircraft(flights: list[dict]) -> bool:
         return False
     fired = False
     saw_military = False
+    saw_watch = False
+    saw_emergency = False    
     for flight in flights:
         if not should_alert(flight):
             continue
@@ -683,8 +691,12 @@ def check_new_aircraft(flights: list[dict]) -> bool:
             continue
         _mark_seen(h)
         fired = True
+        if on_watchlist(flight):
+            saw_watch = True
         if is_military(flight):
             saw_military = True
+        if is_emergency_squawk(flight):
+            saw_emergency = True
         logger.info(
             "ALERT %s mil=%s emrg=%s watch=%s squawk=%s",
             cs,
@@ -695,7 +707,7 @@ def check_new_aircraft(flights: list[dict]) -> bool:
         )
     if fired:
         now = time.time()
-        start_rim_flash(military=saw_military)
+        start_rim_flash(military=saw_military, watch=saw_watch, emergency=saw_emergency)
         if now - _last_beep_ts >= _BEEP_COOLDOWN_S:
             _last_beep_ts = now
     return fired
@@ -717,6 +729,10 @@ def rim_flash_color():
 
     if not pulse_phase():
         return None
+    if _rim_flash_emergency:
+        return theme.ALERT_EMERGENCY
+    if _rim_flash_watch:
+        return theme.ALERT_WATCH
     if _rim_flash_military:
         return theme.ALERT_MILITARY
     return theme.ALERT_OTHER
