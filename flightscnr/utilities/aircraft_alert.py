@@ -29,7 +29,7 @@ _RIM_REFLASH_S = 4.0
 _attention_until = 0.0
 _ATTENTION_HOLD_S = 20.0
 _rim_flash_military = False
-_rim_flash_watch = False
+_rim_flash_watch = False        
 _rim_flash_emergency = False
 
 # ICAO types listed under military-* icon categories (e.g. Q9 → military-drone).
@@ -565,6 +565,14 @@ def on_watchlist_type(flight: dict) -> bool:
     return False
 
 
+def is_a_squawk(flight: dict) -> bool:
+    # Get raw squawk list string from preferences
+    squawk_input = alert_prefs.squawk_callsigns()  # This should return the raw string
+    #squawk_list = alert_prefs.parse_squawk_list(squawk_input)
+    squawk = normalize_squawk(flight.get("squawk"))
+    return squawk in squawk_input
+
+
 def should_alert(flight: dict) -> bool:
     if flight.get("kind") == "vessel":
         return False
@@ -574,6 +582,8 @@ def should_alert(flight: dict) -> bool:
         return True
     if alert_prefs.military_enabled() and is_military(flight):
         return True
+    if is_a_squawk(flight):
+        return True 
     return False
 
 
@@ -607,6 +617,8 @@ def alert_color(flight: dict):
         return theme.ALERT_EMERGENCY
     if on_watchlist(flight):
         return theme.ALERT_WATCH
+    if is_a_squawk(flight):
+        return theme.ALERT_OTHER
     if alert_prefs.military_enabled() and is_military(flight):
         return theme.ALERT_MILITARY
     return theme.AIRCRAFT
@@ -703,11 +715,12 @@ def check_new_aircraft(flights: list[dict]) -> bool:
         if alert_prefs.emergency_enabled() and is_emergency_squawk(flight):
             saw_emergency = True
         logger.info(
-            "ALERT %s mil=%s emrg=%s watch=%s squawk=%s",
+            "ALERT %s mil=%s emrg=%s watch=%s squawk=%s squawk=%s",
             cs,
             is_military(flight),
             is_emergency_squawk(flight),
             on_watchlist(flight),
+            is_a_squawk(flight),
             flight.get("squawk"),
         )
     if fired:
