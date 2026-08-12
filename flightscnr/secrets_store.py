@@ -243,7 +243,7 @@ def dump1090_settings() -> dict:
 
 def route_source_order_setting() -> dict:
     """Current route-source-order portal/settings value.
- 
+
     Prefer secrets.json over process env — same reasoning as
     dump1090_settings(): the display process reads this on every
     enrichment cycle (not just once at import time), so a portal save
@@ -255,9 +255,9 @@ def route_source_order_setting() -> dict:
         raw = str(file_vals.get("ROUTE_SOURCE_ORDER")).strip()
     else:
         raw = os.environ.get("ROUTE_SOURCE_ORDER", "").strip()
- 
+
     from config import _parse_route_source_order
- 
+
     effective = _parse_route_source_order(raw)
     return {
         "ROUTE_SOURCE_ORDER": raw,
