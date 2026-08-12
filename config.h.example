@@ -6,7 +6,7 @@
 // Edit config.h with any text editor, save, then restart:
 //   sudo systemctl restart flightscnr
 //
-// You can also set keys from the web portal at http://raspberrypi.local
+// You can also set keys from the web portal at http://<hostname>.local
 // (saved to /var/lib/flightscnr/secrets.json).
 //
 // Priority (highest wins): /etc/flightscnr.env → web portal → config.h
@@ -23,7 +23,7 @@ TOMORROW_API_KEY =
 // AIRLABS_API_KEY =
 // Optional FlightAware AeroAPI key (route fallback only — not live radar)
 // FLIGHTAWARE_API_KEY =
-// Optional local dump1090/readsb aircraft.json feed
+// Optional local dump1090/readsb aircraft.json feed (off by default)
 // DUMP1090_ENABLED = False
 // DUMP1090_URL = http://127.0.0.1:8080/data/aircraft.json
 

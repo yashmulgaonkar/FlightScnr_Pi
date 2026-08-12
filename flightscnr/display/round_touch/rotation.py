@@ -25,6 +25,7 @@ _rot_hud: pygame.Surface | None = None
 _rot_hud_key = None
 _prev_hud_rect: pygame.Rect | None = None
 _prev_bubble_rect: pygame.Rect | None = None
+_prev_airport_callout_rect: pygame.Rect | None = None
 # Radar layer generation seen but not yet rotated/swapped (one-frame pipeline).
 _pending_key = None
 # Pre-rotated next base prepared between frames (see prewarm_base).
@@ -143,6 +144,7 @@ def present_radar_sweep(
     """
     global _rot_base, _rot_base_key, _prev_sweep_rect, _pending_key, _needs_full
     global _next_base, _next_base_key, _prev_hud_rect, _prev_bubble_rect
+    global _prev_airport_callout_rect
     from display.round_touch import draw
 
     rotation = rotation_degrees()
@@ -207,6 +209,7 @@ def present_radar_sweep(
         _prev_sweep_rect = None
         _prev_hud_rect = None
         _prev_bubble_rect = None
+        _prev_airport_callout_rect = None
         full_refresh = True
         _needs_full = False
     else:
@@ -241,10 +244,20 @@ def present_radar_sweep(
                 r.h,
             )
             display.blit(_rot_base, r.topleft, src)
+        if _prev_airport_callout_rect is not None:
+            r = _prev_airport_callout_rect
+            src = pygame.Rect(
+                r.x - origin_off[0],
+                r.y - origin_off[1],
+                r.w,
+                r.h,
+            )
+            display.blit(_rot_base, r.topleft, src)
 
     old_rect = _prev_sweep_rect
     old_hud = _prev_hud_rect
     old_bubble = _prev_bubble_rect
+    old_airport = _prev_airport_callout_rect
     new_rect = None
     if draw_sweep:
         # present() rotates the frame by -rotation; a logical tip at angle θ lands
@@ -267,6 +280,8 @@ def present_radar_sweep(
     _prev_hud_rect = hud_dirty
     bubble_dirty = _blit_update_bubble(display, origin_off, rotation)
     _prev_bubble_rect = bubble_dirty
+    airport_dirty = _blit_airport_callout(display, origin_off, rotation)
+    _prev_airport_callout_rect = airport_dirty
 
     _t = time.perf_counter()
     if full_refresh:
@@ -274,7 +289,16 @@ def present_radar_sweep(
     else:
         dirty = [
             r
-            for r in (old_rect, new_rect, old_hud, hud_dirty, old_bubble, bubble_dirty)
+            for r in (
+                old_rect,
+                new_rect,
+                old_hud,
+                hud_dirty,
+                old_bubble,
+                bubble_dirty,
+                old_airport,
+                airport_dirty,
+            )
             if r is not None
         ]
         if dirty:
@@ -425,13 +449,58 @@ def _blit_update_bubble(
     src = src.clip(pygame.Rect(0, 0, rw, rh))
     if src.width <= 0 or src.height <= 0:
         return None
-    dst = pygame.Rect(
-        src.x + origin_off[0] - pad_x,
-        src.y + origin_off[1] - pad_y,
-        src.w,
-        src.h,
-    )
     # Align rotated surface: present path blits rot_base at origin_off.
+    rot_off = (
+        origin_off[0] + (theme.SIZE - rw) // 2,
+        origin_off[1] + (theme.SIZE - rh) // 2,
+    )
+    dst = pygame.Rect(src.x + rot_off[0], src.y + rot_off[1], src.w, src.h)
+    display.blit(rotated, dst.topleft, src)
+    return dst
+
+
+def _blit_airport_callout(
+    display: pygame.Surface,
+    origin_off: tuple[int, int],
+    rotation: int,
+) -> pygame.Rect | None:
+    """Stamp the airport ICAO/name toast after the HUD (logical → display)."""
+    try:
+        from display.round_touch import airport_overlay, radar_hud
+    except ImportError:
+        return None
+    if not airport_overlay.callout_visible():
+        return None
+    if radar_hud.volume_popover_open():
+        return None
+
+    logical = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
+    dirty = airport_overlay.draw_callout(logical, pan_offset=None)
+    if dirty is None or dirty.width <= 0 or dirty.height <= 0:
+        return None
+
+    if rotation % 360 == 0:
+        dst = pygame.Rect(
+            dirty.x + origin_off[0],
+            dirty.y + origin_off[1],
+            dirty.w,
+            dirty.h,
+        )
+        display.blit(logical, dst.topleft, dirty)
+        return dst
+
+    try:
+        rotated = pygame.transform.rotate(logical, -rotation)
+    except pygame.error:
+        return None
+    src = _rotate_rect_aabb(dirty.inflate(2, 2), rotation, theme.SIZE)
+    rw, rh = rotated.get_width(), rotated.get_height()
+    pad_x = (rw - theme.SIZE) // 2
+    pad_y = (rh - theme.SIZE) // 2
+    src = pygame.Rect(src.x + pad_x, src.y + pad_y, src.w, src.h)
+    src = src.clip(pygame.Rect(0, 0, rw, rh))
+    if src.width <= 0 or src.height <= 0:
+        return None
     rot_off = (
         origin_off[0] + (theme.SIZE - rw) // 2,
         origin_off[1] + (theme.SIZE - rh) // 2,

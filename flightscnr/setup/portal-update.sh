@@ -87,6 +87,44 @@ schedule_service_restart() {
     echo "Scheduled flightscnr restart in ${RESTART_DELAY_S}s (sleep fallback, pid $!)"
 }
 
+schedule_x11_reboot() {
+    # install-pi.sh leaves this flag when LightDM was switched to X11 for
+    # pinch-to-zoom; a service restart alone cannot apply the new session.
+    local flag="$DATA_DIR/need-reboot-for-x11"
+    local progress="$DATA_DIR/reboot-in-progress"
+    local delay_s="${FLIGHTSCNR_X11_REBOOT_DELAY_S:-8}"
+    local unit="flightscnr-portal-x11-reboot-$$"
+
+    [ -f "$flag" ] || return 1
+    if [ "${FLIGHTSCNR_NO_AUTO_REBOOT:-}" = "1" ]; then
+        echo "X11 reboot needed ($flag) but FLIGHTSCNR_NO_AUTO_REBOOT=1 — skipping"
+        return 1
+    fi
+
+    # On-screen modal in the display app while we wait for the reboot.
+    mkdir -p "$DATA_DIR"
+    printf 'x11\n' >"$progress"
+    chmod 644 "$progress" 2>/dev/null || true
+
+    if command -v systemd-run >/dev/null 2>&1; then
+        if systemd-run \
+            --quiet \
+            --collect \
+            --unit="$unit" \
+            --on-active="${delay_s}s" \
+            /bin/systemctl reboot
+        then
+            echo "Scheduled reboot for X11 / pinch-zoom in ${delay_s}s ($unit)"
+            return 0
+        fi
+        echo "systemd-run reboot schedule failed — falling back to background sleep"
+    fi
+    nohup bash -c "sleep ${delay_s}; systemctl reboot" \
+        >>"$LOG_FILE" 2>&1 </dev/null &
+    echo "Scheduled reboot for X11 / pinch-zoom in ${delay_s}s (sleep fallback, pid $!)"
+    return 0
+}
+
 fail_cleanup() {
     local code=$?
     trap - EXIT
@@ -132,9 +170,16 @@ else
     success_msg="Update finished successfully. Restarting display…"
 fi
 
-# Status + lock must be cleared before restart can kill this cgroup member.
+# Status + lock must be cleared before restart/reboot can kill this cgroup member.
 trap - EXIT
+if [ -f "$DATA_DIR/need-reboot-for-x11" ]; then
+    success_msg="Desktop switched to X11 for pinch-to-zoom. Rebooting…"
+fi
 write_status "success" "$success_msg"
 release_lock
-schedule_service_restart
+if schedule_x11_reboot; then
+    :
+else
+    schedule_service_restart
+fi
 exit 0

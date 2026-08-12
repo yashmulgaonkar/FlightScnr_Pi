@@ -57,10 +57,10 @@ def _download_and_build():
         db.update(_OVERRIDES)
         with open(CACHE_FILE, "w", encoding="utf-8") as f:
             json.dump(db, f)
-        print(f"[Airlines] Database built — {len(db)} entries cached")
+        print(f"[Airlines] Database built - {len(db)} entries cached")
         return db
     except Exception as e:
-        print(f"[Airlines] Download failed: {e} — using built-in list")
+        print(f"[Airlines] Download failed: {e} - using built-in list")
         return dict(_OVERRIDES)
 
 

@@ -131,7 +131,7 @@ def _build_from_csv_path(path: str, *, source: str) -> dict[str, list[dict]]:
         source,
     )
     print(
-        f"[Runways] Database built — {n_seg} segments / {len(db)} airports "
+        f"[Runways] Database built - {n_seg} segments / {len(db)} airports "
         f"(v{CACHE_VERSION}, {source})"
     )
     return db
@@ -189,12 +189,12 @@ def _load() -> None:
             version_found = raw.get("_version", "none") if isinstance(raw, dict) else "legacy"
             print(
                 f"[Runways] Cache version mismatch (found: {version_found}, "
-                f"need: {CACHE_VERSION}) — rebuilding"
+                f"need: {CACHE_VERSION}) - rebuilding"
             )
             if isinstance(raw, dict) and isinstance(raw.get("runways"), dict):
                 stale = raw["runways"]
         except Exception as exc:
-            print(f"[Runways] Cache load failed: {exc} — rebuilding")
+            print(f"[Runways] Cache load failed: {exc} - rebuilding")
     _db = _build_db()
     if not _db and stale:
         print("[Runways] Using previous cache (degraded)")

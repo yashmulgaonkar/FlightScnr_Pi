@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import pwd
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -50,8 +51,19 @@ def update_script_path() -> str:
     return os.path.join(repo_root(), "flightscnr", "setup", "portal-update.sh")
 
 
+def factory_reset_script_path() -> str:
+    return os.path.join(repo_root(), "flightscnr", "setup", "portal-factory-reset.sh")
+
+
 def install_script_path() -> str:
     return os.path.join(repo_root(), "install-pi.sh")
+
+
+def repo_owner_name() -> str:
+    try:
+        return pwd.getpwuid(os.stat(repo_root()).st_uid).pw_name
+    except (OSError, KeyError):
+        return ""
 
 
 _PULL_BLOCKER_PATHS = (
@@ -807,6 +819,60 @@ def start_ota_repair() -> dict:
         "ok": True,
         "message": "Repair started. The display will restart shortly.",
         "cleared_pull_blockers": cleared,
+    }
+
+
+def start_factory_reset() -> dict:
+    """Wipe checkout + data/env, re-clone from GitHub, reinstall, reboot."""
+    if update_running():
+        return {"ok": False, "message": "An update is already running."}
+
+    script = factory_reset_script_path()
+    if not os.path.isfile(script):
+        return {"ok": False, "message": f"Factory reset script not found: {script}"}
+
+    os.makedirs(DATA_DIR, exist_ok=True)
+    _write_status("running", "Factory reset started. Do not turn off.")
+
+    log_fh = open(UPDATE_LOG_PATH, "a", encoding="utf-8")
+    log_fh.write(
+        f"\n--- factory-reset started {datetime.now(timezone.utc).isoformat()} ---\n"
+    )
+    log_fh.flush()
+
+    if os.geteuid() == 0:
+        cmd = ["/bin/bash", script]
+    else:
+        cmd = ["sudo", "-n", "/bin/bash", script]
+
+    env = os.environ.copy()
+    env["FLIGHTSCNR_REPO"] = repo_root()
+    owner = repo_owner_name()
+    if owner:
+        env["FLIGHTSCNR_REPO_OWNER"] = owner
+    env["FLIGHTSCNR_GITHUB_REPO"] = GITHUB_REPO
+    env["FLIGHTSCNR_GITHUB_BRANCH"] = GITHUB_BRANCH
+
+    try:
+        subprocess.Popen(
+            cmd,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            close_fds=True,
+            env=env,
+        )
+    except OSError as exc:
+        log_fh.close()
+        mark_update_finished(False, f"Could not start factory reset: {exc}")
+        return {"ok": False, "message": f"Could not start factory reset: {exc}"}
+
+    return {
+        "ok": True,
+        "message": (
+            "Clean install started. This page will go offline; "
+            "wait several minutes for the Pi to reinstall and reboot."
+        ),
     }
 
 

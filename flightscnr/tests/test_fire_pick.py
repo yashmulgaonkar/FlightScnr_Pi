@@ -39,6 +39,9 @@ class TestFirePickPriority(unittest.TestCase):
         ), mock.patch(
             "display.round_touch.app.wildfire_overlay.pick_fire_at",
             return_value=(fire, fire_d2),
+        ), mock.patch(
+            "display.round_touch.app.airport_overlay.pick_airport_at",
+            return_value=(None, None),
         ):
             opened = RoundTouchDisplay._open_flight_or_fire_at(fake, 100, 500)
 
@@ -66,6 +69,9 @@ class TestFirePickPriority(unittest.TestCase):
         ), mock.patch(
             "display.round_touch.app.wildfire_overlay.pick_fire_at",
             return_value=(fire, fire_d2),
+        ), mock.patch(
+            "display.round_touch.app.airport_overlay.pick_airport_at",
+            return_value=(None, None),
         ):
             opened = RoundTouchDisplay._open_flight_or_fire_at(fake, 100, 500)
 

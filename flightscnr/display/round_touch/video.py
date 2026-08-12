@@ -16,6 +16,8 @@ import os
 
 import pygame
 
+from utilities import x11_kiosk
+
 logger = logging.getLogger("flightscnr.display")
 
 # Common Pi drivers, in rough order of preference when not under a desktop session.
@@ -48,12 +50,8 @@ def _set_driver(driver):
 
 def init_display(width: int, height: int, fullscreen: bool) -> pygame.Surface:
     """Initialize pygame and open the display, trying multiple SDL drivers."""
-    flags = pygame.FULLSCREEN if fullscreen else 0
+    flags = pygame.FULLSCREEN | pygame.NOFRAME if fullscreen else 0
     last_error = None
-
-    # Desktop Bluetooth / notification dialogs can steal focus; keep the
-    # kiosk surface mapped instead of minimizing exclusive fullscreen.
-    os.environ.setdefault("SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS", "0")
 
     for driver in _driver_candidates():
         if pygame.get_init():
@@ -84,6 +82,9 @@ def init_display(width: int, height: int, fullscreen: bool) -> pygame.Surface:
             pygame.init()
             pygame.display.set_caption("FlightScnr Pi")
             surface = pygame.display.set_mode((width, height), flags)
+            if fullscreen:
+                x11_kiosk.undecorate_pygame_window()
+                x11_kiosk.schedule_undecorate_retries()
             logger.info("Display opened (%dx%d, driver=%s)", width, height, label)
             return surface
         except pygame.error as exc:
@@ -112,6 +113,7 @@ def reassert_fullscreen(surface: pygame.Surface | None, *, fullscreen: bool) -> 
             pygame.display.raise_window()
         except Exception:
             pass
+        x11_kiosk.undecorate_pygame_window()
         return surface if surface is not None else pygame.display.get_surface()
     except Exception:
         logger.debug("Could not reassert fullscreen", exc_info=True)

@@ -138,9 +138,14 @@ def _category_for_type(plane_type: str) -> str | None:
         result = _type_to_category[code]
     else:
         # Longest exact prefix first (C25A must not match military C2).
+        # Extra suffix must be letters only (C25A, B38M) so digit siblings
+        # like SF50 / SF25 / SF34 cannot steal each other's icons.
         best = ""
         for length in range(len(code), 2, -1):
             prefix = code[:length]
+            suffix = code[length:]
+            if suffix and not suffix.isalpha():
+                continue
             if prefix in _type_to_category and len(prefix) > len(best):
                 best = prefix
                 result = _type_to_category[prefix]
@@ -153,9 +158,13 @@ def _category_for_type(plane_type: str) -> str | None:
             for mapped, category in _type_to_category.items():
                 if len(mapped) < 3:
                     continue
-                if code.startswith(mapped) and len(mapped) > best_len:
-                    best_len = len(mapped)
-                    result = category
+                if not code.startswith(mapped) or len(mapped) <= best_len:
+                    continue
+                suffix = code[len(mapped):]
+                if suffix and not suffix.isalpha():
+                    continue
+                best_len = len(mapped)
+                result = category
     _category_cache[code] = result
     return result
 

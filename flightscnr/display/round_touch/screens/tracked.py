@@ -33,8 +33,10 @@ from utilities.route_labels import route_display_lines
 try:
     from config import web_portal_url
 except ImportError:
-    def web_portal_url(hostname: str) -> str:
-        name = (hostname or "raspberrypi").split(".")[0].strip() or "raspberrypi"
+    def web_portal_url(hostname: str = "") -> str:
+        name = (hostname or socket.gethostname() or "").split(".")[0].strip()
+        if not name:
+            return "http://localhost"
         return f"http://{name}.local"
 
 FOOTER_BUTTONS = ("pin", "radar")

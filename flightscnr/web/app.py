@@ -1038,6 +1038,7 @@ def radar_json():
             "runway_darkmap_rgb": list(settings.runway_darkmap_rgb()),
             "show_compass_rose": settings.show_compass_rose(),
             "show_range_rings": settings.show_range_rings(),
+            "color_by_altitude": settings.color_by_altitude(),
             "show_aircraft_tag": settings.show_aircraft_tag(),
             "traffic_labels": settings.traffic_labels(),
             "facing_deg": settings.facing_deg(),
@@ -1130,6 +1131,8 @@ def radar_save():
         settings.set_show_compass_rose(bool(data.get("show_compass_rose")))
     if "show_range_rings" in data:
         settings.set_show_range_rings(bool(data.get("show_range_rings")))
+    if "color_by_altitude" in data:
+        settings.set_color_by_altitude(bool(data.get("color_by_altitude")))
     if "traffic_labels" in data:
         settings.set_traffic_labels(data.get("traffic_labels"))
     elif "show_aircraft_tag" in data:
@@ -1509,6 +1512,16 @@ def system_restart_app():
     from utilities import system_control
 
     return jsonify(system_control.request_app_restart())
+
+
+@app.post("/system/factory-reset")
+def system_factory_reset():
+    from utilities import updater
+
+    result = updater.start_factory_reset()
+    if not result.get("ok"):
+        return jsonify(result), 409
+    return jsonify(result)
 
 
 @app.get("/settings/export")

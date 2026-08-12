@@ -1696,7 +1696,7 @@ class Overhead:
             with open(TRACKED_FILE, "w", encoding="utf-8") as f:
                 json.dump({"callsign": ""}, f)
             _tracked_cache["at"] = 0.0
-            print("Tracked flight ended — auto-cleared.")
+            print("Tracked flight ended - auto-cleared.")
         except Exception as e:
             print(f"Failed to auto-clear tracked flight: {e}")
         self._tracked_was_live = False

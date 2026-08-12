@@ -14,8 +14,29 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import time
 
 logger = logging.getLogger("flightscnr.system")
+
+DATA_DIR = os.environ.get("FLIGHTSCNR_DATA_DIR", "/var/lib/flightscnr")
+REBOOT_PROGRESS_PATH = os.path.join(DATA_DIR, "reboot-in-progress")
+# Stale after a completed reboot (file survives on disk across boots).
+_REBOOT_PROGRESS_MAX_AGE_S = 120.0
+
+_REBOOT_COPY = {
+    "x11": (
+        "Reboot in progress",
+        "Enabling pinch-to-zoom…",
+    ),
+    "user": (
+        "Reboot in progress",
+        "Display will come back shortly.",
+    ),
+    "shutdown": (
+        "Shutting down",
+        "Display and portal will power off.",
+    ),
+}
 
 
 def _run_power_command(command: str) -> list[str]:
@@ -24,7 +45,53 @@ def _run_power_command(command: str) -> list[str]:
     return ["/bin/bash", "-c", f"sleep 1.5 && sudo -n {command}"]
 
 
-def _start_power_action(action: str, command: str, *, message: str | None = None) -> dict:
+def mark_reboot_in_progress(reason: str = "user") -> None:
+    """Write the on-screen reboot/shutdown progress flag for the display app."""
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(REBOOT_PROGRESS_PATH, "w", encoding="utf-8") as fh:
+            fh.write(f"{reason.strip() or 'user'}\n")
+    except OSError as exc:
+        logger.warning("Could not write reboot progress flag: %s", exc)
+
+
+def clear_reboot_in_progress() -> None:
+    try:
+        os.remove(REBOOT_PROGRESS_PATH)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        logger.debug("Could not clear reboot progress flag: %s", exc)
+
+
+def reboot_progress_copy() -> tuple[str, str] | None:
+    """Return (title, detail) when the display should show a reboot overlay."""
+    if not os.path.isfile(REBOOT_PROGRESS_PATH):
+        return None
+    try:
+        age = time.time() - os.path.getmtime(REBOOT_PROGRESS_PATH)
+    except OSError:
+        return None
+    if age > _REBOOT_PROGRESS_MAX_AGE_S:
+        clear_reboot_in_progress()
+        return None
+    try:
+        with open(REBOOT_PROGRESS_PATH, encoding="utf-8") as fh:
+            reason = (fh.read() or "user").strip().splitlines()[0].strip() or "user"
+    except OSError:
+        reason = "user"
+    return _REBOOT_COPY.get(reason, _REBOOT_COPY["user"])
+
+
+def _start_power_action(
+    action: str,
+    command: str,
+    *,
+    message: str | None = None,
+    progress_reason: str | None = None,
+) -> dict:
+    if progress_reason:
+        mark_reboot_in_progress(progress_reason)
     try:
         subprocess.Popen(
             _run_power_command(command),
@@ -34,6 +101,8 @@ def _start_power_action(action: str, command: str, *, message: str | None = None
             close_fds=True,
         )
     except OSError as exc:
+        if progress_reason:
+            clear_reboot_in_progress()
         logger.warning("Could not start %s: %s", action, exc)
         return {"ok": False, "message": f"Could not {action}: {exc}"}
 
@@ -43,11 +112,19 @@ def _start_power_action(action: str, command: str, *, message: str | None = None
 
 
 def request_reboot() -> dict:
-    return _start_power_action("reboot", "systemctl reboot")
+    return _start_power_action(
+        "reboot",
+        "systemctl reboot",
+        progress_reason="user",
+    )
 
 
 def request_shutdown() -> dict:
-    return _start_power_action("shutdown", "systemctl poweroff")
+    return _start_power_action(
+        "shutdown",
+        "systemctl poweroff",
+        progress_reason="shutdown",
+    )
 
 
 def request_app_restart() -> dict:
