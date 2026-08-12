@@ -2,8 +2,9 @@
 # install-pi.sh — Install or update FlightScnr Pi on a Raspberry Pi.
 #
 # Requires: Raspberry Pi OS with desktop (X11 on :0), round touch LCD, network.
-# Fresh installs prefer the X11 session (rpd-x) over labwc/Wayland so SDL gets
-# real multi-touch (pinch-to-zoom). SDL_VIDEODRIVER=x11 stays as today.
+# Fresh installs force the X11 session (rpd-x) over labwc/Wayland so SDL gets
+# real multi-touch (pinch-to-zoom), then auto-reboot when needed. Users should
+# not need raspi-config. SDL_VIDEODRIVER=x11 stays as today.
 #
 # First install (after clone):
 #   git clone https://github.com/yashmulgaonkar/FlightScnr_Pi.git ~/FlightScnr_Pi
@@ -15,7 +16,7 @@
 #
 # After an OTA from builds that still ran install in-process (pre-re-exec),
 # the app auto-re-syncs install-pi.sh once (stamp mismatch) so users do not
-# need a second Update click. Reboot if LightDM switched to rpd-x.
+# need a second Update click. Auto-reboots if LightDM switched to rpd-x.
 #
 # Usage:
 #   sudo bash install-pi.sh [install] [--no-start] [--skip-apt]
@@ -29,6 +30,31 @@
 # Or re-run install-pi.sh — it clears lists once and retries automatically.
 #
 set -euo pipefail
+
+# Snapshot to /tmp before doing work. Bash keeps reading this file as it runs;
+# if git/an editor rewrites it mid-install, the tail can hit a stray `;;` (exit 2).
+# `install-pi.sh update` still re-execs the on-disk script after pull (new steps).
+if [ -z "${FLIGHTSCNR_INSTALL_SNAPSHOT:-}" ] \
+    && [ "${FLIGHTSCNR_NO_INSTALL_SNAPSHOT:-}" != "1" ]; then
+    _install_src="$0"
+    if [ "${_install_src#/}" = "$_install_src" ]; then
+        _install_src="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+    fi
+    if [ ! -f "$_install_src" ]; then
+        echo "install-pi.sh not found: $_install_src" >&2
+        exit 1
+    fi
+    _install_snap="$(mktemp /tmp/flightscnr-install-pi.XXXXXX.sh)"
+    cp "$_install_src" "$_install_snap"
+    chmod 700 "$_install_snap"
+    export FLIGHTSCNR_INSTALL_SNAPSHOT=1
+    export FLIGHTSCNR_INSTALL_PI="$_install_src"
+    export FLIGHTSCNR_INSTALL_SNAPSHOT_PATH="$_install_snap"
+    exec bash "$_install_snap" "$@"
+fi
+if [ -n "${FLIGHTSCNR_INSTALL_SNAPSHOT_PATH:-}" ]; then
+    trap 'rm -f "${FLIGHTSCNR_INSTALL_SNAPSHOT_PATH:-}"' EXIT
+fi
 
 ENV_DEST="/etc/flightscnr.env"
 DATA_DIR="/var/lib/flightscnr"
@@ -48,7 +74,12 @@ BOOT_CMDLINE=""
 NEED_REBOOT_FOR_X11=0
 
 setup_paths() {
-    REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+    # Prefer the real checkout path when running from a /tmp snapshot.
+    local src="${FLIGHTSCNR_INSTALL_PI:-$0}"
+    if [ "${src#/}" = "$src" ]; then
+        src="$(cd "$(dirname "$src")" && pwd)/$(basename "$src")"
+    fi
+    REPO_ROOT="$(cd "$(dirname "$src")" && pwd)"
     SETUP_DIR="$REPO_ROOT/flightscnr/setup"
     APP_DIR="$REPO_ROOT/flightscnr"
     VENV_DIR="$REPO_ROOT/flightscnr-venv"
@@ -59,8 +90,17 @@ setup_paths() {
         REPO_OWNER="$(stat -c '%U' "$REPO_ROOT")"
     fi
 
-    REPO_OWNER_HOME="$(getent passwd "$REPO_OWNER" | cut -d: -f6)"
+    if ! id -u "$REPO_OWNER" >/dev/null 2>&1; then
+        echo "Could not resolve install owner '$REPO_OWNER' (SUDO_USER or repo ownership)." >&2
+        exit 1
+    fi
+    # Fail clearly if the owner has no passwd home (do not abort with bare exit 2).
+    REPO_OWNER_HOME="$(getent passwd "$REPO_OWNER" | cut -d: -f6 || true)"
     REPO_OWNER_UID="$(id -u "$REPO_OWNER")"
+    if [ -z "$REPO_OWNER_HOME" ]; then
+        echo "Could not resolve home directory for install owner '$REPO_OWNER'." >&2
+        exit 1
+    fi
 }
 
 require_root() {
@@ -110,8 +150,52 @@ install_apt_packages() {
         mpv \
         bluez \
         libspa-0.2-bluetooth \
-        pulseaudio-utils
+        pulseaudio-utils \
+        rfkill
     log_ok "System packages ready"
+}
+
+ensure_bluetooth_ready() {
+    # Fresh Bookworm images often soft-block Bluetooth (rfkill) and/or leave
+    # bluetoothd inactive until the desktop tray toggles it. FlightScnr pairs
+    # speakers via bluetoothctl with no tray — unblock + enable here.
+    local conf="/etc/bluetooth/main.conf"
+
+    log_step "Bluetooth (adapter for speaker pairing)"
+
+    if command -v rfkill >/dev/null 2>&1; then
+        rfkill unblock bluetooth >/dev/null 2>&1 || true
+        log_ok "rfkill unblock bluetooth"
+    else
+        log_warn "rfkill not installed — skipping unblock"
+    fi
+
+    if systemctl list-unit-files bluetooth.service >/dev/null 2>&1; then
+        systemctl enable bluetooth.service >/dev/null 2>&1 || true
+        if systemctl start bluetooth.service >/dev/null 2>&1; then
+            log_ok "bluetooth.service enabled and started"
+        else
+            log_warn "Could not start bluetooth.service (continuing)"
+        fi
+    else
+        log_warn "bluetooth.service not found — is bluez installed?"
+    fi
+
+    if [ -f "$conf" ]; then
+        if grep -qE '^[[:space:]]*AutoEnable=' "$conf"; then
+            sed -i -e 's/^[[:space:]]*AutoEnable=.*/AutoEnable=true/' "$conf" || true
+        elif grep -qE '^[[:space:]]*#[[:space:]]*AutoEnable=' "$conf"; then
+            sed -i -e 's/^[[:space:]]*#[[:space:]]*AutoEnable=.*/AutoEnable=true/' "$conf" || true
+        else
+            printf '\n# FlightScnr Pi — power adapter on boot for speaker pairing\nAutoEnable=true\n' >> "$conf" || true
+        fi
+        log_ok "BlueZ AutoEnable=true ($conf)"
+    fi
+
+    if command -v bluetoothctl >/dev/null 2>&1; then
+        bluetoothctl power on >/dev/null 2>&1 || true
+        bluetoothctl pairable on >/dev/null 2>&1 || true
+    fi
 }
 
 resolve_boot_paths() {
@@ -133,7 +217,6 @@ configure_display_720x720() {
     local mode="720x720"
     local kanshi_body
     local dispsetup
-    local home_dir owner
     local applied=0
 
     log_step "Display resolution ${mode}"
@@ -149,17 +232,16 @@ profile {
 EOF
 )
 
-    for owner in "$REPO_OWNER" pi root; do
-        home_dir="$(getent passwd "$owner" | cut -d: -f6)"
-        [ -n "$home_dir" ] || continue
-        mkdir -p "${home_dir}/.config/kanshi"
-        if printf '%s\n' "$kanshi_body" > "${home_dir}/.config/kanshi/config"; then
-            chown -R "$owner:$owner" "${home_dir}/.config/kanshi" 2>/dev/null || true
+    # Per-user kanshi for the install owner.
+    if [ -n "${REPO_OWNER_HOME:-}" ]; then
+        mkdir -p "${REPO_OWNER_HOME}/.config/kanshi"
+        if printf '%s\n' "$kanshi_body" > "${REPO_OWNER_HOME}/.config/kanshi/config"; then
+            chown -R "$REPO_OWNER:" "${REPO_OWNER_HOME}/.config/kanshi" 2>/dev/null || true
             applied=1
         else
-            log_warn "Could not write ${home_dir}/.config/kanshi/config (continuing)"
+            log_warn "Could not write ${REPO_OWNER_HOME}/.config/kanshi/config (continuing)"
         fi
-    done
+    fi
 
     # System fallback used by greeter / first boot before a user config exists.
     if mkdir -p /etc/xdg/kanshi 2>/dev/null; then
@@ -339,7 +421,7 @@ PYROT
                 pcmanfm --reconfigure >/dev/null 2>&1 || true
         }
 
-        local profile home_dir owner
+        local profile
         for profile in default LXDE-pi; do
             _set_pcmanfm_wallpaper_conf \
                 "/etc/xdg/pcmanfm/${profile}/desktop-items-0.conf"
@@ -347,20 +429,20 @@ PYROT
                 _set_pcmanfm_wallpaper_conf \
                     "/etc/xdg/pcmanfm/${profile}/desktop-items-1.conf"
             fi
-            for owner in "$REPO_OWNER" pi root; do
-                home_dir="$(getent passwd "$owner" | cut -d: -f6)"
-                [ -n "$home_dir" ] || continue
+            # Per-user pcmanfm for the install owner.
+            if [ -n "${REPO_OWNER_HOME:-}" ]; then
                 _set_pcmanfm_wallpaper_conf \
-                    "${home_dir}/.config/pcmanfm/${profile}/desktop-items-0.conf"
-                if [ -f "${home_dir}/.config/pcmanfm/${profile}/desktop-items-1.conf" ]; then
+                    "${REPO_OWNER_HOME}/.config/pcmanfm/${profile}/desktop-items-0.conf"
+                if [ -f "${REPO_OWNER_HOME}/.config/pcmanfm/${profile}/desktop-items-1.conf" ]; then
                     _set_pcmanfm_wallpaper_conf \
-                        "${home_dir}/.config/pcmanfm/${profile}/desktop-items-1.conf"
+                        "${REPO_OWNER_HOME}/.config/pcmanfm/${profile}/desktop-items-1.conf"
                 fi
-                chown -R "$owner:$owner" "${home_dir}/.config/pcmanfm" 2>/dev/null || true
-            done
+                chown -R "$REPO_OWNER:" \
+                    "${REPO_OWNER_HOME}/.config/pcmanfm" 2>/dev/null || true
+            fi
         done
 
-        _refresh_pcmanfm_wallpaper "${REPO_OWNER:-pi}"
+        _refresh_pcmanfm_wallpaper "$REPO_OWNER"
         # Some images autologin the graphical session as root.
         if [ "$(id -u)" -eq 0 ]; then
             env DISPLAY="${DISPLAY:-:0}" \
@@ -550,7 +632,7 @@ setup_data_dir() {
     log_step "Runtime data directory"
     install -d -m 0755 "$DATA_DIR"
     install -d -m 0755 "$DATA_DIR/maps"
-    chown -R "$REPO_OWNER:$REPO_OWNER" "$DATA_DIR"
+    chown -R "$REPO_OWNER:" "$DATA_DIR"
     log_ok "$DATA_DIR ready (owned by $REPO_OWNER)"
 }
 
@@ -570,17 +652,19 @@ setup_config_h() {
 
     log_step "Creating config.h from template"
     cp "$example" "$dest"
-    chown "$REPO_OWNER:$REPO_OWNER" "$dest"
+    chown "$REPO_OWNER:" "$dest"
     chmod 0644 "$dest"
     log_ok "Created config.h from config.h.example"
 }
+
+REBOOT_X11_FLAG="${DATA_DIR}/need-reboot-for-x11"
 
 lightdm_session_is_wayland() {
     # Prefer LightDM config over $XDG_SESSION_TYPE — installs over SSH are often
     # tty and would miss a labwc autologin session.
     local conf="${1:-/etc/lightdm/lightdm.conf}"
     [ -f "$conf" ] || return 1
-    grep -qE '^[[:space:]]*(user-session|autologin-session)=(rpd-labwc|labwc|LXDE-pi-labwc|rpd-wayland)[[:space:]]*$' "$conf"
+    grep -qE '^[[:space:]]*(user-session|autologin-session)=(rpd-labwc|labwc|LXDE-pi-labwc|LXDE-pi-wayland|rpd-wayland)[[:space:]]*$' "$conf"
 }
 
 # True when the *live* desktop is still labwc/Xwayland (config may already say X11
@@ -589,14 +673,51 @@ wayland_desktop_still_running() {
     pgrep -x labwc >/dev/null 2>&1 || pgrep -x Xwayland >/dev/null 2>&1
 }
 
+lightdm_on_x11_session() {
+    local conf="$1"
+    local xsession="$2"
+    grep -qE "^[[:space:]]*user-session=${xsession}[[:space:]]*$" "$conf" \
+        && grep -qE "^[[:space:]]*autologin-session=${xsession}[[:space:]]*$" "$conf"
+}
+
+# Ensure a LightDM [Seat:*] key exists (create or uncomment), then set its value.
+# Mirrors raspi-config do_wayland W1; also handles images missing the key entirely.
+_set_lightdm_seat_key() {
+    local conf="$1"
+    local key="$2"
+    local value="$3"
+    if grep -qE "^#?[[:space:]]*${key}=" "$conf"; then
+        sed -i -e "s/^#\\?[[:space:]]*${key}.*/${key}=${value}/" "$conf"
+        return 0
+    fi
+    if grep -qE '^\[Seat:\*\]' "$conf"; then
+        sed -i "/^\[Seat:\*\]/a ${key}=${value}" "$conf"
+    else
+        printf '\n[Seat:*]\n%s=%s\n' "$key" "$value" >> "$conf"
+    fi
+}
+
+_mark_reboot_for_x11() {
+    NEED_REBOOT_FOR_X11=1
+    mkdir -p "$DATA_DIR"
+    printf 'x11\n' >"$REBOOT_X11_FLAG"
+    chmod 644 "$REBOOT_X11_FLAG" 2>/dev/null || true
+}
+
+_clear_reboot_for_x11() {
+    rm -f "$REBOOT_X11_FLAG"
+}
+
 prefer_x11_session() {
-    # Bookworm defaults to labwc/Wayland. FlightScnr is an SDL X11 client on :0;
-    # under Xwayland touch is pointer-emulated (MOUSE* only) so pinch cannot work
-    # (issue #21). Mirror raspi-config "W1 X11" so fresh installs get real Xorg
-    # multi-touch. Leaves SDL_VIDEODRIVER=x11 unchanged (env + unit already set it).
+    # Bookworm/Trixie default to labwc/Wayland. FlightScnr is an SDL X11 client
+    # on :0; under Xwayland touch is pointer-emulated (MOUSE* only) so pinch
+    # cannot work (issue #21). Always force the Pi OS X11 session (same as
+    # raspi-config "W1 X11") — do not leave LightDM alone just because the
+    # current session name is unfamiliar. Leaves SDL_VIDEODRIVER=x11 unchanged.
     local conf="/etc/lightdm/lightdm.conf"
     local xsession wsession xgsession
     local accounts=""
+    local switched=0
 
     log_step "Desktop session (X11 for multi-touch / pinch-zoom)"
 
@@ -625,28 +746,37 @@ prefer_x11_session() {
         return 0
     fi
 
-    if ! lightdm_session_is_wayland "$conf"; then
-        if grep -qE "^[[:space:]]*user-session=${xsession}[[:space:]]*$" "$conf" \
-            && grep -qE "^[[:space:]]*autologin-session=${xsession}[[:space:]]*$" "$conf"; then
-            if wayland_desktop_still_running; then
-                # Config was switched earlier but this boot is still labwc/Xwayland.
-                NEED_REBOOT_FOR_X11=1
-                log_warn "LightDM is set to X11 (${xsession}) but labwc/Xwayland is still running"
-                log_warn "Reboot required before pinch-to-zoom will work (issue #21)"
-                return 0
-            fi
-            log_ok "LightDM already on X11 (${xsession}) — pinch multi-touch path OK"
+    if lightdm_on_x11_session "$conf" "$xsession"; then
+        if wayland_desktop_still_running; then
+            # Config was switched earlier but this boot is still labwc/Xwayland.
+            _mark_reboot_for_x11
+            log_warn "LightDM is set to X11 (${xsession}) but labwc/Xwayland is still running"
+            log_warn "Will reboot automatically so pinch-to-zoom can take effect"
             return 0
         fi
-        log_ok "LightDM not on labwc/Wayland — leaving session unchanged"
+        _clear_reboot_for_x11
+        rm -f "${DATA_DIR}/reboot-in-progress"
+        log_ok "LightDM already on X11 (${xsession}) — pinch multi-touch path OK"
         return 0
     fi
 
-    sed -i -e "s/^#\\?user-session.*/user-session=${xsession}/" "$conf"
-    sed -i -e "s/^#\\?autologin-session.*/autologin-session=${xsession}/" "$conf"
+    # Prefer raspi-config when present (tracks OS session/greeter naming).
+    if command -v raspi-config >/dev/null 2>&1; then
+        if raspi-config nonint do_wayland W1 >/dev/null 2>&1; then
+            switched=1
+            log_ok "raspi-config nonint do_wayland W1 → X11 (${xsession})"
+        else
+            log_warn "raspi-config nonint do_wayland W1 failed — applying LightDM edits directly"
+        fi
+    fi
+
+    # Always apply the same LightDM edits raspi-config uses, so we still win on
+    # images where nonint is missing/broken or left greeter/AccountsService stale.
+    _set_lightdm_seat_key "$conf" user-session "$xsession"
+    _set_lightdm_seat_key "$conf" autologin-session "$xsession"
     if [ -f "/usr/share/xgreeters/${xgsession}.desktop" ] \
         || [ -f "/usr/share/lightdm/greeters/${xgsession}.desktop" ]; then
-        sed -i -e "s/^#\\?greeter-session.*/greeter-session=${xgsession}/" "$conf"
+        _set_lightdm_seat_key "$conf" greeter-session "$xgsession"
     fi
     sed -i -e "s/^fallback-test.*/#fallback-test=/" "$conf"
     sed -i -e "s/^fallback-session.*/#fallback-session=/" "$conf"
@@ -654,12 +784,64 @@ prefer_x11_session() {
 
     accounts="/var/lib/AccountsService/users/${REPO_OWNER}"
     if [ -f "$accounts" ]; then
-        sed -i -e "s/^XSession=.*/XSession=${xsession}/" "$accounts" || true
+        if grep -qE '^XSession=' "$accounts"; then
+            sed -i -e "s/^XSession=.*/XSession=${xsession}/" "$accounts" || true
+        else
+            printf 'XSession=%s\n' "$xsession" >> "$accounts" || true
+        fi
     fi
 
-    NEED_REBOOT_FOR_X11=1
-    log_ok "Switched LightDM to X11 (${xsession}; was ${wsession}) for pinch-to-zoom"
-    log_warn "Reboot required before the X11 session (and pinch) take effect"
+    if ! lightdm_on_x11_session "$conf" "$xsession"; then
+        log_warn "Could not set LightDM to ${xsession} — pinch may stay unavailable"
+        return 0
+    fi
+
+    _mark_reboot_for_x11
+    if [ "$switched" -eq 1 ]; then
+        log_ok "Confirmed LightDM on X11 (${xsession}) for pinch-to-zoom"
+    else
+        log_ok "Switched LightDM to X11 (${xsession}; was ${wsession}) for pinch-to-zoom"
+    fi
+    log_warn "Reboot will be scheduled so the X11 session (and pinch) take effect"
+    return 0
+}
+
+schedule_reboot_for_x11() {
+    # Pinch needs a real Xorg session; config changes only apply after reboot.
+    # Auto-reboot so fresh installs do not require raspi-config or a manual reboot.
+    local delay_s="${FLIGHTSCNR_X11_REBOOT_DELAY_S:-8}"
+    local unit="flightscnr-x11-reboot-$$"
+    local progress="${DATA_DIR}/reboot-in-progress"
+
+    if [ "${NEED_REBOOT_FOR_X11:-0}" -ne 1 ] && [ ! -f "$REBOOT_X11_FLAG" ]; then
+        return 0
+    fi
+    if [ "${FLIGHTSCNR_NO_AUTO_REBOOT:-}" = "1" ]; then
+        log_warn "X11 reboot needed but FLIGHTSCNR_NO_AUTO_REBOOT=1 — run: sudo reboot"
+        return 0
+    fi
+
+    # On-screen modal in the display app while we wait for the reboot.
+    mkdir -p "$DATA_DIR"
+    printf 'x11\n' >"$progress"
+    chmod 644 "$progress" 2>/dev/null || true
+
+    log_step "Scheduling reboot for X11 / pinch-to-zoom (${delay_s}s)"
+    if command -v systemd-run >/dev/null 2>&1; then
+        if systemd-run \
+            --quiet \
+            --collect \
+            --unit="$unit" \
+            --on-active="${delay_s}s" \
+            /bin/systemctl reboot
+        then
+            log_ok "Reboot scheduled (${unit}) — pinch works after X11 comes up"
+            return 0
+        fi
+        log_warn "systemd-run reboot schedule failed — falling back to background sleep"
+    fi
+    nohup bash -c "sleep ${delay_s}; systemctl reboot" >/dev/null 2>&1 </dev/null &
+    log_ok "Reboot scheduled (sleep fallback, pid $!) — pinch works after X11 comes up"
     return 0
 }
 
@@ -680,6 +862,12 @@ setup_env_file() {
                 log_warn "TOUCH_USE_FINGER_EVENTS is True — if taps do nothing under Xwayland, set it False in $ENV_DEST"
             fi
         fi
+        # If dump1090 was never configured in env, keep the explicit off default
+        # (avoids connection-refused spam when no local receiver is installed).
+        if ! grep -qE '^[[:space:]]*DUMP1090_ENABLED=' "$ENV_DEST"; then
+            printf '\n# Local ADS-B receiver (off until enabled in the portal)\nDUMP1090_ENABLED=False\n' >> "$ENV_DEST"
+            log_ok "Set DUMP1090_ENABLED=False (no local receiver by default)"
+        fi
     else
         log_step "Creating $ENV_DEST"
         if [ -f "$REPO_ROOT/.env" ]; then
@@ -691,6 +879,9 @@ setup_env_file() {
         fi
         chown root:root "$ENV_DEST"
         chmod 0600 "$ENV_DEST"
+        if ! grep -qE '^[[:space:]]*DUMP1090_ENABLED=' "$ENV_DEST"; then
+            printf '\nDUMP1090_ENABLED=False\n' >> "$ENV_DEST"
+        fi
     fi
 
     setup_config_h
@@ -698,31 +889,66 @@ setup_env_file() {
 
 suppress_desktop_bluetooth_popups() {
     # Raspberry Pi OS panel plugins (lxplug-bluetooth / wfplug-bluetooth, and
-    # wfplug-volumepulse for BT audio) pop a "Connection successful" dialog or a
-    # "<device> Connected N%" notification on every BlueZ connect/disconnect.
-    # Those steal focus from fullscreen FlightScnr. Pairing is done via the web
-    # portal, so drop the panel widget and the panel notification server —
+    # volumepulse / volumealsa for BT audio) pop a "Connection successful"
+    # dialog or a "<device> Connected N%" toast on every BlueZ connect.
+    # Those steal focus from fullscreen FlightScnr. Pairing is done via the
+    # web portal, so drop the panel widgets and mute panel notifications —
     # BlueZ/PipeWire still work for ATC audio.
+    #
+    # After prefer_x11_session, the live stack is Openbox + lxpanel (not
+    # labwc/wf-panel-pi). The earlier Wayland-only widgets_right fix is not
+    # enough; lxpanel must lose its bluetooth plugin (and we still harden
+    # wf-panel-pi for devices that remain on labwc).
     log_step "Suppressing desktop Bluetooth pair/connect popups"
 
     local changed=0
     local panel
-    local panels=(
-        "${REPO_OWNER_HOME}/.config/lxpanel/LXDE-pi/panels/panel"
-        "/etc/xdg/lxpanel/LXDE-pi/panels/panel"
-        "/root/.config/lxpanel/LXDE-pi/panels/panel"
+    local panels=()
+    local p
+    local autostart
+
+    # Collect every lxpanel panel config we can find (system + user profiles).
+    while IFS= read -r p; do
+        [ -n "$p" ] && panels+=("$p")
+    done < <(
+        find \
+            "${REPO_OWNER_HOME}/.config/lxpanel" \
+            /etc/xdg/lxpanel \
+            /root/.config/lxpanel \
+            -type f -path '*/panels/*' 2>/dev/null | sort -u
     )
 
+    # Fresh X11 logins may have no user panel yet and still load bluetooth from
+    # the packaged default — seed a user copy so our strip sticks.
+    if [ -n "${REPO_OWNER_HOME:-}" ] \
+        && [ ! -f "${REPO_OWNER_HOME}/.config/lxpanel/LXDE-pi/panels/panel" ] \
+        && [ -f /etc/xdg/lxpanel/LXDE-pi/panels/panel ]
+    then
+        mkdir -p "${REPO_OWNER_HOME}/.config/lxpanel/LXDE-pi/panels"
+        if cp -a /etc/xdg/lxpanel/LXDE-pi/panels/panel \
+            "${REPO_OWNER_HOME}/.config/lxpanel/LXDE-pi/panels/panel"
+        then
+            chown -R "$REPO_OWNER:" "${REPO_OWNER_HOME}/.config/lxpanel" 2>/dev/null || true
+            panels+=("${REPO_OWNER_HOME}/.config/lxpanel/LXDE-pi/panels/panel")
+            log_ok "Seeded user lxpanel config from system default"
+        fi
+    fi
+
     for panel in "${panels[@]}"; do
-        if [ -f "$panel" ] && grep -q 'type=bluetooth' "$panel"; then
-            # Drop the Plugin { type=bluetooth ... } block (and a following blank line).
-            # A failure here must not abort the install (set -e), so keep it guarded.
-            if python3 - "$panel" <<'PY'
+        [ -f "$panel" ] || continue
+        if ! grep -qiE '^[[:space:]]*type[[:space:]]*=[[:space:]]*bluetooth[[:space:]]*$' "$panel"; then
+            continue
+        fi
+        # Drop Plugin { … type=bluetooth … } blocks. Allow "type = bluetooth".
+        if python3 - "$panel" <<'PY'
 import pathlib, re, sys
+
 path = pathlib.Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 new, n = re.subn(
-    r"(?ms)^Plugin \{\n(?:[^\n]*\n)*?[ \t]*type=bluetooth\n(?:[^\n]*\n)*?^\}\n?",
+    r"(?ims)^Plugin\s*\{(?:(?!^Plugin\s*\{).)*?"
+    r"^[ \t]*type[ \t]*=[ \t]*bluetooth[ \t]*\n"
+    r"(?:(?!^Plugin\s*\{).)*?^\}\s*\n?",
     "",
     text,
 )
@@ -730,19 +956,36 @@ if not n:
     sys.exit(1)
 path.write_text(new, encoding="utf-8")
 PY
-            then
-                changed=1
-                log_ok "Removed bluetooth plugin from $panel"
-            else
-                log_warn "Could not strip bluetooth plugin from $panel (continuing)"
-            fi
+        then
+            changed=1
+            log_ok "Removed bluetooth plugin from $panel"
+        else
+            log_warn "Could not strip bluetooth plugin from $panel (continuing)"
         fi
     done
 
-    # wf-panel-pi (Wayland). An absent widgets_right falls back to the compiled
-    # default, which includes the bluetooth widget — so the key must be written
-    # explicitly, not just filtered. notify_enable=false also stops volumepulse
-    # from popping "Connected"/battery toasts over fullscreen FlightScnr.
+    # Disable desktop autostart helpers that show their own BT dialogs/toasts.
+    for autostart in \
+        /etc/xdg/autostart/blueman.desktop \
+        /etc/xdg/autostart/blueman-applet.desktop \
+        /etc/xdg/autostart/blueberry-tray.desktop \
+        "${REPO_OWNER_HOME}/.config/autostart/blueman.desktop" \
+        "${REPO_OWNER_HOME}/.config/autostart/blueman-applet.desktop"
+    do
+        if [ -f "$autostart" ] && ! grep -qE '^[[:space:]]*Hidden[[:space:]]*=[[:space:]]*true' "$autostart"; then
+            if grep -qE '^[[:space:]]*Hidden[[:space:]]*=' "$autostart"; then
+                sed -i -E 's/^[[:space:]]*Hidden[[:space:]]*=.*/Hidden=true/' "$autostart" || true
+            else
+                printf '\nHidden=true\n' >> "$autostart" || true
+            fi
+            changed=1
+            log_ok "Hidden autostart $(basename "$autostart")"
+        fi
+    done
+
+    # wf-panel-pi (Wayland / labwc). An absent widgets_right falls back to the
+    # packaged default (includes bluetooth) — write the key explicitly.
+    # notify_enable=false also stops volumepulse "Connected"/battery toasts.
     local wf_ini="${REPO_OWNER_HOME}/.config/wf-panel-pi.ini"
     mkdir -p "$(dirname "$wf_ini")"
     # Prefer stdout markers over sys.exit(2): that code became portal
@@ -810,7 +1053,7 @@ PY
 )" || wf_rc=$?
     if [ "$wf_rc" -eq 0 ] && [ "$wf_out" = "UPDATED" ]; then
         if [ -n "${REPO_OWNER:-}" ]; then
-            chown "$REPO_OWNER:$REPO_OWNER" "$wf_ini" 2>/dev/null || true
+            chown "$REPO_OWNER:" "$wf_ini" 2>/dev/null || true
         fi
         changed=1
         log_ok "Disabled bluetooth widget + panel notifications in $wf_ini"
@@ -824,7 +1067,7 @@ PY
         # Reload panel if one is running (best-effort; ignore failures).
         if pgrep -x lxpanel >/dev/null 2>&1; then
             killall -q lxpanel 2>/dev/null || true
-            log_ok "Restarted lxpanel (will respawn with desktop session)"
+            log_ok "Stopped lxpanel so bluetooth plugin reload cannot show dialogs"
         fi
         if pgrep -x wf-panel-pi >/dev/null 2>&1; then
             # Nothing respawns it inside a running Wayland session; it comes back
@@ -832,8 +1075,172 @@ PY
             killall -q wf-panel-pi 2>/dev/null || true
             log_ok "Stopped wf-panel-pi (returns on next boot without the popups)"
         fi
+        # Blueman / blueberry trays if somehow still running.
+        killall -q blueman-applet blueman-tray blueberry-tray 2>/dev/null || true
     else
         log_ok "Desktop Bluetooth panel plugin already disabled (or not present)"
+    fi
+}
+
+suppress_openbox_decorations_for_kiosk() {
+    # Fresh rpd-x (Openbox + PiXtrix) still draws a title bar on the SDL window.
+    # On a 90°-rotated round panel that bar appears on the left with vertical
+    # "FlightScnr Pi" text. Copy the system rc into the user config (Openbox
+    # documents that path) and add undecorate/fullscreen rules.
+    local dest_dir="${REPO_OWNER_HOME}/.config/openbox"
+    local dest="${dest_dir}/rpd-rc.xml"
+    local src=""
+    local f
+    local marker="flightscnr-kiosk-v2"
+
+    log_step "Openbox decorations (hide title bar on round panel)"
+
+    for f in /etc/xdg/openbox/rpd-rc.xml /etc/X11/openbox/rpd-rc.xml \
+             /etc/xdg/openbox/lxde-pi-rc.xml /etc/xdg/openbox/rc.xml; do
+        if [ -f "$f" ]; then
+            src="$f"
+            break
+        fi
+    done
+    if [ -z "$src" ] || [ -z "${REPO_OWNER_HOME:-}" ]; then
+        log_ok "No Openbox rc to patch (or no desktop user home)"
+        return 0
+    fi
+
+    mkdir -p "$dest_dir"
+    if [ ! -f "$dest" ]; then
+        cp -a "$src" "$dest" || {
+            log_warn "Could not copy $src → $dest"
+            return 0
+        }
+        log_ok "Copied $src → $dest"
+    fi
+
+    if grep -q "$marker" "$dest" 2>/dev/null; then
+        log_ok "Openbox kiosk rules already present ($dest)"
+    elif grep -q '</applications>' "$dest"; then
+        local snippet
+        snippet="$(cat <<'XML'
+    <!-- flightscnr-kiosk-v2: wildcard match — no hostname/user/path hardcoding -->
+    <application name="*flightscnr*">
+      <decor>no</decor>
+      <fullscreen>yes</fullscreen>
+      <maximized>yes</maximized>
+    </application>
+    <application class="*flightscnr*">
+      <decor>no</decor>
+      <fullscreen>yes</fullscreen>
+      <maximized>yes</maximized>
+    </application>
+    <application class="SDL_App">
+      <decor>no</decor>
+      <fullscreen>yes</fullscreen>
+      <maximized>yes</maximized>
+    </application>
+    <application class="pygame">
+      <decor>no</decor>
+      <fullscreen>yes</fullscreen>
+      <maximized>yes</maximized>
+    </application>
+    <!-- /flightscnr-kiosk-v2 -->
+XML
+)"
+        python3 - "$dest" "$snippet" <<'PY' || true
+import sys
+path, snippet = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as fh:
+    text = fh.read()
+needle = "</applications>"
+if needle not in text:
+    raise SystemExit(1)
+text = text.replace(needle, snippet.rstrip() + "\n  " + needle, 1)
+with open(path, "w", encoding="utf-8") as fh:
+    fh.write(text)
+PY
+        if grep -q "$marker" "$dest"; then
+            log_ok "Added Openbox undecorate rules ($dest)"
+        else
+            log_warn "Could not insert Openbox kiosk rules into $dest"
+        fi
+    else
+        log_warn "Openbox rc has no </applications> section — skip ($dest)"
+    fi
+
+    chown -R "$REPO_OWNER:" "$dest_dir" 2>/dev/null || true
+
+    if command -v openbox >/dev/null 2>&1 && id -u "$REPO_OWNER" >/dev/null 2>&1; then
+        sudo -u "$REPO_OWNER" env \
+            DISPLAY="${DISPLAY:-:0}" \
+            XAUTHORITY="${REPO_OWNER_HOME}/.Xauthority" \
+            openbox --reconfigure >/dev/null 2>&1 || true
+    fi
+}
+
+suppress_desktop_panel_for_kiosk() {
+    # Under labwc, the panel often yields to fullscreen SDL. On X11 (rpd-x /
+    # Openbox) lxpanel stays on the "above" layer, so the menu bar remains
+    # visible over FlightScnr. Disable lxpanel autostart for the kiosk and
+    # stop any running panel now — flightscnr.service also kills it on start.
+    local changed=0
+    local f
+    local sys_files=(
+        /etc/xdg/lxsession/LXDE-pi/autostart
+        /etc/xdg/lxsession/LXDE/autostart
+        /etc/xdg/lxsession/rpd-x/autostart
+    )
+    local user_dir="${REPO_OWNER_HOME}/.config/lxsession/LXDE-pi"
+    local user_file="${user_dir}/autostart"
+
+    log_step "Desktop panel (hide menu bar for fullscreen kiosk)"
+
+    _comment_lxpanel_autostart() {
+        local path="$1"
+        [ -f "$path" ] || return 1
+        if grep -qE '^[[:space:]]*@lxpanel\b' "$path"; then
+            sed -i -E 's/^[[:space:]]*@lxpanel\b/#@lxpanel/' "$path" || return 1
+            return 0
+        fi
+        return 1
+    }
+
+    for f in "${sys_files[@]}"; do
+        if _comment_lxpanel_autostart "$f"; then
+            changed=1
+            log_ok "Disabled lxpanel in $f"
+        fi
+    done
+
+    # Per-user autostart overrides the system file entirely when present.
+    if [ -f "$user_file" ]; then
+        if _comment_lxpanel_autostart "$user_file"; then
+            changed=1
+            log_ok "Disabled lxpanel in $user_file"
+        fi
+        chown "$REPO_OWNER:" "$user_file" 2>/dev/null || true
+    elif [ -f /etc/xdg/lxsession/LXDE-pi/autostart ] && [ -n "${REPO_OWNER_HOME:-}" ]; then
+        mkdir -p "$user_dir"
+        if cp -a /etc/xdg/lxsession/LXDE-pi/autostart "$user_file"; then
+            _comment_lxpanel_autostart "$user_file" || true
+            chown -R "$REPO_OWNER:" "${REPO_OWNER_HOME}/.config/lxsession" 2>/dev/null || true
+            changed=1
+            log_ok "Installed user autostart without lxpanel ($user_file)"
+        fi
+    fi
+
+    # Stop panels immediately so this install does not need another reboot.
+    if pgrep -x lxpanel >/dev/null 2>&1; then
+        killall -q lxpanel 2>/dev/null || true
+        changed=1
+        log_ok "Stopped lxpanel"
+    fi
+    if pgrep -x wf-panel-pi >/dev/null 2>&1; then
+        killall -q wf-panel-pi 2>/dev/null || true
+        changed=1
+        log_ok "Stopped wf-panel-pi"
+    fi
+
+    if [ "$changed" -eq 0 ]; then
+        log_ok "Desktop panel already hidden (or not present)"
     fi
 }
 
@@ -860,11 +1267,12 @@ install_systemd_service() {
 
 fix_repo_permissions() {
     log_step "Repository permissions"
-    chown -R "$REPO_OWNER:$REPO_OWNER" "$REPO_ROOT"
+    chown -R "$REPO_OWNER:" "$REPO_ROOT"
     find "$REPO_ROOT" -type d -exec chmod 755 {} +
     find "$REPO_ROOT" -type f -exec chmod 644 {} +
     chmod 755 "$REPO_ROOT/install-pi.sh"
     chmod 755 "$SETUP_DIR/portal-update.sh" 2>/dev/null || true
+    chmod 755 "$SETUP_DIR/portal-factory-reset.sh" 2>/dev/null || true
     # Preserve +x on release helpers — a blanket chmod 644 leaves git "dirty"
     # (mode 100755→100644) and blocks the next `git pull --ff-only` OTA.
     if [ -d "$REPO_ROOT/scripts" ]; then
@@ -933,6 +1341,7 @@ install_update_sudoers() {
     local src="$SETUP_DIR/sudoers-flightscnr-update"
     local dest="/etc/sudoers.d/flightscnr-update"
     local update_script="$SETUP_DIR/portal-update.sh"
+    local factory_reset_script="$SETUP_DIR/portal-factory-reset.sh"
 
     if [ ! -f "$src" ]; then
         log_warn "sudoers template missing — portal updates may require manual sudo"
@@ -941,9 +1350,12 @@ install_update_sudoers() {
 
     log_step "Portal update permissions"
     chmod 0755 "$update_script"
+    chmod 0755 "$factory_reset_script" 2>/dev/null || true
+    # Owner is quoted in the template so hyphenated Imager usernames parse.
     sed \
         -e "s|__REPO_OWNER__|$REPO_OWNER|g" \
         -e "s|__UPDATE_SCRIPT__|$update_script|g" \
+        -e "s|__FACTORY_RESET_SCRIPT__|$factory_reset_script|g" \
         "$src" > "$dest"
     chmod 0440 "$dest"
     if visudo -cf "$dest" >/dev/null 2>&1; then
@@ -994,7 +1406,10 @@ cmd_install() {
     setup_data_dir
     prefer_x11_session
     setup_env_file
+    ensure_bluetooth_ready
     suppress_desktop_bluetooth_popups
+    suppress_desktop_panel_for_kiosk
+    suppress_openbox_decorations_for_kiosk
     install_systemd_service
     install_update_sudoers
     fix_repo_permissions
@@ -1014,11 +1429,23 @@ cmd_install() {
     echo "  Service:   sudo systemctl status flightscnr"
     echo "  Logs:      sudo journalctl -u flightscnr -f"
     echo "  Config:    nano $REPO_ROOT/config.h"
-    echo "             OR web portal → API Keys (http://raspberrypi.local)"
+    _portal_host="$(hostname -s 2>/dev/null || hostname 2>/dev/null || true)"
+    _portal_host="${_portal_host%%.*}"
+    if [ -n "$_portal_host" ]; then
+        echo "             OR web portal → API Keys (http://${_portal_host}.local)"
+    else
+        echo "             OR web portal → API Keys (http://<hostname>.local)"
+    fi
     echo "             (advanced: sudo nano $ENV_DEST)"
-    if [ "${NEED_REBOOT_FOR_X11:-0}" -eq 1 ]; then
-        echo "  Reboot:    REQUIRED now — switched desktop to X11 for pinch-to-zoom"
-        echo "             (sudo reboot). Afterward: pinch on radar should change range."
+    if [ "${NEED_REBOOT_FOR_X11:-0}" -eq 1 ] || [ -f "$REBOOT_X11_FLAG" ]; then
+        echo "  Reboot:    AUTO — desktop switched to X11 for pinch-to-zoom"
+        echo "             (pinch on radar works after reboot completes)"
+        # Portal (--no-start) schedules reboot after status/lock are cleared.
+        if [ "$no_start" -eq 0 ]; then
+            schedule_reboot_for_x11
+        else
+            log_ok "X11 reboot flagged for portal/updater to schedule after status write"
+        fi
     else
         echo "  Reboot:    starts automatically (systemctl is-enabled flightscnr)"
     fi
@@ -1073,6 +1500,8 @@ cmd_update() {
     # from an old build would skip new steps (X11 session, 720x720, fan guards).
     echo ""
     echo "Re-syncing with updated installer..."
+    # Drop snapshot env so the post-pull file copies itself to /tmp again.
+    unset FLIGHTSCNR_INSTALL_SNAPSHOT FLIGHTSCNR_INSTALL_SNAPSHOT_PATH
     if [ "$(id -u)" -ne 0 ]; then
         exec sudo bash "$REPO_ROOT/install-pi.sh" install "${install_args[@]}"
     else

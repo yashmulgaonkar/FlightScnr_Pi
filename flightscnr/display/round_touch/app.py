@@ -25,6 +25,7 @@ from utilities.route_enrichment import (
     needs_route_enrichment,
 )
 from display.round_touch import (
+    airport_overlay,
     disclaimer_acceptance,
     draw,
     frame_debug,
@@ -157,6 +158,7 @@ class RoundTouchDisplay:
         self._wifi_setup_redraw = False
         self._wifi_try_saved_busy = False
         self._wifi_offline_since: float | None = None
+        self._wifi_down_streak = 0
         self._last_wifi_link_poll = 0.0
         self._wifi_ap_starting = False
         self._last_clock_minute = -1
@@ -177,6 +179,8 @@ class RoundTouchDisplay:
         self._atc_picker_scroll = nav.ScrollState()
         # Finger Y while dragging inside the ATC picker (continuous scroll).
         self._atc_picker_drag_y: int | None = None
+        # Row id under finger before the gesture becomes a scroll.
+        self._atc_picker_pressed_id: str | None = None
         # Same for settings pages, plus whether that drag already scrolled.
         self._settings_drag_y: int | None = None
         self._settings_drag_scrolled = False
@@ -369,6 +373,7 @@ class RoundTouchDisplay:
         )
         self._wifi_setup_mode = True
         self._wifi_offline_since = None
+        self._wifi_down_streak = 0
         self._wifi_try_saved_busy = False
         self.screen = SCREEN_WIFI_SETUP
         try:
@@ -411,6 +416,7 @@ class RoundTouchDisplay:
         self._wifi_try_saved_busy = False
         self._wifi_ap_starting = False
         self._wifi_offline_since = None
+        self._wifi_down_streak = 0
         self._fatal_error = None
         map_bg.request_background()
         map_bg.prewarm_all_scales()
@@ -551,20 +557,37 @@ class RoundTouchDisplay:
             return
         if wifi_setup_util.skip_requested():
             self._wifi_offline_since = None
+            self._wifi_down_streak = 0
             return
         now = time.time()
         if now - self._last_wifi_link_poll < 2.0:
             return
         self._last_wifi_link_poll = now
         try:
-            up = wifi_setup_util.link_up()
+            # Kick/refresh cache; probe state distinguishes down vs nmcli flakiness.
+            wifi_setup_util.link_up()
+            state = wifi_setup_util.last_link_probe_state()
         except Exception:
             logger.debug("Wi-Fi link poll failed", exc_info=True)
             return
-        if up:
+        if state == "up":
             if self._wifi_offline_since is not None:
                 logger.info("Network link restored")
             self._wifi_offline_since = None
+            self._wifi_down_streak = 0
+            return
+        if state != "down":
+            # unknown / not yet probed: do not start or continue offline grace
+            self._wifi_down_streak = 0
+            if self._wifi_offline_since is not None:
+                logger.info(
+                    "Network link probe inconclusive — pausing Wi-Fi setup entry"
+                )
+                self._wifi_offline_since = None
+            return
+        needed = wifi_setup_util.link_down_streak_needed()
+        self._wifi_down_streak += 1
+        if self._wifi_down_streak < needed:
             return
         if self._wifi_offline_since is None:
             self._wifi_offline_since = now
@@ -795,12 +818,14 @@ class RoundTouchDisplay:
     def _draw(self):
         if self._fatal_error:
             draw.draw_error(self.surface, self._fatal_error)
+            self._draw_reboot_progress_overlay()
             draw.apply_round_bezel(self.surface)
             self._present()
             return
 
         if time.time() < self._boot_until:
             details.draw_details(self.surface, boot_splash=True)
+            self._draw_reboot_progress_overlay()
             draw.apply_round_bezel(self.surface)
             self._present()
             return
@@ -856,6 +881,7 @@ class RoundTouchDisplay:
                 system_confirm=self._system_confirm,
                 atc_picker=self._atc_picker,
                 atc_picker_scroll=self._atc_picker_scroll.offset,
+                atc_picker_pressed_id=self._atc_picker_pressed_id,
             )
             if self._atc_picker:
                 self._atc_picker_scroll.max_offset = drawn_max
@@ -895,6 +921,9 @@ class RoundTouchDisplay:
             bezel_applied = True  # already applied inside capture
         else:
             self._invalidate_timeout_content_cache()
+        # Reboot/shutdown progress sits above all screens (install auto-reboot,
+        # System → Reboot, portal X11 switch).
+        self._draw_reboot_progress_overlay()
         _t = time.perf_counter()
         if not bezel_applied:
             draw.apply_round_bezel(self.surface)
@@ -904,6 +933,15 @@ class RoundTouchDisplay:
         self._present()
         if FRAME_DEBUG:
             self._stage("4_present", time.perf_counter() - _t)
+
+    def _draw_reboot_progress_overlay(self) -> None:
+        from utilities import system_control
+
+        copy = system_control.reboot_progress_copy()
+        if copy is None:
+            return
+        title, detail = copy
+        info.draw_reboot_progress_popup(self.surface, title, detail)
 
     def _timeout_duration_s(self) -> float | None:
         """Active secondary-screen timeout in seconds, or None if no countdown."""
@@ -1106,6 +1144,7 @@ class RoundTouchDisplay:
             int(self._display_focus),
             self._atc_picker or "",
             int(self._atc_picker_scroll.offset) if self._atc_picker else 0,
+            self._atc_picker_pressed_id or "",
             self._system_confirm or "",
         )
 
@@ -1326,6 +1365,9 @@ class RoundTouchDisplay:
             settings.cycle_vessel_min_speed()
         elif action == "sweep":
             settings.toggle_sweep_line()
+        elif action == "color_by_altitude":
+            settings.toggle_color_by_altitude()
+            radar.invalidate_frame_layer()
         elif action == "precipitation":
             settings.toggle_show_precipitation()
             rainviewer_overlay.invalidate()
@@ -1422,11 +1464,13 @@ class RoundTouchDisplay:
         self._atc_picker = kind
         self._atc_picker_scroll.reset()
         self._atc_picker_drag_y = None
+        self._atc_picker_pressed_id = None
 
     def _close_atc_picker(self) -> None:
         self._atc_picker = None
         self._atc_picker_scroll.reset()
         self._atc_picker_drag_y = None
+        self._atc_picker_pressed_id = None
         info.invalidate_atc_labels()
 
     def _select_atc_airport(self, icao: str) -> None:
@@ -1880,6 +1924,7 @@ class RoundTouchDisplay:
         self._pan_offset = (0, 0)
         self._pan_drag_start = None
         self._pan_drag_was_active = False
+        airport_overlay.clear_callout()
         self._long_press_pan.clear_candidate()
         if from_long_press:
             self._long_press_pan.begin_from_long_press()
@@ -2262,6 +2307,7 @@ class RoundTouchDisplay:
         rainviewer_overlay.request_overlay()
         wildfire_overlay.invalidate()
         wildfire_overlay.request_refresh(force=True)
+        airport_overlay.clear_callout()
         self._safe_draw()
 
     def _flights_for_detail(self):
@@ -2553,6 +2599,24 @@ class RoundTouchDisplay:
             if self.input.is_dragging():
                 pos = self.input.drag_pos()
                 if pos is not None:
+                    threshold = float(input_handler.gesture_threshold_px())
+                    if self.input.max_travel() < threshold:
+                        hit = info.atc_picker_hit(pos[0], pos[1])
+                        nxt = (
+                            hit[1]
+                            if hit is not None and hit[0] == "item" and hit[1]
+                            else None
+                        )
+                        if nxt != self._atc_picker_pressed_id:
+                            self._atc_picker_pressed_id = nxt
+                            self._note_activity()
+                            self._safe_draw()
+                        self._atc_picker_drag_y = pos[1]
+                        return
+                    if self._atc_picker_pressed_id is not None:
+                        self._atc_picker_pressed_id = None
+                        self._note_activity()
+                        self._safe_draw()
                     if self._atc_picker_drag_y is not None:
                         dy = pos[1] - self._atc_picker_drag_y
                         if dy:
@@ -2872,6 +2936,12 @@ class RoundTouchDisplay:
     def _handle_navigation(self):
         if time.time() < self._boot_until:
             return
+        # Ignore input while reboot/shutdown is already scheduled.
+        from utilities import system_control
+
+        if system_control.reboot_progress_copy() is not None:
+            self.input.consume_gesture()
+            return
         if self.screen == SCREEN_DISCLAIMER:
             # Consume all gestures; only checkbox / Accept hit rects act.
             # During a remembered countdown there is no Accept — wait it out.
@@ -3054,6 +3124,7 @@ class RoundTouchDisplay:
             # jump the other direction and hide the rows just revealed.
             if self._atc_picker:
                 self._atc_picker_drag_y = None
+                self._atc_picker_pressed_id = None
                 self._note_activity()
             elif self._settings_drag_scrolled:
                 self._settings_drag_scrolled = False
@@ -3593,22 +3664,41 @@ class RoundTouchDisplay:
     def _open_flight_or_fire_at(
         self, x: int, y: int, alt_x: int | None = None, alt_y: int | None = None
     ) -> bool:
-        """Open the nearer of a flight or fire under the tap.
+        """Open the nearer of a flight, fire, or airport under the tap.
 
         Dense traffic (and beyond-range rim blips) used to always win over a
-        fire even when the finger was clearly on the flame icon.
+        fire even when the finger was clearly on the flame icon. Airports are
+        secondary to both: they only win when clearly nearer than a flight,
+        and never beat a fire that already wins the fire-vs-flight bias.
         """
         flight, flight_d2 = radar.pick_flight_at(self._radar_flights(), x, y, alt_x, alt_y)
         fire, fire_d2 = wildfire_overlay.pick_fire_at(x, y, alt_x, alt_y)
+        airport, airport_d2 = airport_overlay.pick_airport_at(x, y, alt_x, alt_y)
         # Prefer the fire when it is as close or only slightly farther — fires
         # are sparse and easy to miss under Oshkosh-density aircraft.
         fire_bias = theme.s(16) ** 2
         if fire is not None and (
             flight is None or fire_d2 is None or flight_d2 is None or fire_d2 <= flight_d2 + fire_bias
         ):
-            return self._open_picked_fire(fire)
-        if flight is not None:
+            if airport is None or fire_d2 is None or airport_d2 is None or fire_d2 <= airport_d2:
+                airport_overlay.clear_callout()
+                return self._open_picked_fire(fire)
+        # Prefer aircraft over airports when distances are close.
+        flight_bias = theme.s(12) ** 2
+        if flight is not None and (
+            airport is None
+            or flight_d2 is None
+            or airport_d2 is None
+            or flight_d2 <= airport_d2 + flight_bias
+        ):
+            airport_overlay.clear_callout()
             return self._open_picked_flight(flight)
+        if airport is not None:
+            airport_overlay.show_callout(airport)
+            radar.invalidate_frame_layer()
+            self._note_activity()
+            return True
+        airport_overlay.clear_callout()
         return False
 
     def _tick_ais(self):
@@ -3807,6 +3897,17 @@ class RoundTouchDisplay:
                     self._last_radar_draw = time.time()
 
                 now = time.time()
+                # Install/portal auto-reboot (and System → Reboot) write a flag;
+                # keep the modal painted until the device goes down.
+                from utilities import system_control
+
+                if system_control.reboot_progress_copy() is not None:
+                    if (now - self._last_static_draw) >= 0.25:
+                        self._safe_draw()
+                        self._last_static_draw = now
+                    time.sleep(0.05)
+                    continue
+
                 if (
                     self.screen not in (SCREEN_WIFI_SETUP, SCREEN_DISCLAIMER)
                     and not self._radar_modal_active()

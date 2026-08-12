@@ -454,6 +454,7 @@ def draw_radar(
             from display.round_touch import update_bubble
 
             update_bubble.draw_bubble(surface)
+            airport_overlay.draw_callout(surface, pan_offset=offset)
             bezel_applied = True
         elif layer is not None:
             # Fast present composites from this layer directly; skip the unused
@@ -478,6 +479,7 @@ def draw_radar(
             from display.round_touch import update_bubble
 
             update_bubble.draw_bubble(surface)
+            airport_overlay.draw_callout(surface, pan_offset=offset)
             if aircraft_alert.rim_flash_active():
                 _draw_alert_rim_flash(surface)
         # Sweep is composited in present() on the fast path so we can skip a
@@ -756,7 +758,9 @@ _LIGHT_MAP_ALT_UP = (14, 116, 144)      # deep teal
 _LIGHT_MAP_ALT_DOWN = (126, 34, 206)    # deep purple
 _LIGHT_MAP_VESSEL_PARKED = (100, 116, 139)
 _LIGHT_MAP_ALERT_MIL = (220, 38, 38)    # keep alerts punchy
-_LIGHT_MAP_ALERT_OTHER = (37, 99, 235)
+_LIGHT_MAP_ALERT_WATCH = (8, 145, 178)  # deep aqua — not LIVE / climb teal
+_LIGHT_MAP_ALERT_OTHER = _LIGHT_MAP_ALERT_WATCH
+_LIGHT_MAP_ALERT_EMERGENCY = _LIGHT_MAP_ALERT_MIL  # solid red, same as military
 
 
 def _overlay_color_for_basemap(color: tuple) -> tuple:
@@ -776,9 +780,11 @@ def _overlay_color_for_basemap(color: tuple) -> tuple:
         tuple(theme.TAG_ALT_DESCEND[:3]): _LIGHT_MAP_ALT_DOWN,
         tuple(theme.VESSEL_PARKED[:3]): _LIGHT_MAP_VESSEL_PARKED,
         tuple(theme.ALERT_MILITARY[:3]): _LIGHT_MAP_ALERT_MIL,
-        tuple(theme.ALERT_OTHER[:3]): _LIGHT_MAP_ALERT_OTHER,
+        tuple(theme.ALERT_WATCH[:3]): _LIGHT_MAP_ALERT_WATCH,
+        tuple(theme.ALERT_OTHER[:3]): _LIGHT_MAP_ALERT_WATCH,
+        tuple(theme.ALERT_EMERGENCY[:3]): _LIGHT_MAP_ALERT_EMERGENCY,
         tuple(theme.ALERT_FLASH[:3]): _LIGHT_MAP_ALERT_MIL,
-        tuple(theme.ALERT_FLASH_OTHER[:3]): _LIGHT_MAP_ALERT_OTHER,
+        tuple(theme.ALERT_FLASH_OTHER[:3]): _LIGHT_MAP_ALERT_WATCH,
         tuple(theme.HINT[:3]): _LIGHT_MAP_VESSEL_PARKED,
     }
     if key in mapping:
@@ -795,7 +801,7 @@ def _flight_icon_color(flight, *, compact: bool):
     if _is_tracked(flight) and not compact:
         return _overlay_color_for_basemap(theme.SWEEP)
     if aircraft_alert.is_highlighted(flight):
-        # Pulse between alert color (red/blue) and normal aircraft yellow.
+        # Pulse between alert color and aircraft yellow; emergency stays solid red.
         if aircraft_alert.pulse_phase():
             return _overlay_color_for_basemap(aircraft_alert.alert_pulse_color(flight))
         return _overlay_color_for_basemap(aircraft_alert.alert_color(flight))
@@ -810,6 +816,10 @@ def _flight_icon_color(flight, *, compact: bool):
             return _overlay_color_for_basemap(theme.AIRCRAFT_UNKNOWN)
     except Exception:
         pass
+    if settings.color_by_altitude():
+        from display.round_touch import altitude_color
+
+        return altitude_color.color_for_altitude(flight.get("altitude"))
     return _overlay_color_for_basemap(theme.AIRCRAFT)
 
 

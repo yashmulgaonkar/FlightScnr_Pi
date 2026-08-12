@@ -57,8 +57,8 @@ def _parse_watch(blob: str) -> list[str]:
 
 
 _defaults = {
-    "alert_military": False,
-    "alert_emergency": False,
+    "alert_military": True,
+    "alert_emergency": True,
     "alert_hide_non_alerted": False,
     "alert_watch": "",
     "alert_watch_types": "",
@@ -136,11 +136,11 @@ def reload():
 
 
 def military_enabled() -> bool:
-    return bool(_state.get("alert_military", False))
+    return bool(_state.get("alert_military", True))
 
 
 def emergency_enabled() -> bool:
-    return bool(_state.get("alert_emergency", False))
+    return bool(_state.get("alert_emergency", True))
 
 
 def hide_non_alerted() -> bool:

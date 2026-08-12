@@ -26,7 +26,7 @@
     "business-jet": {
       "file": "business-jet.png",
       "description": "Business/Private jets",
-      "examples": ["G650", "GLEX", "GLF5", "C680", "CL60", "FA8X", "LJ75"]
+      "examples": ["G650", "GLEX", "GLF5", "C680", "CL60", "FA8X", "LJ75", "SF50"]
     },
     "turboprop": {
       "file": "turboprop.png",

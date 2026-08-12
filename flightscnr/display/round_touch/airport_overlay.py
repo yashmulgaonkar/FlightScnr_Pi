@@ -21,11 +21,12 @@ import logging
 import math
 import os
 import threading
+import time
 from typing import Any
 
 import pygame
 
-from display.round_touch import geo, theme
+from display.round_touch import draw, geo, theme
 
 logger = logging.getLogger("flightscnr.display")
 
@@ -41,6 +42,7 @@ _ICON_HEIGHT = 16
 # Opaque tip of airport.png sits near mid-bottom (~89% down, 50% across).
 _ICON_ANCHOR_X = 0.50
 _ICON_ANCHOR_Y = 0.89
+_CALLOUT_TTL_S = 3.5
 
 _lock = threading.Lock()
 _airports: list[dict[str, Any]] = []
@@ -50,6 +52,9 @@ _load_key: tuple | None = None
 _loading = False
 _icon_cache: dict[int, pygame.Surface] = {}
 _icon_warned = False
+_callout_airport: dict[str, Any] | None = None
+_callout_until = 0.0
+_callout_rect = pygame.Rect(0, 0, 0, 0)
 
 
 def _icons_on() -> bool:
@@ -334,3 +339,173 @@ def draw_airports(
     if icons:
         for airport in airports:
             _draw_marker(surface, airport, ox=ox, oy=oy, max_r=max_r, cx=cx, cy=cy)
+
+
+def pick_airport_at(
+    tap_x: int, tap_y: int, alt_x=None, alt_y=None
+) -> tuple[dict[str, Any] | None, float | None]:
+    """Nearest airport pin under a tap. Returns ``(airport, distance_sq)`` or ``(None, None)``."""
+    if not _icons_on():
+        return None, None
+    airports, _ = _ensure_cached()
+    if not airports:
+        return None, None
+    points = [(tap_x, tap_y)]
+    if alt_x is not None and alt_y is not None:
+        points.append((alt_x, alt_y))
+    hit_r = max(theme.TAP_PICK_RADIUS, theme.s(32))
+    hit_r2 = hit_r * hit_r
+    best = None
+    best_d2 = None
+    for airport in airports:
+        try:
+            pos = _screen_xy(float(airport["lat"]), float(airport["lon"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if pos is None:
+            continue
+        x, y = pos
+        for px, py in points:
+            d2 = (x - px) ** 2 + (y - py) ** 2
+            if d2 <= hit_r2 and (best_d2 is None or d2 < best_d2):
+                best = airport
+                best_d2 = d2
+    return best, best_d2
+
+
+def show_callout(airport: dict[str, Any]) -> None:
+    """Show a short-lived ICAO/name toast for ``airport`` on the radar."""
+    global _callout_airport, _callout_until
+    _callout_airport = dict(airport)
+    _callout_until = time.time() + _CALLOUT_TTL_S
+
+
+def clear_callout() -> None:
+    global _callout_airport, _callout_until
+    _callout_airport = None
+    _callout_until = 0.0
+
+
+def callout_visible() -> bool:
+    if _callout_airport is None:
+        return False
+    if time.time() >= _callout_until:
+        clear_callout()
+        return False
+    return True
+
+
+def callout_bounds() -> pygame.Rect:
+    return _callout_rect.copy()
+
+
+def _callout_lines(airport: dict[str, Any]) -> tuple[str, str]:
+    ident = str(airport.get("ident") or "").strip().upper() or "?"
+    line1 = ident
+    try:
+        from utilities.airports import icao_to_iata
+
+        iata = icao_to_iata(ident) if len(ident) == 4 else ""
+        if iata and len(iata) == 3 and iata.isalpha() and iata != ident:
+            line1 = f"{ident}  ·  {iata}"
+    except Exception:
+        pass
+    facility = str(airport.get("facility") or "").strip()
+    city = str(airport.get("name") or "").strip()
+    if facility and city and facility.casefold() != city.casefold():
+        line2 = f"{facility}  ·  {city}"
+    elif facility:
+        line2 = facility
+    else:
+        line2 = city
+    return line1, line2
+
+
+def draw_callout(
+    surface: pygame.Surface, pan_offset: tuple[int, int] | None = None
+) -> pygame.Rect | None:
+    """Draw the active airport toast near its pin; return dirty rect or None."""
+    global _callout_rect
+    if not callout_visible() or _callout_airport is None:
+        _callout_rect = pygame.Rect(0, 0, 0, 0)
+        return None
+    airport = _callout_airport
+    try:
+        pos = _screen_xy(float(airport["lat"]), float(airport["lon"]))
+    except (KeyError, TypeError, ValueError):
+        clear_callout()
+        return None
+    if pos is None:
+        return None
+    ox = int(pan_offset[0]) if pan_offset else 0
+    oy = int(pan_offset[1]) if pan_offset else 0
+    pin_x, pin_y = int(pos[0]) + ox, int(pos[1]) + oy
+
+    line1, line2 = _callout_lines(airport)
+    font1 = draw.load_font(max(12, theme.s(14)), bold=True)
+    font2 = draw.load_font(max(10, theme.s(12)), bold=False)
+    try:
+        from display.round_touch import radar_hud
+
+        glyph, fill_rgba = radar_hud._hud_chrome()
+    except Exception:
+        glyph, fill_rgba = (28, 30, 34), (255, 255, 255, 180)
+
+    surf1 = font1.render(line1, True, theme.TAG_TYPE)
+    surf2 = font2.render(line2, True, glyph) if line2 else None
+    pad_x = theme.s(12)
+    pad_y = theme.s(8)
+    gap = theme.s(2) if surf2 is not None else 0
+    width = pad_x * 2 + max(
+        surf1.get_width(), surf2.get_width() if surf2 is not None else 0
+    )
+    height = pad_y * 2 + surf1.get_height() + gap + (
+        surf2.get_height() if surf2 is not None else 0
+    )
+    # Prefer above the pin so the finger does not cover the toast.
+    bubble = pygame.Rect(0, 0, width, height)
+    bubble.centerx = pin_x
+    bubble.bottom = pin_y - theme.s(18)
+
+    margin = theme.s(10)
+    limit = theme.VISIBLE_RADIUS - margin
+    cx, cy = theme.CENTER_X, theme.CENTER_Y
+    for _ in range(6):
+        corners = (
+            (bubble.left, bubble.top),
+            (bubble.right, bubble.top),
+            (bubble.right, bubble.bottom),
+            (bubble.left, bubble.bottom),
+        )
+        outside = False
+        for x, y in corners:
+            if math.hypot(x - cx, y - cy) > limit:
+                outside = True
+                break
+        if not outside:
+            break
+        # Pull toward center.
+        bubble.centerx += int(round((cx - bubble.centerx) * 0.35))
+        bubble.centery += int(round((cy - bubble.centery) * 0.35))
+        # If still colliding with the pin vertically, flip below.
+        if bubble.colliderect(
+            pygame.Rect(pin_x - 4, pin_y - 4, 8, 8)
+        ) or bubble.bottom > pin_y - theme.s(4):
+            bubble.top = pin_y + theme.s(14)
+
+    panel = pygame.Surface((bubble.width, bubble.height), pygame.SRCALPHA)
+    pygame.draw.rect(
+        panel,
+        fill_rgba,
+        panel.get_rect(),
+        border_radius=max(8, theme.s(10)),
+    )
+    y = pad_y
+    panel.blit(surf1, ((bubble.width - surf1.get_width()) // 2, y))
+    y += surf1.get_height() + gap
+    if surf2 is not None:
+        panel.blit(surf2, ((bubble.width - surf2.get_width()) // 2, y))
+    surface.blit(panel, bubble.topleft)
+    _callout_rect = bubble.copy()
+    return _callout_rect
+

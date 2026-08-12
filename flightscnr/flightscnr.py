@@ -13,6 +13,14 @@ import os
 import sys
 import logging
 
+# systemd / minimal locales often leave stdout as latin-1 or ascii; force UTF-8
+# so print/log lines with em dashes (—) cannot raise UnicodeEncodeError.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # Configure logging for systemd (no timestamps — journald adds them)
 logging.basicConfig(
     level=logging.INFO,
@@ -82,6 +90,11 @@ def validate_config():
 
 
 if __name__ == "__main__":
+    # SDL reads WM_CLASS at init time — before any pygame import in the tree.
+    from utilities.kiosk_env import apply_sdl_kiosk_env
+
+    apply_sdl_kiosk_env()
+
     # Get directory of this script (flightscnr.py)
     base_dir = os.path.dirname(os.path.abspath(__file__))
 

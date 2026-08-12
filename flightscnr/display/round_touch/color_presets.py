@@ -50,8 +50,8 @@ THEMES: tuple[dict[str, tuple[int, int, int]], ...] = (
 
 DEFAULT_THEME_INDEX = 2  # Green (legacy; UI is RGB-only now)
 DEFAULT_CUSTOM_RGB = THEMES[DEFAULT_THEME_INDEX]["sweep"]
-# Default dark-basemap runway centerline (warm orange, off precip blues).
-DEFAULT_RUNWAY_DARKMAP_RGB = (225, 128, 0)
+# Default dark-basemap runway centerline (white).
+DEFAULT_RUNWAY_DARKMAP_RGB = (255, 255, 255)
 
 # Bump when THEME_NAMES / index order changes so saved indices can remapped.
 THEME_PALETTE_V = 3

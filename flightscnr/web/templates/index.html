@@ -74,6 +74,16 @@
         .update-ver{font-size:.82rem;color:var(--muted);margin:.15rem 0}
         .btn-danger{background:#4a1515;border-color:#7a2222}
         .btn-danger:hover{background:#5c1a1a}
+        .irreversible-card{background:#161010;border-color:#7a2222}
+        .irreversible-card>summary .ico{background:#2a1212;border-color:#7a2222;color:#f08888}
+        .irreversible-card .body{padding-top:.75rem;border-top-color:#5a2020}
+        .irreversible-row{display:flex;gap:.75rem;align-items:center;
+        justify-content:space-between;flex-wrap:wrap;padding:.2rem 0 .15rem}
+        .irreversible-copy{flex:1;min-width:12rem}
+        .irreversible-copy h3{margin:0;font-size:.95rem;font-weight:700}
+        .irreversible-copy .desc{margin:.3rem 0 0;color:var(--muted);font-size:.78rem}
+        .btn-irreversible{background:#1c1414;border-color:#8a2a2a;color:#f08870;flex:none}
+        .btn-irreversible:hover{background:#2a1414;color:#ff9d88}
         .fav-list{margin-top:.35rem}
         .fav-row{display:flex;gap:.55rem;align-items:flex-start;padding:.65rem 0;
         border-bottom:1px solid rgba(120,120,120,.22)}
@@ -119,6 +129,7 @@
             <label for="min_height">Min altitude floor (ft, 0 = off)</label>
             <select id="min_height">
                 <option value="0">0 (off)</option>
+                <option value="100">100</option>
                 <option value="500">500</option>
                 <option value="1000">1000</option>
                 <option value="1500">1500</option>
@@ -194,6 +205,10 @@
             <div class="chk">
                 <label for="show_range_rings">Show range rings</label>
                 <span class="switch"><input id="show_range_rings" type="checkbox"><span class="track"></span></span>
+            </div>
+            <div class="chk">
+                <label for="color_by_altitude">Color aircraft by altitude</label>
+                <span class="switch"><input id="color_by_altitude" type="checkbox"><span class="track"></span></span>
             </div>
             <label for="traffic_labels">Traffic labels</label>
             <select id="traffic_labels">
@@ -637,7 +652,7 @@
             <p class="update-ver" id="update-local">Installed version: checking…</p>
             <p class="update-ver" id="update-remote">Latest on GitHub: checking…</p>
             <p class="hint" id="update-message"></p>
-            <p class="hint">After Update Now, the device may briefly re-sync install steps automatically (X11 / display). Reboot if prompted for pinch-zoom.</p>
+            <p class="hint">After Update Now, the device may briefly re-sync install steps automatically (X11 / display). If LightDM is switched to X11 for pinch-zoom, the Pi reboots on its own.</p>
             <p class="hint" id="update-repair-hint">If you are stuck on an old version and <strong>Repair &amp; Update</strong> is missing, on the Pi open <strong>Menu → Accessories → Terminal</strong> and paste:<br><code>curl -fsSL https://raw.githubusercontent.com/yashmulgaonkar/FlightScnr_Pi/main/scripts/repair-ota.sh | bash</code></p>
             <div class="track-row" style="margin-top:.55rem">
                 <button class="btn" id="btn-check-updates" type="button">Check Updates</button>
@@ -685,6 +700,26 @@
                 <button class="btn" id="btn-system-confirm-no" type="button">Cancel</button>
             </div>
             <div id="system-status" class="status"></div>
+        </div>
+    </details>
+
+    <details class="card irreversible-card">
+        <summary><span class="ico">&#9888;</span>Master Caution<span class="sum">wipe, reinstall</span><span class="chev">&#9656;</span></summary>
+        <div class="body">
+            <p class="hint">Download settings from <strong>System</strong> first if you want to keep radar prefs and API keys. Wi-Fi and dump1090 are not touched. If this button fails with a sudo error, tap <strong>Update Now</strong> or <strong>Finish install</strong> once so sudoers is updated.</p>
+            <div class="irreversible-row" id="irreversible-actions-row">
+                <div class="irreversible-copy">
+                    <h3>Clean install</h3>
+                    <p class="desc">Deletes the FlightScnr checkout, all settings, API keys, watch lists, and maps, then reinstalls from GitHub and reboots. Once you start, there is no going back.</p>
+                </div>
+                <button class="btn btn-irreversible" id="btn-wipe-reinstall" type="button">Wipe &amp; reinstall</button>
+            </div>
+            <div class="track-row hidden" id="irreversible-confirm-row" style="margin-top:.55rem;flex-wrap:wrap;gap:.5rem">
+                <span id="irreversible-confirm-msg" class="hint" style="flex:1 1 100%;margin:0"></span>
+                <button class="btn btn-irreversible" id="btn-irreversible-confirm-yes" type="button">Continue</button>
+                <button class="btn" id="btn-irreversible-confirm-no" type="button">Cancel</button>
+            </div>
+            <div id="irreversible-status" class="status"></div>
         </div>
     </details>
 
@@ -1016,6 +1051,7 @@ async function loadAll() {
         }
         $("show_compass").checked = !!r.show_compass_rose;
         if ($("show_range_rings")) $("show_range_rings").checked = r.show_range_rings !== false;
+        if ($("color_by_altitude")) $("color_by_altitude").checked = !!r.color_by_altitude;
         if ($("traffic_labels")) $("traffic_labels").value = r.traffic_labels || (r.show_aircraft_tag === false ? "off" : "both");
         $("facing_deg").value = String(Math.round(Number(r.facing_deg) || 0) % 360);
         $("show_sweep").checked = !!r.show_sweep_line;
@@ -1249,6 +1285,7 @@ async function saveRadar() {
                 runway_darkmap_rgb: readRgbInputs("runway"),
                 show_compass_rose: $("show_compass").checked,
                 show_range_rings: $("show_range_rings") ? $("show_range_rings").checked : true,
+                color_by_altitude: $("color_by_altitude") ? $("color_by_altitude").checked : false,
                 traffic_labels: $("traffic_labels") ? $("traffic_labels").value : "both",
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,
@@ -1338,6 +1375,7 @@ async function saveAndReloadSettings() {
                 runway_darkmap_rgb: readRgbInputs("runway"),
                 show_compass_rose: $("show_compass").checked,
                 show_range_rings: $("show_range_rings") ? $("show_range_rings").checked : true,
+                color_by_altitude: $("color_by_altitude") ? $("color_by_altitude").checked : false,
                 traffic_labels: $("traffic_labels") ? $("traffic_labels").value : "both",
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,
@@ -2069,6 +2107,55 @@ function setSystemButtonsDisabled(disabled) {
     $("btn-shutdown").disabled = disabled;
 }
 
+let irreversibleStep = 0;
+
+function showIrreversibleConfirm(step) {
+    irreversibleStep = step || 0;
+    const row = $("irreversible-confirm-row");
+    const actions = $("irreversible-actions-row");
+    const msg = $("irreversible-confirm-msg");
+    const yes = $("btn-irreversible-confirm-yes");
+    if (!irreversibleStep) {
+        row.classList.add("hidden");
+        actions.classList.remove("hidden");
+        return;
+    }
+    actions.classList.add("hidden");
+    row.classList.remove("hidden");
+    if (irreversibleStep === 1) {
+        msg.textContent = "This deletes everything FlightScnr stores on this Pi, then reinstalls from GitHub. The Pi will reboot. Continue?";
+        yes.textContent = "Continue";
+    } else {
+        msg.textContent = "Last chance. This cannot be undone. Wipe everything and reinstall?";
+        yes.textContent = "Wipe & reinstall";
+    }
+}
+
+async function confirmIrreversible() {
+    if (irreversibleStep === 1) {
+        showIrreversibleConfirm(2);
+        return;
+    }
+    if (irreversibleStep !== 2) return;
+    showIrreversibleConfirm(0);
+    $("btn-wipe-reinstall").disabled = true;
+    try {
+        const data = await jsonFetch("/system/factory-reset", { method: "POST" });
+        if (!data.ok) {
+            showStatus("irreversible-status", data.message || "Clean install could not start.", true);
+            $("btn-wipe-reinstall").disabled = false;
+            return;
+        }
+        showStatus(
+            "irreversible-status",
+            data.message || "Clean install started. This page will go offline; wait several minutes for reboot."
+        );
+    } catch (e) {
+        showStatus("irreversible-status", e.message, true);
+        $("btn-wipe-reinstall").disabled = false;
+    }
+}
+
 $("btn-check-updates").addEventListener("click", checkUpdates);
 $("btn-update-now").addEventListener("click", applyUpdate);
 $("btn-repair-update").addEventListener("click", applyRepairConfirmed);
@@ -2083,6 +2170,12 @@ if ($("btn-disclaimer-clear")) {
 }
 $("btn-system-confirm-yes").addEventListener("click", confirmSystemAction);
 $("btn-system-confirm-no").addEventListener("click", () => showSystemConfirm(false));
+$("btn-wipe-reinstall").addEventListener("click", () => {
+    clearStatus("irreversible-status");
+    showIrreversibleConfirm(1);
+});
+$("btn-irreversible-confirm-yes").addEventListener("click", confirmIrreversible);
+$("btn-irreversible-confirm-no").addEventListener("click", () => showIrreversibleConfirm(0));
 
 $("btn-export-settings").addEventListener("click", () => {
     showStatus("export-status", "Downloading settings…");

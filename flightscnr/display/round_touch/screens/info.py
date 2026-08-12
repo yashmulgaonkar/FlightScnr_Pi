@@ -36,8 +36,10 @@ except ImportError:
     OPENSKY_API_CLIENT_SECRET = ""
     LOCATION_HOME = [0.0, 0.0]
 
-    def web_portal_url(hostname: str) -> str:
-        name = (hostname or "raspberrypi").split(".")[0].strip() or "raspberrypi"
+    def web_portal_url(hostname: str = "") -> str:
+        name = (hostname or socket.gethostname() or "").split(".")[0].strip()
+        if not name:
+            return "http://localhost"
         return f"http://{name}.local"
 
 from display.round_touch import alert_prefs, draw, nav, settings, theme
@@ -76,6 +78,7 @@ DISPLAY_ACTIONS = (
     "compass",
     "range_rings",
     "sweep",
+    "color_by_altitude",
     "units",
     "range",
     "rotate",
@@ -447,6 +450,7 @@ def draw_atc_picker(
     kind: str,
     *,
     scroll_offset: int = 0,
+    pressed_id: str | None = None,
 ) -> int:
     """Modal scrollable list for ATC airport / channel / output. Returns max_scroll."""
     global _atc_picker_hits, _atc_picker_list_rect
@@ -456,6 +460,7 @@ def draw_atc_picker(
     kind = str(kind or "").strip().lower()
     title_text = _ATC_PICKER_TITLES.get(kind, "Select")
     items = atc_picker_items(kind)
+    pressed = str(pressed_id or "").strip()
 
     # Opaque cover — per-pixel SRCALPHA dims often fail on the Pi framebuffer
     # and left ATC settings text bleeding through the picker.
@@ -508,9 +513,13 @@ def draw_atc_picker(
         title.get_rect(midtop=(theme.CENTER_X - close_size // 2, title_y)),
     )
 
-    hint_reserve = theme.s(18)
-    list_top = title_y + title.get_height() + theme.s(10)
-    list_bottom = content.bottom - pad - hint_reserve
+    # Clear the title/close chrome so the first row is easy to tap.
+    title_block_bottom = max(
+        title_y + title.get_height(),
+        close_rect.bottom,
+    )
+    list_top = title_block_bottom + theme.s(26)
+    list_bottom = content.bottom - pad
     list_rect = pygame.Rect(
         content.left + pad,
         list_top,
@@ -540,7 +549,7 @@ def draw_atc_picker(
     for item in items:
         item_id = str(item.get("id") or "")
         label = str(item.get("label") or item_id)
-        selected = bool(item.get("selected"))
+        selected = bool(item.get("selected")) or (bool(pressed) and item_id == pressed)
         row_rect = pygame.Rect(list_rect.left, int(y), list_rect.width, row_h)
         if row_rect.bottom >= list_rect.top and row_rect.top <= list_rect.bottom:
             if selected:
@@ -576,10 +585,9 @@ def draw_atc_picker(
     surface.set_clip(clip_prev)
 
     if max_scroll > 0:
-        hint = hint_font.render("Swipe to scroll", True, theme.HINT)
-        surface.blit(
-            hint,
-            hint.get_rect(midbottom=(theme.CENTER_X, content.bottom - theme.s(2))),
+        # Same thin right-edge scrollbar as Display / Layers settings pages.
+        _draw_scroll_overflow_cues(
+            surface, list_rect.top, list_rect.bottom, scroll, max_scroll
         )
     return max_scroll
 
@@ -735,6 +743,45 @@ def draw_system_confirm_popup(surface, action: str) -> None:
         ("cancel", cancel_rect.copy()),
         ("confirm", confirm_rect.copy()),
     ]
+
+
+def draw_reboot_progress_popup(
+    surface,
+    title: str = "Reboot in progress",
+    detail: str = "Display will come back shortly.",
+) -> None:
+    """Non-interactive modal shown while a reboot/shutdown is scheduled."""
+    # Opaque cover — SRCALPHA dims are unreliable on the Pi framebuffer.
+    draw.fill_background(surface)
+
+    title_font = draw.load_font(theme.s(16), bold=True)
+    body_font = draw.load_font(theme.s(12))
+    title_surf = title_font.render(title, True, theme.LABEL)
+    detail_surf = body_font.render(detail, True, theme.HINT)
+
+    pad_x = theme.s(16)
+    pad_y = theme.s(18)
+    gap = theme.s(8)
+    content_w = max(title_surf.get_width(), detail_surf.get_width())
+    panel_w = min(content_w + pad_x * 2, int(theme.VISIBLE_RADIUS * 1.6))
+    panel_h = pad_y + title_surf.get_height() + gap + detail_surf.get_height() + pad_y
+
+    panel_rect = pygame.Rect(0, 0, panel_w, panel_h)
+    panel_rect.center = (theme.CENTER_X, theme.CENTER_Y)
+    radius = theme.s(10)
+    pygame.draw.rect(surface, (8, 28, 14), panel_rect, border_radius=radius)
+    pygame.draw.rect(
+        surface,
+        _SYSTEM_BTN_DANGER_BORDER,
+        panel_rect,
+        max(1, theme.s(2)),
+        border_radius=radius,
+    )
+
+    y = panel_rect.top + pad_y
+    surface.blit(title_surf, title_surf.get_rect(midtop=(theme.CENTER_X, y)))
+    y += title_surf.get_height() + gap
+    surface.blit(detail_surf, detail_surf.get_rect(midtop=(theme.CENTER_X, y)))
 
 
 def tap_footer_action(x: int, y: int, page: int = PAGE_MAIN) -> str | None:
@@ -1561,6 +1608,7 @@ def _display_row_labels() -> list[str]:
         "Compass Rose",
         "Radar Range Rings",
         "Radar Sweep Line",
+        "Color by Altitude",
         f"Units: {settings.unit_preset_label()}",
         f"Radar Range: {settings.scale_label()}",
         f"Rotate Screen: {settings.display_rotation()}°",
@@ -1621,6 +1669,7 @@ _TOGGLE_ROW_STATE = {
     "compass": settings.show_compass_rose,
     "range_rings": settings.show_range_rings,
     "sweep": settings.show_sweep_line,
+    "color_by_altitude": settings.color_by_altitude,
     "radar_hud": settings.radar_hud_enabled,
     "precipitation": settings.show_precipitation,
     "wildfires": settings.show_wildfires,
@@ -1756,6 +1805,56 @@ def _draw_settings_rows(
     finally:
         surface.set_clip(clip_prev)
     return max_scroll
+
+
+def _draw_scroll_overflow_cues(
+    surface,
+    top: int,
+    bottom: int,
+    scroll_offset: int,
+    max_scroll: int,
+) -> None:
+    """Modern thin scrollbar on the right when settings rows overflow."""
+    if max_scroll <= 0:
+        return
+
+    track_top = int(top + theme.s(10))
+    track_bottom = int(bottom - theme.s(10))
+    track_h = track_bottom - track_top
+    if track_h < theme.s(24):
+        return
+
+    # Sit on the right of the round viewport, clear of centered labels.
+    track_x = theme.CENTER_X + int(theme.VISIBLE_RADIUS * 0.78)
+    track_w = max(3, theme.s(4))
+    radius = max(2, track_w // 2)
+
+    # Viewport fraction of total content (content = viewport + max_scroll).
+    viewport_h = max(1, bottom - top)
+    content_h = viewport_h + max_scroll
+    thumb_h = max(theme.s(18), int(round(track_h * (viewport_h / content_h))))
+    thumb_h = min(thumb_h, track_h)
+    travel = max(0, track_h - thumb_h)
+    t = 0.0 if max_scroll <= 0 else min(1.0, max(0.0, scroll_offset / float(max_scroll)))
+    thumb_y = track_top + int(round(travel * t))
+
+    track_rect = pygame.Rect(track_x - track_w // 2, track_top, track_w, track_h)
+    thumb_rect = pygame.Rect(track_x - track_w // 2, thumb_y, track_w, thumb_h)
+
+    # Frosted track + solid thumb (reads on light and dark themes).
+    track_surf = pygame.Surface((track_w, track_h), pygame.SRCALPHA)
+    pygame.draw.rect(
+        track_surf,
+        (*theme.HINT[:3], 70),
+        track_surf.get_rect(),
+        border_radius=radius,
+    )
+    surface.blit(track_surf, track_rect.topleft)
+
+    thumb_color = theme.MUTED if hasattr(theme, "MUTED") else theme.LABEL
+    pygame.draw.rect(surface, thumb_color, thumb_rect, border_radius=radius)
+    # Hairline edge for contrast on similar backgrounds.
+    pygame.draw.rect(surface, theme.GRID, thumb_rect, max(1, theme.s(1)), border_radius=radius)
 
 
 def _draw_brightness_slider_row(surface, ry: int, focused: bool) -> None:
@@ -1960,6 +2059,7 @@ def draw_info(
     system_confirm: str | None = None,
     atc_picker: str | None = None,
     atc_picker_scroll: int = 0,
+    atc_picker_pressed_id: str | None = None,
 ) -> int:
     draw.fill_background(surface)
     nav.draw_breadcrumb(surface, _breadcrumb(page))
@@ -2180,7 +2280,14 @@ def draw_info(
 
     if page == PAGE_ATC and atc_picker:
         # Full-screen picker; skip footer chrome underneath.
-        return draw_atc_picker(surface, atc_picker, scroll_offset=atc_picker_scroll)
+        return draw_atc_picker(
+            surface,
+            atc_picker,
+            scroll_offset=atc_picker_scroll,
+            pressed_id=atc_picker_pressed_id,
+        )
+    if max_scroll > 0 and page != PAGE_MAIN:
+        _draw_scroll_overflow_cues(surface, top, bottom, scroll_offset, max_scroll)
     nav.draw_footer_buttons(surface, list(footer_kinds_for_page(page)))
     if page == PAGE_SYSTEM and system_confirm:
         draw_system_confirm_popup(surface, system_confirm)

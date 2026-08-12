@@ -23,7 +23,7 @@ _settings_mtime: float | None = None
 # True when _state matches disk. Slider drags set this False until persist.
 _disk_synced = True
 
-MIN_HEIGHT_OPTIONS = (0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000)
+MIN_HEIGHT_OPTIONS = (0, 100, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000)
 # AIS vessels slower than or equal to this (kt) are hidden; 0 = no speed floor.
 VESSEL_MIN_SPEED_OPTIONS = (0, 1, 2, 3, 5, 8, 10, 15)
 # Aircraft slower than or equal to this GS (kt) are hidden; 0 = no speed floor.
@@ -61,7 +61,7 @@ UNIT_PRESET_LABELS = {
     "mi_kts": "mi, kts",
     "km_kts": "km, kts",
 }
-_LEGACY_DISTANCE_TO_PRESET = {"km": "km_kph", "mi": "mi_mph", "nm": "nm_kts"}
+_LEGACY_DISTANCE_TO_PRESET = {"km": "km_kph", "mi": "mi_kts", "nm": "nm_kts"}
 # Stored ids for basemap (labels live in map_style_label()).
 MAP_STYLES = ("dark", "light", "voyager", "vfr")
 
@@ -231,23 +231,24 @@ def radar_hud_arrange_debug_enabled() -> bool:
 
 _defaults = {
     "brightness_percent": 100,
-    "distance_units": "km",
-    "unit_preset": "km_kph",
+    "distance_units": "mi",
+    "unit_preset": "mi_kts",
     "show_compass_rose": True,
+    "color_by_altitude": False,
     "show_range_rings": True,
     # Legacy bool kept in sync with traffic_labels for older readers.
     "show_aircraft_tag": True,
     # aircraft | marine | both | off — which callsign/name tags to draw
-    "traffic_labels": "both",
+    "traffic_labels": "aircraft",
     # Real-world direction at the top of the screen (0=north-up).
     "facing_deg": 0.0,
     "show_sweep": True,
     "show_precipitation": True,
     "show_wildfires": False,
     # OurAirports runway centerlines on dark/light maps (not VFR).
-    "show_airport_centerlines": False,
+    "show_airport_centerlines": True,
     # airport.png pins for large/medium/small airports in range.
-    "show_airport_icons": False,
+    "show_airport_icons": True,
     # Airport ground vehicles (GRND/GVEH/… icon category) on the radar.
     "show_ground_vehicles": True,
     # Hide AIS vessels at or below this SOG (knots). 0 = show all speeds.
@@ -268,9 +269,9 @@ _defaults = {
     "flight_detail_timeout_s": 20,
     "clock_timeout_s": 10,
     # aircraft | marine | both — what the radar shows
-    "traffic_mode": "aircraft",
+    "traffic_mode": "both",
     # Kept in sync with traffic_mode for older readers / portal payloads
-    "ais_enabled": False,
+    "ais_enabled": True,
     # dark | light | voyager | vfr — radar basemap (see map_bg)
     "map_style": "dark",
     "vfr_map_opacity": 45,
@@ -292,7 +293,7 @@ _defaults = {
     "radar_hud_enabled": True,
     "radar_hud_position": "top",
     "radar_hud_opacity": 72,
-    "radar_hud_dark": False,
+    "radar_hud_dark": True,
     "radar_hud_arrange": False,  # legacy; arrange is gated by FLIGHTSCNR_HUD_ARRANGE
     "radar_hud_layout_top": copy_radar_hud_layout_top_default(),
     "radar_hud_layout_bottom": copy_radar_hud_layout_bottom_default(),
@@ -407,7 +408,7 @@ def _normalize_unit_preset(value) -> str:
     # Legacy distance-only values.
     if raw in _LEGACY_DISTANCE_TO_PRESET:
         return _LEGACY_DISTANCE_TO_PRESET[raw]
-    return "km_kph"
+    return "mi_kts"
 
 
 def _env_min_height() -> int:
@@ -454,7 +455,7 @@ def _seed_from_env(state: dict) -> None:
 
         state["distance_units"] = "mi" if DISTANCE_UNITS.strip().lower() == "imperial" else "km"
         state["unit_preset"] = (
-            "mi_mph" if state["distance_units"] == "mi" else "km_kph"
+            "mi_kts" if state["distance_units"] == "mi" else "km_kph"
         )
         state["scale_index"] = scale.index_for_radius_nm(SEARCH_RADIUS_NM)
         state["min_height_ft"] = _snap_min_height(MIN_HEIGHT)
@@ -600,7 +601,7 @@ def _load():
         del state["distance_miles"]
         migrated = True
     if "distance_units" not in state:
-        state["distance_units"] = "km"
+        state["distance_units"] = "mi"
         migrated = True
     # Compound distance+speed presets (nm,kts / mi,mph / …).
     preset = _normalize_unit_preset(state.get("unit_preset"))
@@ -608,7 +609,7 @@ def _load():
         preset = _normalize_unit_preset(
             state.get("unit_preset")
             or _LEGACY_DISTANCE_TO_PRESET.get(
-                str(state.get("distance_units", "km")).lower(), "km_kph"
+                str(state.get("distance_units", "mi")).lower(), "mi_kts"
             )
         )
         state["unit_preset"] = preset
@@ -632,17 +633,17 @@ def _load():
         if "ais_enabled" in data:
             state["traffic_mode"] = "both" if data.get("ais_enabled") else "aircraft"
         else:
-            state["traffic_mode"] = mode if mode in TRAFFIC_MODES else "aircraft"
+            state["traffic_mode"] = mode if mode in TRAFFIC_MODES else "both"
         migrated = True
     state["ais_enabled"] = state["traffic_mode"] in ("marine", "both")
     # Migrate legacy show_aircraft_tag bool → traffic_labels enum
     labels = str(state.get("traffic_labels") or "").strip().lower()
     if "traffic_labels" not in data or labels not in TRAFFIC_LABEL_MODES:
         if "show_aircraft_tag" in data:
-            state["traffic_labels"] = "both" if data.get("show_aircraft_tag") else "off"
+            state["traffic_labels"] = "aircraft" if data.get("show_aircraft_tag") else "off"
         else:
             state["traffic_labels"] = (
-                labels if labels in TRAFFIC_LABEL_MODES else "both"
+                labels if labels in TRAFFIC_LABEL_MODES else "aircraft"
             )
         migrated = True
     else:
@@ -742,7 +743,7 @@ def _load():
         state["radar_hud_opacity"] = 72
         migrated = True
     if "radar_hud_dark" not in data:
-        state["radar_hud_dark"] = False
+        state["radar_hud_dark"] = True
         migrated = True
     else:
         state["radar_hud_dark"] = bool(state.get("radar_hud_dark"))
@@ -904,6 +905,7 @@ def _settings_snapshot(state: dict) -> tuple:
         tuple(color_presets.normalize_rgb(state.get("runway_darkmap_rgb"))),
         state.get("show_compass_rose"),
         state.get("show_range_rings"),
+        state.get("color_by_altitude"),
         state.get("show_aircraft_tag"),
         state.get("traffic_labels"),
         _normalize_facing(state.get("facing_deg", 0)),
@@ -942,7 +944,7 @@ def _settings_snapshot(state: dict) -> tuple:
         bool(state.get("radar_hud_enabled", True)),
         str(state.get("radar_hud_position") or "top"),
         clamp_radar_hud_opacity(state.get("radar_hud_opacity", 72)),
-        bool(state.get("radar_hud_dark", False)),
+        bool(state.get("radar_hud_dark", True)),
         bool(radar_hud_arrange_debug_enabled()),
         tuple(
             sorted(
@@ -1169,7 +1171,7 @@ def unit_preset() -> str:
 
 
 def unit_preset_label() -> str:
-    return UNIT_PRESET_LABELS.get(unit_preset(), "km, kph")
+    return UNIT_PRESET_LABELS.get(unit_preset(), "mi, kts")
 
 
 def distance_units() -> str:
@@ -1256,7 +1258,7 @@ def set_show_wildfires(enabled: bool):
 
 
 def show_airport_centerlines() -> bool:
-    return bool(_state.get("show_airport_centerlines", False))
+    return bool(_state.get("show_airport_centerlines", True))
 
 
 def toggle_show_airport_centerlines():
@@ -1270,7 +1272,7 @@ def set_show_airport_centerlines(enabled: bool):
 
 
 def show_airport_icons() -> bool:
-    return bool(_state.get("show_airport_icons", False))
+    return bool(_state.get("show_airport_icons", True))
 
 
 def toggle_show_airport_icons():
@@ -1519,6 +1521,20 @@ def set_show_compass_rose(enabled: bool):
     _save(_state)
 
 
+def color_by_altitude():
+    return bool(_state.get("color_by_altitude", False))
+
+
+def toggle_color_by_altitude():
+    _state["color_by_altitude"] = not color_by_altitude()
+    _save(_state)
+
+
+def set_color_by_altitude(enabled: bool):
+    _state["color_by_altitude"] = bool(enabled)
+    _save(_state)
+
+
 def show_range_rings() -> bool:
     return bool(_state.get("show_range_rings", True))
 
@@ -1547,7 +1563,7 @@ def traffic_labels() -> str:
 
 
 def traffic_labels_label() -> str:
-    return TRAFFIC_LABEL_LABELS.get(traffic_labels(), "Aircraft and Marine")
+    return TRAFFIC_LABEL_LABELS.get(traffic_labels(), "Aircraft Only")
 
 
 def show_aircraft_labels() -> bool:
@@ -2058,7 +2074,7 @@ def set_radar_hud_opacity(value: int, *, persist: bool = True) -> int:
 
 
 def radar_hud_dark() -> bool:
-    return bool(_state.get("radar_hud_dark", False))
+    return bool(_state.get("radar_hud_dark", True))
 
 
 def set_radar_hud_dark(enabled: bool) -> None:

@@ -4,8 +4,8 @@ Documentation=https://github.com/yashmulgaonkar/FlightScnr_Pi
 # Start after networking and the display manager (X11 on :0).
 # WantedBy=graphical.target below registers this unit for boot without creating
 # an ordering cycle (do not also add After=graphical.target).
-After=NetworkManager.service display-manager.service
-Wants=NetworkManager.service
+After=NetworkManager.service display-manager.service bluetooth.service
+Wants=NetworkManager.service bluetooth.service
 
 [Service]
 Type=simple
@@ -21,10 +21,18 @@ Environment=XDG_RUNTIME_DIR=__XDG_RUNTIME_DIR__
 Environment=PULSE_SERVER=unix:__XDG_RUNTIME_DIR__/pulse/native
 Environment=PULSE_COOKIE=__PULSE_COOKIE__
 Environment=SDL_VIDEODRIVER=x11
+# systemd often starts units with LANG=C / latin-1 stdio; em dashes and other
+# Unicode in print()/logging then raise UnicodeEncodeError and abort enrichment.
+Environment=PYTHONIOENCODING=utf-8
+Environment=LANG=C.UTF-8
+Environment=LC_ALL=C.UTF-8
 
 # Wait for the desktop X session before launching pygame (up to 90s after boot).
 ExecStartPre=/bin/bash -c 'for i in $(seq 1 90); do [ -S /tmp/.X11-unix/X0 ] && [ -f "${XAUTHORITY}" ] && exit 0; sleep 1; done; echo "X11 not ready after 90s"; exit 1'
 ExecStartPre=/bin/bash -c 'mkdir -p /var/lib/flightscnr/maps'
+# X11 lxpanel sits above pygame FULLSCREEN; stop it so the kiosk is edge-to-edge.
+# Also kill BT tray helpers that can still pop "Connection successful" dialogs.
+ExecStartPre=/bin/bash -c 'killall -q lxpanel wf-panel-pi blueman-applet blueman-tray blueberry-tray 2>/dev/null || true'
 
 ExecStart=__REPO_DIR__/flightscnr-venv/bin/python3 __REPO_DIR__/flightscnr/flightscnr.py
 Restart=always

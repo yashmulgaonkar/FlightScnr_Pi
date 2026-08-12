@@ -204,6 +204,8 @@ class TestAirportsModule:
         db = airports_mod.build_db_from_csv_text(csv_text)
         assert db["KSFO"]["type"] == "large_airport"
         assert db["KSFO"]["ident"] == "KSFO"
+        assert db["KSFO"]["name"] == "San Francisco"
+        assert db["KSFO"]["facility"] == "San Francisco Intl"
         assert db["SFO"]["ident"] == "KSFO"
         assert db["KOAK"]["type"] == "medium_airport"
         assert db["KHAF"]["type"] == "small_airport"

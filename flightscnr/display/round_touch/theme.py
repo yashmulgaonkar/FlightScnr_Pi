@@ -111,12 +111,14 @@ AIRPORT = (120, 150, 175)
 RUNWAY_DARKMAP = (225, 128, 0)
 # Higher-contrast runway lines on light CARTO basemap.
 RUNWAY_LIGHT = (35, 55, 95)
-ALERT_MILITARY = (255, 40, 40)   # red — military tracks
-ALERT_OTHER = (56, 160, 255)     # blue — emergency squawk / watch list
-ALERT_EMERGENCY = ALERT_OTHER
+ALERT_MILITARY = (255, 40, 40)   # red — military tracks (flashing)
+# Vivid aqua — watch list. Punchier than LIVE (56, 168, 255), not climb (0, 255, 255).
+ALERT_WATCH = (0, 200, 255)
+ALERT_OTHER = ALERT_WATCH
+# Same red as military, but icons stay solid (no yellow pulse).
+ALERT_EMERGENCY = ALERT_MILITARY
 ALERT_FLASH = (255, 80, 80)      # bright red pulse (military rim / icons)
-ALERT_FLASH_OTHER = (120, 200, 255)  # bright blue pulse
-ALERT_WATCH = ALERT_OTHER
+ALERT_FLASH_OTHER = (80, 220, 255)  # bright aqua pulse (watch)
 
 SCALE_LABEL_BEARING_DEG = 245.5
 RING_COUNT = 3
