@@ -278,20 +278,6 @@ def apply_dump1090_to_runtime(enabled: bool, url: str) -> None:
     except Exception:
         pass
 
-def apply_dump1090_to_runtime(enabled: bool, url: str) -> None:
-    """Update process env + config module so the next overhead cycle picks this up."""
-    url = (url or "").strip() or "http://127.0.0.1:8080/data/aircraft.json"
-    os.environ["DUMP1090_ENABLED"] = "True" if enabled else "False"
-    os.environ["DUMP1090_URL"] = url
-    try:
-        import config as cfg
- 
-        cfg.DUMP1090_ENABLED = bool(enabled)
-        cfg.DUMP1090_URL = url
-    except Exception:
-        pass
-
-
 def mask_secret(value: str) -> str:
     value = (value or "").strip()
     if not value:
@@ -423,7 +409,6 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
             # writing "" — keeps secrets.json free of no-op entries and
             # matches how an unset .env var behaves.
             updated.pop("ROUTE_SOURCE_ORDER", None)
-        apply_route_source_order_to_runtime(raw)
 
     os.makedirs(DATA_DIR, exist_ok=True)
     tmp = SECRETS_JSON_PATH + ".tmp"

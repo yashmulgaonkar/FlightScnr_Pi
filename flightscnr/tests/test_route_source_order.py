@@ -38,7 +38,13 @@ def test_disabled_sources_are_never_called():
     import utilities.route_enrichment as re_mod
 
     flight = {"callsign": "DLH123", "icao_hex": "abc123"}
-    with patch("config.ROUTE_SOURCE_ORDER", ("opensky",)), patch.object(
+    with patch(
+        "secrets_store.route_source_order_setting",
+        return_value={
+            "ROUTE_SOURCE_ORDER": "opensky",
+            "ROUTE_SOURCE_ORDER_EFFECTIVE": "opensky",
+        },
+    ), patch.object(
         re_mod, "_from_airlabs", side_effect=AssertionError("must not be called")
     ), patch.object(
         re_mod, "_from_flightaware", side_effect=AssertionError("must not be called")
@@ -63,7 +69,13 @@ def test_custom_order_fills_gaps_and_stops_once_complete():
     import utilities.route_enrichment as re_mod
 
     flight = {"callsign": "DLH123", "icao_hex": "abc123"}
-    with patch("config.ROUTE_SOURCE_ORDER", ("opensky", "airlabs")), patch.object(
+    with patch(
+        "secrets_store.route_source_order_setting",
+        return_value={
+            "ROUTE_SOURCE_ORDER": "opensky,airlabs",
+            "ROUTE_SOURCE_ORDER_EFFECTIVE": "opensky,airlabs",
+        },
+    ), patch.object(
         re_mod,
         "_from_opensky",
         return_value={
