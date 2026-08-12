@@ -725,6 +725,7 @@ def alerts_json():
             "alert_hide_non_alerted": alert_prefs.hide_non_alerted(),
             "alert_watch": alert_prefs.watch_blob(),
             "alert_watch_types": alert_prefs.watch_types_blob(),
+            "alert_squawk": alert_prefs.squawk_blob(),
         }
     )
 
@@ -740,6 +741,7 @@ def alerts_save():
         alert_hide_non_alerted=bool(data.get("alert_hide_non_alerted", False)),
         alert_watch=str(data.get("alert_watch", "") or ""),
         alert_watch_types=str(data.get("alert_watch_types", "") or ""),
+        alert_squawk=str(data.get("alert_squawk", "") or ""),
     )
     return jsonify({"ok": True})
 

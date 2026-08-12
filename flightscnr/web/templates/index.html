@@ -341,6 +341,9 @@
             <label for="alert-watch-types">Watch list (aircraft types)</label>
             <input id="alert-watch-types" type="text" autocomplete="off" placeholder="B738, A337, A330-743">
             <p class="hint">Alert on every aircraft of a given type on local radar. Use ICAO type codes (B738, A337) or designations (A330-743), comma-separated. Clear and Save to remove.</p>
+            <label for="alert-squawk">Squawk list (squawk codes - non emergency)</label>
+            <input id="alert-squawk" type="text" autocomplete="off" placeholder="0023,0450-0457,0460-0467,1200,2000,7000">
+            <p class="hint">Highlight many aircraft on the <strong>local radar</strong> when they enter range. Enter individual Squawk codes or a range of codes, comma-separated. Clear and Save to remove.</p>
             <button class="btn btn-primary" id="btn-alerts" style="margin-top:.7rem" type="button">Save alerts</button>
             <div id="alert-status" class="status"></div>
         </div>
@@ -1117,6 +1120,7 @@ async function loadAll() {
         $("alert-hide").checked = !!a.alert_hide_non_alerted;
         $("alert-watch").value = a.alert_watch || "";
         if ($("alert-watch-types")) $("alert-watch-types").value = a.alert_watch_types || "";
+        $("alert-squawk").value = a.alert_squawk || "";
     } catch (_) {}
 
     try {
@@ -1454,6 +1458,7 @@ async function saveAlerts() {
                 alert_hide_non_alerted: $("alert-hide").checked,
                 alert_watch: $("alert-watch").value.trim().toUpperCase(),
                 alert_watch_types: ($("alert-watch-types") ? $("alert-watch-types").value : "").trim().toUpperCase(),
+                alert_squawk: $("alert-squawk").value.trim().toUpperCase(),
             }),
         });
         showStatus("alert-status", "Alert settings saved.");
