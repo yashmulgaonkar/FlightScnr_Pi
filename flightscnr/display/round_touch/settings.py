@@ -1232,6 +1232,17 @@ def set_show_sweep_line(enabled: bool):
 def show_precipitation() -> bool:
     return bool(_state.get("show_precipitation", True))
 
+def live_map_heading_up() -> bool:
+    """Extended-tracking live map orientation. False (default) = north-up,
+    per the design decision to keep it consistently readable when swiping
+    back and forth from the route map (which is also north-up)."""
+    return bool(_state.get("live_map_heading_up", False))
+ 
+ 
+def set_live_map_heading_up(enabled: bool):
+    _state["live_map_heading_up"] = bool(enabled)
+    _save(_state)
+
 
 def toggle_show_precipitation():
     _state["show_precipitation"] = not show_precipitation()

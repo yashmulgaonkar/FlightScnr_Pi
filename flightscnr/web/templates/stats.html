@@ -66,10 +66,30 @@
         <thead><tr><th>Date</th><th>Flights</th><th></th><th>First</th><th>Last</th></tr></thead>
         <tbody id="log-body"></tbody>
     </table>
+    <h3>Live-Position Sources (Extended Tracking)</h3>
+    <p style="color:#888;font-size:.85rem;margin-top:-.5rem">
+        How often each source actually won the fallback race today while a
+        flight was being tracked on the live map — useful for spotting how
+        often metered sources (OpenSky, ADS-B Exchange, FR24) get used
+        instead of the free local dump1090/adsb.fi sources.
+    </p>
+    <table id="position-sources-table">
+        <thead><tr><th>Source</th><th>Calls today</th></tr></thead>
+        <tbody id="position-sources-body">
+            <tr><td colspan="2" style="color:#888">No live-tracking activity yet today.</td></tr>
+        </tbody>
+    </table>
 
     <script>
         const COLOURS = ['#ffb300','#ff6b35','#69f0ae','#ffd54f','#ff69b4','#9b59b6','#1abc9c','#e74c3c','#3498db','#f39c12','#00b894','#fd79a8'];
         const DOWS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+	const POSITION_SOURCE_LABELS = {
+            dump1090: 'Local (dump1090 / readsb)',
+            adsbfi: 'adsb.fi',
+            opensky: 'OpenSky',
+            adsbexchange: 'ADS-B Exchange',
+            fr24: 'FlightRadar24',
+        };
 
         let airportCode = '';
 
@@ -214,6 +234,7 @@
         }
 
         document.addEventListener('DOMContentLoaded', loadAll);
+	document.addEventListener('DOMContentLoaded', loadPositionSourceStats);
     </script>
 </body>
 </html>

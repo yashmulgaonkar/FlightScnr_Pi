@@ -54,7 +54,13 @@
         .chk{display:flex;align-items:center;gap:.6rem;padding:.7rem 0;border-bottom:1px solid rgba(120,120,120,.22);}
         .chk:last-of-type{border-bottom:none;}
         .chk label{margin:0;font-size:.9rem;color:var(--text);flex:1;}
-        .switch{position:relative;width:2.6rem;height:1.5rem;flex:none;}
+        .drag-list{list-style:none;margin:.5rem 0 0;padding:0;}
+        .drag-item{display:flex;align-items:center;gap:.6rem;padding:.6rem .5rem;margin-bottom:.4rem;
+          background:var(--card2);border:1px solid var(--fline);border-radius:.5rem;
+          font-size:.88rem;color:var(--text);cursor:grab;user-select:none;}
+        .drag-item.dragging{opacity:.4;cursor:grabbing;}
+        .drag-handle{color:var(--fline);font-size:1rem;line-height:1;}
+	.switch{position:relative;width:2.6rem;height:1.5rem;flex:none;}
         .switch input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer;}
         .switch .track{position:absolute;inset:0;border-radius:999px;background:#333;
         border:1px solid var(--fline);transition:.18s;pointer-events:none;}
@@ -337,6 +343,23 @@
             <p class="hint">Comma-separated: airlabs, flightaware, opensky — tried in this order, first match per field wins, gaps filled by the next. Omit an entry to disable it entirely. Example for a fully free/open-source lookup with no paid API ever called: <code>opensky</code>. Leave blank for the default order (airlabs,flightaware,opensky).</p>
             <button class="btn btn-primary" id="btn-route-source-order" style="margin-top:.7rem" type="button">Save route order</button>
             <div id="route-source-order-status" class="status"></div>
+        </div>
+    </details>
+
+    <details class="card">
+        <summary><span class="ico">&#128506;</span>Position Sources<span class="sum">extended tracking map</span><span class="chev">&#9656;</span></summary>
+        <div class="body">
+            <p class="hint">Fallback order for the live-centered map (Radar &gt; Track &gt; swipe to live map). First source that has a fresh position for the tracked aircraft wins. Drag to reorder; a source with no key/URL configured is skipped automatically even if left in the list.</p>
+            <ul id="position-source-list" class="drag-list">
+                <!-- populated by loadPositionSourceOrder() -->
+            </ul>
+            <div class="chk" style="margin-top:.75rem">
+                <label for="live_map_heading_up">Rotate map to heading (default: north-up)</label>
+                <span class="switch"><input id="live_map_heading_up" type="checkbox"><span class="track"></span></span>
+            </div>
+            <button class="btn btn-primary" id="btn-position-sources" style="margin-top:.7rem" type="button">Save position sources</button>
+            <button class="btn" id="btn-position-sources-reset" style="margin-top:.4rem" type="button">Reset to default order</button>
+            <div id="position-sources-status" class="status"></div>
         </div>
     </details>
 
@@ -1049,6 +1072,9 @@ async function loadAll() {
             $("vfr_opacity").value = String(r.vfr_map_opacity ?? 45);
             syncVfrOpacityLabel();
         }
+        if ($("live_map_heading_up")) {
+            $("live_map_heading_up").checked = !!r.live_map_heading_up;
+        }
         $("show_compass").checked = !!r.show_compass_rose;
         if ($("show_range_rings")) $("show_range_rings").checked = r.show_range_rings !== false;
         if ($("color_by_altitude")) $("color_by_altitude").checked = !!r.color_by_altitude;
@@ -1169,6 +1195,7 @@ async function loadAll() {
         if ($("route_source_order")) {
             $("route_source_order").value = rso.ROUTE_SOURCE_ORDER || "";
         }
+	renderPositionSourceList(keys.position_source_order || DEFAULT_POSITION_SOURCE_ORDER);
 	const faUsage = keys.flightaware_usage;
         if ($("flightaware-usage") && faUsage) {
             $("flightaware-usage").textContent =
@@ -1357,6 +1384,93 @@ async function saveRouteSourceOrder() {
     } catch (e) {
         showStatus("route-source-order-status", e.message, true);
     }
+}
+const DEFAULT_POSITION_SOURCE_ORDER = ["dump1090", "adsbfi", "opensky", "adsbexchange", "fr24"];
+const POSITION_SOURCE_LABELS = {
+    dump1090: "Local (dump1090 / readsb)",
+    adsbfi: "adsb.fi",
+    opensky: "OpenSky",
+    adsbexchange: "ADS-B Exchange",
+    fr24: "FlightRadar24",
+};
+ 
+function renderPositionSourceList(order) {
+    const list = $("position-source-list");
+    if (!list) return;
+    const known = (order && order.length ? order : DEFAULT_POSITION_SOURCE_ORDER)
+        .filter((s) => POSITION_SOURCE_LABELS[s]);
+    // Any source missing from the saved order (e.g. after an update adds
+    // a new one) still shows up at the end, same "unknown/omitted entries
+    // fall back gracefully" behavior as config.py's parser.
+    for (const s of DEFAULT_POSITION_SOURCE_ORDER) {
+        if (!known.includes(s)) known.push(s);
+    }
+    list.innerHTML = "";
+    for (const source of known) {
+        const li = document.createElement("li");
+        li.draggable = true;
+        li.dataset.source = source;
+        li.className = "drag-item";
+        li.innerHTML = `<span class="drag-handle">&#9776;</span> <span>${POSITION_SOURCE_LABELS[source]}</span>`;
+        list.appendChild(li);
+    }
+    attachDragReorder(list);
+}
+ 
+function attachDragReorder(list) {
+    let dragEl = null;
+    list.querySelectorAll(".drag-item").forEach((item) => {
+        item.addEventListener("dragstart", () => {
+            dragEl = item;
+            item.classList.add("dragging");
+        });
+        item.addEventListener("dragend", () => {
+            item.classList.remove("dragging");
+            dragEl = null;
+        });
+    });
+    list.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        const after = [...list.querySelectorAll(".drag-item:not(.dragging)")].find(
+            (sib) => e.clientY <= sib.getBoundingClientRect().top + sib.offsetHeight / 2
+        );
+        if (dragEl) {
+            if (after) list.insertBefore(dragEl, after);
+            else list.appendChild(dragEl);
+        }
+    });
+}
+ 
+async function savePositionSources() {
+    clearStatus("position-sources-status");
+    try {
+        const order = [...document.querySelectorAll("#position-source-list .drag-item")]
+            .map((li) => li.dataset.source);
+        const headingUp = $("live_map_heading_up") ? $("live_map_heading_up").checked : false;
+        await jsonFetch("/api-keys", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ position_source_order: order }),
+        });
+        await jsonFetch("/radar", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ live_map_heading_up: headingUp }),
+        });
+        // Show the effective/parsed order after save (same PR #69 review
+        // feedback applied here too: confirm what was actually persisted,
+        // in case any dragged-in entry was somehow invalid).
+        const keys = await jsonFetch("/api-keys/json");
+        const effective = keys.position_source_order || order;
+        showStatus("position-sources-status", `Saved: ${effective.join(" \u2192 ")}`);
+    } catch (e) {
+        showStatus("position-sources-status", e.message, true);
+    }
+}
+ 
+async function resetPositionSources() {
+    renderPositionSourceList(DEFAULT_POSITION_SOURCE_ORDER);
+    await savePositionSources();
 }
 
 async function saveAndReloadSettings() {
@@ -2222,6 +2336,8 @@ $("btn-import-settings").addEventListener("click", async () => {
 $("btn-radar").addEventListener("click", saveRadar);
 $("btn-dump1090").addEventListener("click", saveDump1090);
 $("btn-route-source-order").addEventListener("click", saveRouteSourceOrder);
+$("btn-position-sources").addEventListener("click", savePositionSources);
+$("btn-position-sources-reset").addEventListener("click", resetPositionSources);
 $("btn-save-reload").addEventListener("click", saveAndReloadSettings);
 $("btn-offhours").addEventListener("click", saveOffHours);
 $("btn-weather").addEventListener("click", saveWeather);

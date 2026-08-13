@@ -653,6 +653,19 @@ def stats_page():
     """Flight counter stats dashboard."""
     return render_template("stats.html")
 
+@app.get("/stats/position-sources")
+def stats_position_sources():
+    """Live-position fallback usage (extended tracking map): how often
+    each source (dump1090/adsb.fi/OpenSky/ADS-B Exchange/FR24) actually
+    won the fallback race. Answers "how many OpenSky credits are we
+    actually burning" without needing to inspect X-Rate-Limit-Remaining
+    headers by hand."""
+    try:
+        from utilities.position_source_stats import usage_today, usage_history
+ 
+        return jsonify({"today": usage_today(), "history": usage_history(days=7)})
+    except Exception as e:
+        return jsonify({"today": {}, "history": {}, "error": str(e)}), 500
 
 @app.get("/stats/<date>")
 def stats_day_page(date):
@@ -1056,7 +1069,8 @@ def radar_json():
             "map_style_options": list(settings.MAP_STYLES),
             "vfr_map_opacity": settings.vfr_map_opacity(),
             "dump1090": dump1090_portal_status(),
-        }
+            "live_map_heading_up": settings.live_map_heading_up(),
+	}
     )
 
 
@@ -1196,6 +1210,8 @@ def radar_save():
                 "dump1090_url": str(data.get("dump1090_url") or "").strip(),
             }
         )
+    if "live_map_heading_up" in data:
+        settings.set_live_map_heading_up(bool(data.get("live_map_heading_up")))
     settings.request_reload()
     return jsonify({"ok": True, "message": "Radar settings saved."})
 

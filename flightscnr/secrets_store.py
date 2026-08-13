@@ -41,6 +41,7 @@ MANAGED_KEYS = (
     "FLIGHTAWARE_API_KEY",
     "OPENSKY_API_CLIENT_ID",
     "OPENSKY_API_CLIENT_SECRET",
+    "ADSBEXCHANGE_API_KEY",
     "FIRMS_MAP_KEY",
     "HOME_LAT",
     "HOME_LON",
@@ -55,7 +56,7 @@ CONFIG_H_SETTINGS = MANAGED_KEYS + (
     "VESSEL_PARKED_SOG_KT",
     "DUMP1090_ENABLED",
     "DUMP1090_URL",
-    "ROUTE_SOURCE_ORDER"
+    "POSITION_SOURCE_ORDER",
 )
 
 TOGGLE_KEYS = (
@@ -65,6 +66,7 @@ TOGGLE_KEYS = (
     "USE_AISSTREAM_API",
     "USE_FLIGHTAWARE_API",
     "USE_OPENSKY_API",
+    "USE_ADSBEXCHANGE_API",
 )
 
 # Non-secret data-source settings stored alongside secrets.json.
@@ -72,6 +74,7 @@ SOURCE_SETTING_KEYS = (
     "DUMP1090_ENABLED",
     "DUMP1090_URL",
     "ROUTE_SOURCE_ORDER",
+    "POSITION_SOURCE_ORDER",
 )
 
 
@@ -168,6 +171,7 @@ def load_toggles() -> dict[str, bool]:
         "USE_FLIGHTAWARE_API": False,
         # Free route fallback — on by default when credentials exist.
         "USE_OPENSKY_API": True,
+        "USE_ADSBEXCHANGE_API": True,
     }
     try:
         with open(SECRETS_JSON_PATH, encoding="utf-8") as fh:
@@ -192,6 +196,7 @@ def api_enabled(key_name: str) -> bool:
         "FLIGHTAWARE_API_KEY": "USE_FLIGHTAWARE_API",
         "OPENSKY_API_CLIENT_ID": "USE_OPENSKY_API",
         "OPENSKY_API_CLIENT_SECRET": "USE_OPENSKY_API",
+        "ADSBEXCHANGE_API_KEY": "USE_ADSBEXCHANGE_API",
     }
     toggle_key = mapping.get(key_name)
     if not toggle_key:
@@ -241,29 +246,6 @@ def dump1090_settings() -> dict:
         "DUMP1090_URL": url or "http://127.0.0.1:8080/data/aircraft.json",
     }
 
-def route_source_order_setting() -> dict:
-    """Current route-source-order portal/settings value.
- 
-    Prefer secrets.json over process env — same reasoning as
-    dump1090_settings(): the display process reads this on every
-    enrichment cycle (not just once at import time), so a portal save
-    must be visible immediately without a service restart.
-    """
-    bootstrap_secrets()
-    file_vals = load_secrets_json()
-    if "ROUTE_SOURCE_ORDER" in file_vals and str(file_vals.get("ROUTE_SOURCE_ORDER") or "").strip():
-        raw = str(file_vals.get("ROUTE_SOURCE_ORDER")).strip()
-    else:
-        raw = os.environ.get("ROUTE_SOURCE_ORDER", "").strip()
- 
-    from config import _parse_route_source_order
- 
-    effective = _parse_route_source_order(raw)
-    return {
-        "ROUTE_SOURCE_ORDER": raw,
-        "ROUTE_SOURCE_ORDER_EFFECTIVE": ",".join(effective),
-    }
-
 
 def apply_dump1090_to_runtime(enabled: bool, url: str) -> None:
     """Update process env + config module so the next overhead cycle picks this up."""
@@ -278,16 +260,94 @@ def apply_dump1090_to_runtime(enabled: bool, url: str) -> None:
     except Exception:
         pass
 
-def apply_dump1090_to_runtime(enabled: bool, url: str) -> None:
-    """Update process env + config module so the next overhead cycle picks this up."""
-    url = (url or "").strip() or "http://127.0.0.1:8080/data/aircraft.json"
-    os.environ["DUMP1090_ENABLED"] = "True" if enabled else "False"
-    os.environ["DUMP1090_URL"] = url
+
+def route_source_order_setting() -> dict:
+    """Current route-source-order portal/settings value."""
+    bootstrap_secrets()
+    file_vals = load_secrets_json()
+
+    if (
+        "ROUTE_SOURCE_ORDER" in file_vals
+        and str(file_vals.get("ROUTE_SOURCE_ORDER") or "").strip()
+    ):
+        raw = str(file_vals.get("ROUTE_SOURCE_ORDER")).strip()
+    else:
+        raw = os.environ.get("ROUTE_SOURCE_ORDER", "").strip()
+
+    from config import _parse_route_source_order
+
+    effective = _parse_route_source_order(raw)
+
+    return {
+        "ROUTE_SOURCE_ORDER": raw,
+        "ROUTE_SOURCE_ORDER_EFFECTIVE": ",".join(effective),
+    }
+
+
+def apply_route_source_order_to_runtime(raw: str) -> None:
+    """Update process env + config module so the next lookup picks this up."""
+    raw = (raw or "").strip()
+    os.environ["ROUTE_SOURCE_ORDER"] = raw
     try:
         import config as cfg
- 
-        cfg.DUMP1090_ENABLED = bool(enabled)
-        cfg.DUMP1090_URL = url
+
+        cfg.ROUTE_SOURCE_ORDER = cfg._parse_route_source_order(raw)
+    except Exception:
+        pass
+
+
+_POSITION_SOURCE_DEFAULT_ORDER = ("dump1090", "adsbfi", "opensky", "adsbexchange", "fr24")
+_POSITION_SOURCE_VALID = frozenset(_POSITION_SOURCE_DEFAULT_ORDER)
+
+
+def _parse_position_source_order(raw) -> tuple:
+    """Same parsing rules as config._parse_position_source_order — duplicated
+    here (no import of config from secrets_store, to avoid an import cycle
+    since config imports secrets_store during bootstrap). Mirrors the
+    ROUTE_SOURCE_ORDER convention used just above (see
+    config._parse_route_source_order / route_source_order_setting)."""
+    raw = "" if raw is None else str(raw)
+    if not raw.strip():
+        return _POSITION_SOURCE_DEFAULT_ORDER
+    seen = []
+    for name in raw.split(","):
+        name = name.strip().lower()
+        if name and name in _POSITION_SOURCE_VALID and name not in seen:
+            seen.append(name)
+    return tuple(seen) if seen else _POSITION_SOURCE_DEFAULT_ORDER
+
+
+def position_source_order_settings() -> tuple:
+    """Current live-position fallback order for the extended tracking map
+    (Radar > Track > swipe to live map).
+
+    Unlike route_source_order_setting() above, this is re-read fresh from
+    secrets.json on *every* call rather than just exposed for the portal —
+    intentional, because live-position lookups happen once per display
+    refresh cycle (much higher frequency than route enrichment, which
+    happens once per newly-tracked flight), so the display process needs
+    to see portal changes without a restart. Same reasoning as
+    dump1090_settings() above.
+    """
+    bootstrap_secrets()
+    file_vals = load_secrets_json()
+    if "POSITION_SOURCE_ORDER" in file_vals:
+        raw = file_vals.get("POSITION_SOURCE_ORDER")
+    else:
+        raw = os.environ.get("POSITION_SOURCE_ORDER", "")
+    return _parse_position_source_order(raw)
+
+
+def apply_position_source_order_to_runtime(order) -> None:
+    """Update process env + config module so the next overhead cycle picks
+    this up in the *same* process (Flask). The display process still reads
+    fresh via position_source_order_settings() every cycle regardless."""
+    order = tuple(order) if order else _POSITION_SOURCE_DEFAULT_ORDER
+    os.environ["POSITION_SOURCE_ORDER"] = ",".join(order)
+    try:
+        import config as cfg
+
+        cfg.POSITION_SOURCE_ORDER = order
     except Exception:
         pass
 
@@ -329,6 +389,7 @@ def secrets_status() -> dict:
     status["secrets_json_path"] = SECRETS_JSON_PATH
     status["dump1090"] = dump1090_settings()
     status["route_source_order"] = route_source_order_setting()
+    status["position_source_order"] = list(position_source_order_settings())
     try:
         from utilities.flightaware_client import usage_status
 
@@ -373,6 +434,7 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         "flightaware_api_key": "FLIGHTAWARE_API_KEY",
         "opensky_api_client_id": "OPENSKY_API_CLIENT_ID",
         "opensky_api_client_secret": "OPENSKY_API_CLIENT_SECRET",
+        "adsbexchange_api_key": "ADSBEXCHANGE_API_KEY",
         "firms_map_key": "FIRMS_MAP_KEY",
     }
     for form_key, env_key in field_map.items():
@@ -393,6 +455,7 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         "use_aisstream_api": "USE_AISSTREAM_API",
         "use_flightaware_api": "USE_FLIGHTAWARE_API",
         "use_opensky_api": "USE_OPENSKY_API",
+        "use_adsbexchange_api": "USE_ADSBEXCHANGE_API",
     }
     for form_key, key in toggle_map.items():
         if form_key in payload:
@@ -413,17 +476,21 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         updated["DUMP1090_ENABLED"] = "True" if enabled else "False"
         updated["DUMP1090_URL"] = url
         apply_dump1090_to_runtime(enabled, url)
-
     if "route_source_order" in payload:
         raw = str(payload.get("route_source_order") or "").strip()
+
         if raw:
             updated["ROUTE_SOURCE_ORDER"] = raw
         else:
-            # Clearing to default: remove the key entirely rather than
-            # writing "" — keeps secrets.json free of no-op entries and
-            # matches how an unset .env var behaves.
             updated.pop("ROUTE_SOURCE_ORDER", None)
-        apply_route_source_order_to_runtime(raw)
+
+    if "position_source_order" in payload:
+        raw = payload.get("position_source_order")
+        if isinstance(raw, (list, tuple)):
+            raw = ",".join(str(x) for x in raw)
+        order = _parse_position_source_order(raw)
+        updated["POSITION_SOURCE_ORDER"] = ",".join(order)
+        apply_position_source_order_to_runtime(order)
 
     os.makedirs(DATA_DIR, exist_ok=True)
     tmp = SECRETS_JSON_PATH + ".tmp"

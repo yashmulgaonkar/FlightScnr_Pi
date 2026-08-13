@@ -65,6 +65,8 @@ from display.round_touch.screens import (
     tracked,
     wifi_setup as wifi_setup_screen,
 )
+from display.round_touch import live_map
+from utilities import position_source
 from utilities import wifi_setup as wifi_setup_util
 
 logger = logging.getLogger("flightscnr.display")
@@ -193,6 +195,14 @@ class RoundTouchDisplay:
         self._route_enrichment: dict[str, dict] = {}
         self._route_enrich_inflight: set[str] = set()
         self._route_enrich_redraw = False
+        # Extended tracking: 0 = existing route/overview page, 1 = live
+        # centered map (second left-swipe within SCREEN_TRACKED, per the
+        # "erweiterte Tracking" feature — does not affect any other screen).
+        self._tracked_page = 0
+        self._live_map_last_fetch = 0.0
+        self._live_map_last_result: dict | None = None
+        self._live_map_last_radius_km = 8.0
+        self._live_map_last_source: str | None = None
         self._aircraft_photos: dict[str, dict] = {}
         self._aircraft_photo_inflight: set[str] = set()
         self._aircraft_photo_miss: set[str] = set()
@@ -906,11 +916,15 @@ class RoundTouchDisplay:
             if display_data:
                 display_data = self._merge_tracked_aircraft_photo(display_data)
                 self._maybe_fetch_tracked_aircraft_photo(display_data)
-            self._scroll.max_offset = tracked.draw_tracked(
-                self.surface,
-                display_data,
-                scroll_offset=self._scroll.offset,
-            )
+            if self._tracked_page == 1 and display_data:
+                self._draw_tracked_live_map(display_data)
+                self._scroll.max_offset = 0
+            else:
+                self._scroll.max_offset = tracked.draw_tracked(
+                    self.surface,
+                    display_data,
+                    scroll_offset=self._scroll.offset,
+                )
         self._scroll.clamp()
         remaining = self._timeout_remaining_fraction()
         if remaining is not None:
@@ -933,6 +947,140 @@ class RoundTouchDisplay:
         self._present()
         if FRAME_DEBUG:
             self._stage("4_present", time.perf_counter() - _t)
+    def _draw_tracked_live_map(self, display_data: dict) -> None:
+        """Second page of SCREEN_TRACKED (reached by swiping left again from
+        the existing overview) — full-screen map centered on the tracked
+        aircraft's current position. Position lookups go through
+        utilities.position_source's fallback chain (dump1090 -> adsb.fi ->
+        OpenSky -> ADS-B Exchange -> FR24), throttled to roughly once per
+        second so we don't hammer metered sources every frame."""
+        now = time.time()
+        callsign = (display_data.get("callsign") or "").strip()
+        icao24 = (display_data.get("icao_hex") or "").strip()
+ 
+        if now - self._live_map_last_fetch >= 1.0 and (callsign or icao24):
+            last_lat = display_data.get("plane_latitude")
+            last_lon = display_data.get("plane_longitude")
+            last_speed = display_data.get("ground_speed")
+            if last_lat is not None and last_lon is not None:
+                try:
+                    entry, source, radius_km = position_source.fetch_live_position(
+                        callsign=callsign,
+                        icao24=icao24,
+                        last_known_lat=float(last_lat),
+                        last_known_lon=float(last_lon),
+                        last_known_speed_kt=last_speed,
+                    )
+                except Exception:
+                    logger.exception("[live_map] fetch_live_position failed")
+                    entry, source, radius_km = None, None, self._live_map_last_radius_km
+                self._live_map_last_fetch = now
+                self._live_map_last_radius_km = radius_km
+                self._live_map_last_source = source
+                if entry:
+                    self._live_map_last_result = entry
+ 
+        result = self._live_map_last_result or display_data
+        lat = result.get("plane_latitude")
+        lon = result.get("plane_longitude")
+        heading = result.get("heading", 0) or 0
+        radius_km = self._live_map_last_radius_km
+ 
+        draw.fill_background(self.surface)
+        if lat is None or lon is None:
+            # Nothing to center on yet (e.g. very first frame after opening
+            # this page) — fall back to a plain background rather than a
+            # crash; next throttled fetch will likely fill this in.
+            nav.draw_breadcrumb(self.surface, ["Radar", "Track", "Live"])
+            return
+ 
+        if settings.live_map_heading_up():
+            # live_map.render_live_tracking_map() is intentionally north-up
+            # only (see its docstring) — heading-up rotation is deferred to
+            # the caller ("the screen module"), which is this method.
+            side = theme.VISIBLE_RADIUS * 2
+            map_surf = live_map.render_live_tracking_map(
+                lat=float(lat), lon=float(lon), heading=float(heading),
+                radius_km=float(radius_km), width=side, height=side, flight=result,
+            )
+            if map_surf is not None:
+                # Rotate the whole composed surface by -heading so the
+                # aircraft (drawn at `heading` inside render_live_tracking_map)
+                # ends up pointing straight up, with everything else rotating
+                # around it — same convention as heading-up radar modes.
+                rotated = pygame.transform.rotate(map_surf, -float(heading))
+                crop_rect = rotated.get_rect(center=(rotated.get_width() // 2, rotated.get_height() // 2))
+                crop = pygame.Surface((side, side))
+                crop.blit(rotated, (0, 0), area=pygame.Rect(
+                    crop_rect.centerx - side // 2, crop_rect.centery - side // 2, side, side,
+                ))
+                mask = pygame.Surface((side, side), pygame.SRCALPHA)
+                pygame.draw.circle(mask, (255, 255, 255, 255), (side // 2, side // 2), side // 2)
+                clipped = crop.copy()
+                clipped.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+                rect = clipped.get_rect(center=(theme.CENTER_X, theme.CENTER_Y))
+                self.surface.blit(clipped, rect)
+        else:
+            live_map.blit_live_tracking_map(
+                self.surface,
+                lat=float(lat),
+                lon=float(lon),
+                heading=float(heading),
+                radius_km=float(radius_km),
+                flight=result,
+            )
+        nav.draw_breadcrumb(self.surface, ["Radar", "Track", "Live"])
+ 
+    def _timeout_duration_s(self) -> float | None:
+        """Active secondary-screen timeout in seconds, or None if no countdown."""
+        if time.time() < self._boot_until:
+            return None
+        if self.screen in (SCREEN_WIFI_SETUP, SCREEN_DISCLAIMER):
+            return None
+        if self.screen in (SCREEN_RADAR, SCREEN_CLOCK, SCREEN_CLOCK_SETTINGS, SCREEN_FORECAST):
+            return None
+        if self.screen == SCREEN_TRACKED and tracked.is_pinned():
+            return None
+        if self.screen == SCREEN_FLIGHT:
+            return float(settings.flight_detail_timeout_s())
+        if self.screen == SCREEN_FIRE:
+            return float(settings.flight_detail_timeout_s())
+        return float(SECONDARY_TIMEOUT_S)
+ 
+    def _timeout_remaining_fraction(self) -> float | None:
+        """Fraction of secondary-screen timeout remaining, or None if not applicable."""
+        timeout_s = self._timeout_duration_s()
+        if timeout_s is None:
+            return None
+        if timeout_s <= 0:
+            return None
+        elapsed = time.time() - self._secondary_activity
+        return max(0.0, (timeout_s - elapsed) / timeout_s)
+ 
+    def _stage(self, name: str, seconds: float) -> None:
+        frame_debug.stage(name, seconds)
+ 
+    def _note_frame_time(self, draw_s: float) -> None:
+        """Log draw cost and achieved interval every 2s (FLIGHTSCNR_FRAME_DEBUG=1)."""
+        now = time.perf_counter()
+        gap = (now - self._frame_prev_at) if self._frame_prev_at else 0.0
+        if self._frame_prev_at and gap >= _HITCH_GAP_S:
+            try:
+                with open(_HITCH_LOG, "a", encoding="utf-8") as fh:
+                    fh.write(
+                        f"{time.time():.3f}\tgap_ms={gap * 1000:.0f}\t"
+                        f"draw_ms={draw_s * 1000:.0f}\t"
+                        f"proc={int(bool(self.overhead.processing))}\t"
+                        f"grab={self.overhead.grab_seq}\n"
+                    )
+            except Exception:
+                pass
+        if self._frame_prev_at and FRAME_DEBUG:
+            self._frame_gaps.append(gap)
+        self._frame_prev_at = now
+        if FRAME_DEBUG:
+            self._frame_draws.append(draw_s)
+
 
     def _draw_reboot_progress_overlay(self) -> None:
         from utilities import system_control
@@ -1304,6 +1452,13 @@ class RoundTouchDisplay:
             self._scroll.reset()
             self._settings_drag_y = None
             self._settings_drag_scrolled = False
+        if screen == SCREEN_TRACKED and previous != SCREEN_TRACKED:
+            # Fresh entry into tracking always starts on the existing
+            # overview page — the live map is reached by swiping left
+            # again from there, never entered directly.
+            self._tracked_page = 0
+            self._live_map_last_fetch = 0.0
+            self._live_map_last_result = None
         if screen == SCREEN_RADAR:
             self._radar_visible_since = time.time()
             self._auto_idle_clock = False
@@ -3060,8 +3215,16 @@ class RoundTouchDisplay:
                 if opened:
                     self._safe_draw()
         elif swipe == input_handler.SWIPE_LEFT and self.screen == SCREEN_TRACKED:
-            self._return_to_radar()
-            self._safe_draw()
+            if self._tracked_page == 0:
+                # First left-swipe within Tracked goes to the live map
+                # (extended tracking) instead of leaving the screen.
+                self._tracked_page = 1
+                self._live_map_last_fetch = 0.0  # force an immediate fetch
+                self._note_activity()
+                self._safe_draw()
+       	    else:
+                self._return_to_radar()
+                self._safe_draw()
         elif swipe == input_handler.SWIPE_DOWN and self.screen == SCREEN_RADAR:
             self._open_screen(SCREEN_CLOCK)
             self._auto_idle_clock = False
