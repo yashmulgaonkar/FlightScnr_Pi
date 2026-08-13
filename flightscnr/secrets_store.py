@@ -57,6 +57,7 @@ CONFIG_H_SETTINGS = MANAGED_KEYS + (
     "DUMP1090_ENABLED",
     "DUMP1090_URL",
     "POSITION_SOURCE_ORDER",
+    "ROUTE_SOURCE_ORDER",
 )
 
 TOGGLE_KEYS = (
@@ -244,6 +245,30 @@ def dump1090_settings() -> dict:
     return {
         "DUMP1090_ENABLED": enabled,
         "DUMP1090_URL": url or "http://127.0.0.1:8080/data/aircraft.json",
+    }
+
+
+def route_source_order_setting() -> dict:
+    """Current route-source-order portal/settings value.
+
+    Prefer secrets.json over process env — same reasoning as
+    dump1090_settings(): the display process reads this on every
+    enrichment cycle (not just once at import time), so a portal save
+    must be visible immediately without a service restart.
+    """
+    bootstrap_secrets()
+    file_vals = load_secrets_json()
+    if "ROUTE_SOURCE_ORDER" in file_vals and str(file_vals.get("ROUTE_SOURCE_ORDER") or "").strip():
+        raw = str(file_vals.get("ROUTE_SOURCE_ORDER")).strip()
+    else:
+        raw = os.environ.get("ROUTE_SOURCE_ORDER", "").strip()
+
+    from config import _parse_route_source_order
+
+    effective = _parse_route_source_order(raw)
+    return {
+        "ROUTE_SOURCE_ORDER": raw,
+        "ROUTE_SOURCE_ORDER_EFFECTIVE": ",".join(effective),
     }
 
 
@@ -491,6 +516,21 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         order = _parse_position_source_order(raw)
         updated["POSITION_SOURCE_ORDER"] = ",".join(order)
         apply_position_source_order_to_runtime(order)
+
+    if "route_source_order" in payload:
+        raw = str(payload.get("route_source_order") or "").strip()
+        if raw:
+            updated["ROUTE_SOURCE_ORDER"] = raw
+            os.environ["ROUTE_SOURCE_ORDER"] = raw
+        else:
+            # Clearing to default: remove the key entirely rather than
+            # writing "" — keeps secrets.json free of no-op entries and
+            # matches how an unset .env var behaves.
+            # Also drop process env: bootstrap_secrets() may have stamped a
+            # previous portal value into os.environ, and route_source_order_setting()
+            # falls back to env when the file key is gone.
+            updated.pop("ROUTE_SOURCE_ORDER", None)
+            os.environ.pop("ROUTE_SOURCE_ORDER", None)
 
     os.makedirs(DATA_DIR, exist_ok=True)
     tmp = SECRETS_JSON_PATH + ".tmp"

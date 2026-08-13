@@ -1373,8 +1373,9 @@ async function saveRouteSourceOrder() {
                 route_source_order: raw,
             }),
         });
-	//Show the *effective (parse(filtered) order, not just what was typed
-	//unknown or misspelled entries are silently dropped, so this is the only way to notice a typo actually did something
+	// Show the *effective* (parsed/filtered) order, not just what was typed.
+        // Unknown or misspelled entries are silently dropped, so this is the
+        // only way to notice a typo actually did something.
         const effective =
             (resp.keys && resp.keys.route_source_order &&
                 resp.keys.route_source_order.ROUTE_SOURCE_ORDER_EFFECTIVE) ||

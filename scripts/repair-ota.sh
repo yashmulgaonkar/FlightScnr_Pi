@@ -7,6 +7,11 @@
 # the device stays on the old VERSION (e.g. 2026.8.5.5) even though the portal
 # may look like the update "finished".
 #
+# It also reattaches detached HEAD (checkout of a tag/commit such as
+# 2026.8.10.2 / 7381c3f). `git pull` has no branch in that state; this script
+# fetches origin and runs `checkout -f -B main origin/main` so HEAD is on main
+# before install-pi.sh update runs — even an old on-disk installer can proceed.
+#
 # It also repairs a corrupted git object database — the classic Pi power-loss
 # signatures: "error: object file .git/objects/... is empty" followed by
 # "fatal: unpack-objects failed", or "fatal: bad object refs/tags/..." +
@@ -20,8 +25,9 @@
 #   curl -fsSL https://raw.githubusercontent.com/yashmulgaonkar/FlightScnr_Pi/main/scripts/repair-ota.sh | bash
 #
 # Options:
-#   --hard   git fetch + reset --hard origin/main (discards ALL local repo edits),
-#            then install --skip-apt. Use if restore alone is not enough.
+#   --hard   git fetch + checkout -f -B main origin/main (discards ALL local
+#            repo edits), then install --skip-apt. Same git sync as the
+#            default path; kept so older instructions still work.
 #   --repo DIR   FlightScnr_Pi checkout path (default: auto-detect)
 #
 set -euo pipefail
@@ -43,7 +49,7 @@ while [ $# -gt 0 ]; do
             fi
             ;;
         -h|--help)
-            sed -n '2,26p' "$0"
+            sed -n '2,31p' "$0"
             exit 0
             ;;
         *)
@@ -252,35 +258,18 @@ fi
 echo "Before: $(run_git status -sb | tr '\n' ' ')"
 echo "VERSION=$(tr -d '[:space:]' <VERSION 2>/dev/null || echo '?')"
 
-if [ "$HARD" -eq 1 ]; then
-    echo "Hard reset to origin/main (discards local checkout changes)…"
-    run_git fetch origin || repair_object_db
-    # Prefer main; fall back to whatever upstream is.
-    if run_git show-ref --verify --quiet refs/remotes/origin/main; then
-        run_git reset --hard origin/main
-    else
-        run_git pull --ff-only || run_git reset --hard '@{u}'
-    fi
-else
-    # Same blocker list as install-pi.sh prepare_repo_for_pull, minus this
-    # script itself: rewriting the running file mid-execution is unsafe when
-    # invoked from disk, and install-pi.sh clears it before pulling anyway.
-    for rel in scripts/release.sh scripts/release.cmd scripts/dev-release.sh; do
-        if run_git status --porcelain -- "$rel" 2>/dev/null | grep -q .; then
-            echo "Clearing local changes: $rel"
-            run_git restore --source=HEAD --staged --worktree -- "$rel" 2>/dev/null \
-                || run_git checkout HEAD -- "$rel"
-        fi
-    done
-    # If anything else still blocks ff-only, say so clearly.
-    if ! run_git diff --quiet || ! run_git diff --cached --quiet; then
-        echo "Warning: other local changes still present:" >&2
-        run_git status --short >&2
-        echo "If pull fails, re-run with --hard" >&2
-    fi
+# Same sync as install-pi.sh update: fetch + checkout -B leaves HEAD on main.
+# reset --hard while detached would move the commit and stay detached, so the
+# following `git pull` still fails. -f discards local checkout edits (kiosk).
+echo "Syncing to origin/main…"
+run_git fetch --tags origin || repair_object_db
+if ! run_git show-ref --verify --quiet refs/remotes/origin/main; then
+    echo "origin/main not found after fetch" >&2
+    exit 1
 fi
+run_git checkout -f -B main origin/main
 
-echo "After clean: $(run_git status -sb | tr '\n' ' ')"
+echo "After sync: $(run_git status -sb | tr '\n' ' ')"
 
 echo "Running install-pi.sh update…"
 if [ "$(id -u)" -eq 0 ]; then

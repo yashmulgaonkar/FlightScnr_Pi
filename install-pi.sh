@@ -11,7 +11,7 @@
 #   cd ~/FlightScnr_Pi
 #   sudo bash install-pi.sh
 #
-# Update (git pull + re-sync, skips apt for speed):
+# Update (sync origin/main + re-sync, skips apt for speed):
 #   bash ~/FlightScnr_Pi/install-pi.sh update
 #
 # After an OTA from builds that still ran install in-process (pre-re-exec),
@@ -114,6 +114,19 @@ log_step() { echo ""; echo "==> $*"; }
 log_ok()   { echo "    ✓ $*"; }
 log_warn() { echo "    ⚠ $*"; }
 
+# Bound a command so a hung child cannot wedge portal OTA. If GNU timeout is
+# missing, run unwrapped — skipping the work (fetch/pip) would strand devices.
+run_with_timeout() {
+    local kill_after="$1"
+    local wait_s="$2"
+    shift 2
+    if command -v timeout >/dev/null 2>&1; then
+        timeout -k "$kill_after" "$wait_s" "$@"
+    else
+        "$@"
+    fi
+}
+
 install_apt_packages() {
     log_step "Installing system packages"
 
@@ -193,8 +206,8 @@ ensure_bluetooth_ready() {
     fi
 
     if command -v bluetoothctl >/dev/null 2>&1; then
-        bluetoothctl power on >/dev/null 2>&1 || true
-        bluetoothctl pairable on >/dev/null 2>&1 || true
+        run_with_timeout 5 15 bluetoothctl power on >/dev/null 2>&1 || true
+        run_with_timeout 5 15 bluetoothctl pairable on >/dev/null 2>&1 || true
     fi
 }
 
@@ -283,7 +296,8 @@ EOF
     if [ -n "${DISPLAY:-}" ] || [ -S /tmp/.X11-unix/X0 ]; then
         for out in DSI-1 DSI-2; do
             DISPLAY="${DISPLAY:-:0}" XAUTHORITY="${XAUTHORITY:-${REPO_OWNER_HOME}/.Xauthority}" \
-                xrandr --output "$out" --mode "$mode" --primary >/dev/null 2>&1 || true
+                run_with_timeout 5 10 xrandr --output "$out" --mode "$mode" --primary \
+                >/dev/null 2>&1 || true
         done
     fi
 
@@ -336,6 +350,10 @@ install_boot_splash() {
     local wall_dir="/usr/share/rpd-wallpaper"
     local wall_splash="$wall_dir/flightscnr.png"
     local tmp_splash=""
+    local splash_hash=""
+    local splash_stamp="${DATA_DIR}/plymouth-initramfs.sha256"
+    local plymouth_theme=""
+    local need_initramfs=0
 
     log_step "Boot splash & wallpaper (FlightScnr)"
 
@@ -372,11 +390,34 @@ PYROT
         log_ok "Installed Plymouth splash from assets/boot/splash.png (rotated 90° CW for panel)"
 
         if command -v plymouth-set-default-theme >/dev/null 2>&1; then
+            plymouth_theme="$(plymouth-set-default-theme 2>/dev/null || true)"
             plymouth-set-default-theme pix >/dev/null 2>&1 || true
-            if command -v update-initramfs >/dev/null 2>&1; then
-                update-initramfs -u >/dev/null 2>&1 || log_warn "update-initramfs failed (splash may need a reboot once)"
+            if command -v sha256sum >/dev/null 2>&1; then
+                splash_hash="$(sha256sum "$pix_splash" | awk '{print $1}')"
             fi
-            log_ok "Plymouth theme set to pix"
+            # Skip initramfs unless the splash bytes changed or the theme was
+            # not pix. Stamp only on success so a failed rebuild still retries
+            # next OTA (do not skip forever after one full-/boot failure).
+            if [ -z "$splash_hash" ] \
+                || [ "$plymouth_theme" != "pix" ] \
+                || [ "$(cat "$splash_stamp" 2>/dev/null || true)" != "$splash_hash" ]
+            then
+                need_initramfs=1
+            fi
+            if command -v update-initramfs >/dev/null 2>&1 && [ "$need_initramfs" -eq 1 ]; then
+                if run_with_timeout 30 600 update-initramfs -u >/dev/null 2>&1; then
+                    if [ -n "$splash_hash" ]; then
+                        mkdir -p "$DATA_DIR"
+                        printf '%s\n' "$splash_hash" >"$splash_stamp" || true
+                        chmod 644 "$splash_stamp" 2>/dev/null || true
+                    fi
+                    log_ok "Plymouth theme set to pix (initramfs updated)"
+                else
+                    log_warn "update-initramfs failed or timed out (splash may need a reboot once)"
+                fi
+            else
+                log_ok "Plymouth theme set to pix (initramfs unchanged)"
+            fi
         fi
     else
         log_warn "Plymouth pix theme not found — skipped boot splash install"
@@ -414,11 +455,11 @@ PYROT
             desk_uid="$(id -u "$desk_user")"
             sudo -u "$desk_user" env DISPLAY="${DISPLAY:-:0}" \
                 XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$desk_uid}" \
-                pcmanfm --set-wallpaper="$wall_splash" --wallpaper-mode=crop \
+                timeout -k 5 10 pcmanfm --set-wallpaper="$wall_splash" --wallpaper-mode=crop \
                 >/dev/null 2>&1 || true
             sudo -u "$desk_user" env DISPLAY="${DISPLAY:-:0}" \
                 XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$desk_uid}" \
-                pcmanfm --reconfigure >/dev/null 2>&1 || true
+                timeout -k 5 10 pcmanfm --reconfigure >/dev/null 2>&1 || true
         }
 
         local profile
@@ -447,11 +488,11 @@ PYROT
         if [ "$(id -u)" -eq 0 ]; then
             env DISPLAY="${DISPLAY:-:0}" \
                 XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/0}" \
-                pcmanfm --set-wallpaper="$wall_splash" --wallpaper-mode=crop \
+                timeout -k 5 10 pcmanfm --set-wallpaper="$wall_splash" --wallpaper-mode=crop \
                 >/dev/null 2>&1 || true
             env DISPLAY="${DISPLAY:-:0}" \
                 XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/0}" \
-                pcmanfm --reconfigure >/dev/null 2>&1 || true
+                timeout -k 5 10 pcmanfm --reconfigure >/dev/null 2>&1 || true
         fi
 
         unset -f _set_pcmanfm_wallpaper_conf _refresh_pcmanfm_wallpaper
@@ -462,27 +503,45 @@ PYROT
 
     rm -f "$tmp_splash"
 
-    if [ -n "$BOOT_CONFIG" ]; then
-        if grep -qE '^\s*disable_splash=' "$BOOT_CONFIG"; then
-            sed -i 's/^\s*disable_splash=.*/disable_splash=1/' "$BOOT_CONFIG"
-        else
-            printf '\n# FlightScnr Pi — hide firmware rainbow splash\ndisable_splash=1\n' >> "$BOOT_CONFIG"
-        fi
-        log_ok "Firmware splash disabled ($BOOT_CONFIG)"
-    else
+    # Same vfat remount-ro / full-partition guard as install_gpio_fan — these
+    # writes must not abort portal OTA under set -e.
+    if [ -z "$BOOT_CONFIG" ]; then
         log_warn "Could not find config.txt — firmware splash unchanged"
+    elif [ ! -w "$BOOT_CONFIG" ]; then
+        log_warn "config.txt not writable ($BOOT_CONFIG) — firmware splash unchanged"
+    elif grep -qE '^\s*disable_splash=' "$BOOT_CONFIG"; then
+        if sed -i 's/^\s*disable_splash=.*/disable_splash=1/' "$BOOT_CONFIG"; then
+            log_ok "Firmware splash disabled ($BOOT_CONFIG)"
+        else
+            log_warn "Could not update disable_splash in $BOOT_CONFIG (continuing)"
+        fi
+    else
+        if printf '\n# FlightScnr Pi — hide firmware rainbow splash\ndisable_splash=1\n' >> "$BOOT_CONFIG"; then
+            log_ok "Firmware splash disabled ($BOOT_CONFIG)"
+        else
+            log_warn "Could not write disable_splash to $BOOT_CONFIG (continuing)"
+        fi
     fi
 
     if [ -n "$BOOT_CMDLINE" ] && [ -f "$BOOT_CMDLINE" ]; then
-        # Keep quiet splash for Plymouth; add if missing.
-        if ! grep -qw splash "$BOOT_CMDLINE"; then
-            # cmdline is a single line
-            sed -i 's/$/ splash/' "$BOOT_CMDLINE"
+        if [ ! -w "$BOOT_CMDLINE" ]; then
+            log_warn "cmdline.txt not writable ($BOOT_CMDLINE) — splash/quiet unchanged"
+        else
+            # Keep quiet splash for Plymouth; add if missing. cmdline is one line.
+            if ! grep -qw splash "$BOOT_CMDLINE"; then
+                if ! sed -i 's/$/ splash/' "$BOOT_CMDLINE"; then
+                    log_warn "Could not add splash to $BOOT_CMDLINE (continuing)"
+                fi
+            fi
+            if ! grep -qw quiet "$BOOT_CMDLINE"; then
+                if ! sed -i 's/$/ quiet/' "$BOOT_CMDLINE"; then
+                    log_warn "Could not add quiet to $BOOT_CMDLINE (continuing)"
+                fi
+            fi
+            if grep -qw splash "$BOOT_CMDLINE" && grep -qw quiet "$BOOT_CMDLINE"; then
+                log_ok "Kernel cmdline keeps quiet splash"
+            fi
         fi
-        if ! grep -qw quiet "$BOOT_CMDLINE"; then
-            sed -i 's/$/ quiet/' "$BOOT_CMDLINE"
-        fi
-        log_ok "Kernel cmdline keeps quiet splash"
     fi
 }
 
@@ -611,10 +670,16 @@ setup_venv() {
     fi
 
     # pip uses exit 2 for UNKNOWN_ERROR — do not let a self-upgrade flake abort OTA.
-    if ! "$VENV_DIR/bin/python" -m pip install --upgrade pip setuptools wheel >/dev/null; then
+    if ! run_with_timeout 15 180 "$VENV_DIR/bin/python" -m pip install --upgrade pip setuptools wheel >/dev/null; then
         log_warn "pip self-upgrade failed (continuing with existing pip)"
     fi
-    "$VENV_DIR/bin/python" -m pip install -r "$REPO_ROOT/requirements.txt"
+    # Bound a hung index/wheel fetch. 20 minutes is enough for a Pi native
+    # wheel; still fail-closed so a broken venv does not write the install
+    # stamp (auto-resync can retry). Do not || true — that would skip retry.
+    if ! run_with_timeout 30 1200 "$VENV_DIR/bin/python" -m pip install -r "$REPO_ROOT/requirements.txt"; then
+        echo "pip install -r requirements.txt failed or timed out" >&2
+        return 1
+    fi
     log_ok "Python dependencies installed"
 }
 
@@ -1169,7 +1234,7 @@ PY
     chown -R "$REPO_OWNER:" "$dest_dir" 2>/dev/null || true
 
     if command -v openbox >/dev/null 2>&1 && id -u "$REPO_OWNER" >/dev/null 2>&1; then
-        sudo -u "$REPO_OWNER" env \
+        run_with_timeout 5 10 sudo -u "$REPO_OWNER" env \
             DISPLAY="${DISPLAY:-:0}" \
             XAUTHORITY="${REPO_OWNER_HOME}/.Xauthority" \
             openbox --reconfigure >/dev/null 2>&1 || true
@@ -1283,19 +1348,68 @@ fix_repo_permissions() {
     log_ok "Repo owned by $REPO_OWNER"
 }
 
-# Drop install-induced dirt that would abort `git pull --ff-only` (notably
+# Run git as the checkout owner so root-run portal updates do not leave
+# root-owned index/refs. setup_paths must have set REPO_ROOT / REPO_OWNER.
+# Optional: run_repo_git --timeout KILL WAIT git-args...
+# Timeout wraps the git binary inside sudo -u so SIGKILL reaches fetch.
+run_repo_git() {
+    local timed=()
+    if [ "${1:-}" = "--timeout" ]; then
+        shift
+        local kill_after="$1"
+        local wait_s="$2"
+        shift 2
+        if command -v timeout >/dev/null 2>&1; then
+            timed=(timeout -k "$kill_after" "$wait_s")
+        fi
+    fi
+    local git_safe=(git -c "safe.directory=${REPO_ROOT}" -C "$REPO_ROOT")
+    if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+        sudo -u "$SUDO_USER" "${timed[@]}" "${git_safe[@]}" "$@"
+    elif [ "$(id -u)" -eq 0 ] && [ -n "${REPO_OWNER:-}" ] && [ "$REPO_OWNER" != "root" ]; then
+        sudo -u "$REPO_OWNER" "${timed[@]}" "${git_safe[@]}" "$@"
+    else
+        "${timed[@]}" "${git_safe[@]}" "$@"
+    fi
+}
+
+# Drop install-induced dirt that would abort a checkout (notably
 # scripts/release.sh executable-bit flips from older fix_repo_permissions).
+# Always git as REPO_OWNER (not root) so restore cannot leave root-owned
+# files that checkout -f as the owner then cannot overwrite.
 prepare_repo_for_pull() {
-    local git_safe=("$@")
     local rel
     for rel in scripts/release.sh scripts/release.cmd scripts/dev-release.sh scripts/repair-ota.sh; do
-        if "${git_safe[@]}" status --porcelain -- "$rel" 2>/dev/null | grep -q .; then
+        if [ "$(id -u)" -eq 0 ] && [ -n "${REPO_OWNER:-}" ] && [ "$REPO_OWNER" != "root" ] \
+            && [ -e "$REPO_ROOT/$rel" ]
+        then
+            chown "$REPO_OWNER:" "$REPO_ROOT/$rel" 2>/dev/null || true
+        fi
+        if run_repo_git status --porcelain -- "$rel" 2>/dev/null | grep -q .; then
             log_step "Clearing local changes that block pull ($rel)"
-            "${git_safe[@]}" restore --source=HEAD --staged --worktree -- "$rel" 2>/dev/null \
-                || "${git_safe[@]}" checkout HEAD -- "$rel" 2>/dev/null \
+            run_repo_git restore --source=HEAD --staged --worktree -- "$rel" 2>/dev/null \
+                || run_repo_git checkout HEAD -- "$rel" 2>/dev/null \
                 || true
         fi
     done
+}
+
+# Fleet OTA: fetch GitHub main and check it out. Works from a branch, a missing
+# upstream, or detached HEAD (tag/commit checkout, e.g. 2026.8.10.2 / 7381c3f).
+# `git pull --ff-only` cannot do this — with no branch it errors, and
+# `reset --hard origin/main` while detached stays detached.
+# -B recreates local main at origin/main and leaves HEAD on the branch.
+# -f overwrites the worktree so leftover mode dirt cannot block the switch.
+sync_to_origin_main() {
+    log_step "Syncing to origin/main"
+    # 10 minutes is enough for --tags on slow Wi-Fi; a hang is worse than retry.
+    run_repo_git --timeout 30 600 fetch --tags origin
+    if ! run_repo_git show-ref --verify --quiet refs/remotes/origin/main; then
+        echo "origin/main not found after fetch" >&2
+        return 1
+    fi
+    run_repo_git checkout -f -B main origin/main
+    log_ok "Synced to origin/main ($(run_repo_git log --oneline -1 2>/dev/null || true))"
 }
 
 start_service() {
@@ -1476,19 +1590,8 @@ cmd_update() {
         exit 1
     fi
 
-    log_step "Pulling latest changes"
-    # Match utilities/updater.py: always pass safe.directory so root-run portal
-    # updates can read a pi-owned checkout (Git 2.35+ dubious-ownership checks).
-    local git_safe=(git -c "safe.directory=${REPO_ROOT}" -C "$REPO_ROOT")
-    prepare_repo_for_pull "${git_safe[@]}"
-    if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
-        sudo -u "$SUDO_USER" "${git_safe[@]}" pull --ff-only
-    elif [ "$(id -u)" -eq 0 ]; then
-        sudo -u "$REPO_OWNER" "${git_safe[@]}" pull --ff-only
-    else
-        "${git_safe[@]}" pull --ff-only
-    fi
-    log_ok "Git pull complete ($("${git_safe[@]}" log --oneline -1 2>/dev/null || true))"
+    prepare_repo_for_pull
+    sync_to_origin_main
 
     local install_args=(--skip-apt)
     if [ "$no_start" -eq 1 ]; then
@@ -1515,7 +1618,7 @@ Usage:
   sudo bash install-pi.sh [install] [--no-start] [--skip-apt]
       First install or full re-sync (includes apt packages)
   bash install-pi.sh update [--no-start]
-      git pull + re-sync + restart (skips apt for speed)
+      fetch origin/main, check it out (reattaches detached HEAD), re-sync, restart
       --no-start  skip service restart (portal update schedules it after status write)
 
 If apt fails with MergeList / "no Package: header" (corrupt index cache):

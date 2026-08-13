@@ -975,8 +975,10 @@ def lat_lon_to_basemap_screen(
     vx = (mx - home_px) * render_scale
     vy = (my - home_py) * render_scale
     if abs(facing) >= 0.05:
-        # Same CCW rotation pygame applies to the basemap surface.
-        vx, vy = vx * cos_a - vy * sin_a, vx * sin_a + vy * cos_a
+        # pygame.transform.rotate(surf, facing) is visual CCW in y-down
+        # pixel space: east (+x) goes to screen-up (−y). Math CCW would send
+        # east down and leave icons 180° off the map (issue #92).
+        vx, vy = vx * cos_a + vy * sin_a, -vx * sin_a + vy * cos_a
     return (
         theme.CENTER_X + int(round(vx)),
         theme.CENTER_Y + int(round(vy)),
@@ -1017,8 +1019,8 @@ def basemap_screen_to_lat_lon(
         rad = math.radians(facing)
         cos_a = math.cos(rad)
         sin_a = math.sin(rad)
-        # Inverse of the CCW facing rotation applied in lat_lon_to_basemap_screen.
-        vx, vy = vx * cos_a + vy * sin_a, -vx * sin_a + vy * cos_a
+        # Inverse of the pygame-matching facing rotation above.
+        vx, vy = vx * cos_a - vy * sin_a, vx * sin_a + vy * cos_a
     if render_scale:
         vx /= render_scale
         vy /= render_scale
