@@ -55,7 +55,7 @@ CONFIG_H_SETTINGS = MANAGED_KEYS + (
     "VESSEL_PARKED_SOG_KT",
     "DUMP1090_ENABLED",
     "DUMP1090_URL",
-    "ROUTE_SOURCE_ORDER"
+    "ROUTE_SOURCE_ORDER",
 )
 
 TOGGLE_KEYS = (
@@ -241,6 +241,7 @@ def dump1090_settings() -> dict:
         "DUMP1090_URL": url or "http://127.0.0.1:8080/data/aircraft.json",
     }
 
+
 def route_source_order_setting() -> dict:
     """Current route-source-order portal/settings value.
 
@@ -277,6 +278,7 @@ def apply_dump1090_to_runtime(enabled: bool, url: str) -> None:
         cfg.DUMP1090_URL = url
     except Exception:
         pass
+
 
 def mask_secret(value: str) -> str:
     value = (value or "").strip()
@@ -404,11 +406,16 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         raw = str(payload.get("route_source_order") or "").strip()
         if raw:
             updated["ROUTE_SOURCE_ORDER"] = raw
+            os.environ["ROUTE_SOURCE_ORDER"] = raw
         else:
             # Clearing to default: remove the key entirely rather than
             # writing "" — keeps secrets.json free of no-op entries and
             # matches how an unset .env var behaves.
+            # Also drop process env: bootstrap_secrets() may have stamped a
+            # previous portal value into os.environ, and route_source_order_setting()
+            # falls back to env when the file key is gone.
             updated.pop("ROUTE_SOURCE_ORDER", None)
+            os.environ.pop("ROUTE_SOURCE_ORDER", None)
 
     os.makedirs(DATA_DIR, exist_ok=True)
     tmp = SECRETS_JSON_PATH + ".tmp"

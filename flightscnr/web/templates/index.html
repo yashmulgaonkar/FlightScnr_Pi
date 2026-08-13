@@ -1169,7 +1169,7 @@ async function loadAll() {
         if ($("route_source_order")) {
             $("route_source_order").value = rso.ROUTE_SOURCE_ORDER || "";
         }
-	const faUsage = keys.flightaware_usage;
+        const faUsage = keys.flightaware_usage;
         if ($("flightaware-usage") && faUsage) {
             $("flightaware-usage").textContent =
                 `FlightAware this month: $${Number(faUsage.spend_usd || 0).toFixed(2)} / $${Number(faUsage.monthly_limit_usd || 4.5).toFixed(2)} (${faUsage.calls || 0} calls)`;
@@ -1346,13 +1346,14 @@ async function saveRouteSourceOrder() {
                 route_source_order: raw,
             }),
         });
-	//Show the *effective (parse(filtered) order, not just what was typed
-	//unknown or misspelled entries are silently dropped, so this is the only way to notice a typo actually did something
+        // Show the *effective* (parsed/filtered) order, not just what was typed.
+        // Unknown or misspelled entries are silently dropped, so this is the
+        // only way to notice a typo actually did something.
         const effective =
             (resp.keys && resp.keys.route_source_order &&
                 resp.keys.route_source_order.ROUTE_SOURCE_ORDER_EFFECTIVE) ||
             "airlabs,flightaware,opensky";
-	showStatus("route-source-order-status", `Saved — effective order: ${effective}`);
+        showStatus("route-source-order-status", `Saved — effective order: ${effective}`);
         await loadAll();
     } catch (e) {
         showStatus("route-source-order-status", e.message, true);
