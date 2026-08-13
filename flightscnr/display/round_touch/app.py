@@ -3222,7 +3222,7 @@ class RoundTouchDisplay:
                 self._live_map_last_fetch = 0.0  # force an immediate fetch
                 self._note_activity()
                 self._safe_draw()
-       	    else:
+            else:
                 self._return_to_radar()
                 self._safe_draw()
         elif swipe == input_handler.SWIPE_DOWN and self.screen == SCREEN_RADAR:
