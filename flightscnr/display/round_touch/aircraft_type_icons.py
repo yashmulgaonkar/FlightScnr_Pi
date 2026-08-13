@@ -409,6 +409,8 @@ def draw_icon(
             )
         return False
 
+    # heading_deg is screen heading (0 = up). Negative pygame angle is CW,
+    # so a nose-up PNG turns to point along track.
     rotated = pygame.transform.rotate(icon, -float(heading_deg))
     rect = rotated.get_rect(center=center)
     surface.blit(rotated, rect)

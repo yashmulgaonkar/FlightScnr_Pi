@@ -73,6 +73,54 @@ class TestBasemapProjection(unittest.TestCase):
         self.assertAlmostEqual(lat, target[0], places=4)
         self.assertAlmostEqual(lon, target[1], places=4)
 
+    def test_east_of_home_is_screen_up_when_east_up(self):
+        """Basemap facing must match pygame.rotate (issue #92).
+
+        East-up: a point east of home sits above center (same as ENU / compass),
+        not below it. The old math-CCW matrix put east down, so noses pointed
+        opposite the track on the tile map.
+        """
+        from display.round_touch import geo, map_bg, theme
+
+        home = [37.62, -122.37]
+        cos_lat = math.cos(math.radians(home[0]))
+        lon = home[1] + 0.5 / (111.320 * cos_lat)
+        lat = home[0]
+
+        self.settings.set_facing_deg(90)
+        with patch("display.round_touch.geo.LOCATION_HOME", home), patch(
+            "config.LOCATION_HOME", home
+        ), patch.object(map_bg, "_enabled", return_value=True):
+            x, y = geo.lat_lon_to_screen(lat, lon)
+            merc = map_bg.lat_lon_to_basemap_screen(
+                lat, lon, center_lat=home[0], center_lon=home[1]
+            )
+
+        self.assertEqual((x, y), merc)
+        self.assertAlmostEqual(x, theme.CENTER_X, delta=2)
+        self.assertLess(y, theme.CENTER_Y)
+
+    def test_east_up_basemap_roundtrip(self):
+        from display.round_touch import geo, map_bg
+
+        home = [37.62, -122.37]
+        target = (37.625, -122.365)
+        self.settings.set_facing_deg(90)
+        with patch("display.round_touch.geo.LOCATION_HOME", home), patch(
+            "config.LOCATION_HOME", home
+        ), patch.object(map_bg, "_enabled", return_value=True):
+            x, y = geo.lat_lon_to_screen(*target)
+            lat, lon = geo.screen_to_lat_lon(x, y)
+
+        self.assertAlmostEqual(lat, target[0], places=3)
+        self.assertAlmostEqual(lon, target[1], places=3)
+
+    def test_screen_heading_eastbound_is_up_when_east_up(self):
+        from display.round_touch.geo import screen_heading
+
+        self.assertAlmostEqual(screen_heading(90, 90), 0)
+        self.assertAlmostEqual(screen_heading(0, 90), -90)
+
 
 if __name__ == "__main__":
     unittest.main()
