@@ -1237,8 +1237,8 @@ def live_map_heading_up() -> bool:
     per the design decision to keep it consistently readable when swiping
     back and forth from the route map (which is also north-up)."""
     return bool(_state.get("live_map_heading_up", False))
- 
- 
+
+
 def set_live_map_heading_up(enabled: bool):
     _state["live_map_heading_up"] = bool(enabled)
     _save(_state)

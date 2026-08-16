@@ -134,8 +134,8 @@ OPENSKY_API_CLIENT_SECRET = os.environ.get("OPENSKY_API_CLIENT_SECRET", "")
 # ignored. Empty or unset falls back to the historical default order.
 _ROUTE_SOURCE_DEFAULT_ORDER = ("airlabs", "flightaware", "opensky")
 _ROUTE_SOURCE_VALID = frozenset(_ROUTE_SOURCE_DEFAULT_ORDER)
- 
- 
+
+
 def _parse_route_source_order(raw: str) -> tuple[str, ...]:
     if not (raw or "").strip():
         return _ROUTE_SOURCE_DEFAULT_ORDER
@@ -145,10 +145,10 @@ def _parse_route_source_order(raw: str) -> tuple[str, ...]:
         if name and name in _ROUTE_SOURCE_VALID and name not in seen:
             seen.append(name)
     return tuple(seen) if seen else _ROUTE_SOURCE_DEFAULT_ORDER
- 
- 
+
+
 ROUTE_SOURCE_ORDER = _parse_route_source_order(os.environ.get("ROUTE_SOURCE_ORDER", ""))
- 
+
 # ADS-B Exchange — optional extra free/cheap live-position fallback, tried
 # after OpenSky. Endpoint/plan varies (RapidAPI vs. self-hosted feeder read);
 # leave ADSBEXCHANGE_API_KEY empty to disable without touching the order list.
@@ -156,7 +156,7 @@ ADSBEXCHANGE_API_KEY = os.environ.get("ADSBEXCHANGE_API_KEY", "")
 ADSBEXCHANGE_API_BASE = os.environ.get(
     "ADSBEXCHANGE_API_BASE", "https://adsbexchange-com1.p.rapidapi.com/v2"
 ).rstrip("/")
- 
+
 # Order in which *live position* fallbacks are tried for the extended
 # tracking map, as a comma-separated list of: dump1090, adsbfi, opensky,
 # adsbexchange, fr24. Mirrors ROUTE_SOURCE_ORDER's parsing rules — omit an
@@ -164,7 +164,7 @@ ADSBEXCHANGE_API_BASE = os.environ.get(
 # to the default order below. First entry that returns a fresh position wins.
 _POSITION_SOURCE_DEFAULT_ORDER = ("dump1090", "adsbfi", "opensky", "adsbexchange", "fr24")
 _POSITION_SOURCE_VALID = frozenset(_POSITION_SOURCE_DEFAULT_ORDER)
- 
+
 def _parse_position_source_order(raw: str) -> tuple[str, ...]:
     if not (raw or "").strip():
         return _POSITION_SOURCE_DEFAULT_ORDER
@@ -174,12 +174,12 @@ def _parse_position_source_order(raw: str) -> tuple[str, ...]:
         if name and name in _POSITION_SOURCE_VALID and name not in seen:
             seen.append(name)
     return tuple(seen) if seen else _POSITION_SOURCE_DEFAULT_ORDER
- 
- 
+
+
 POSITION_SOURCE_ORDER = _parse_position_source_order(
     os.environ.get("POSITION_SOURCE_ORDER", "")
 )
- 
+
 # Extended live-tracking map (Radar > Track > swipe to live map): radius is
 # derived from current ground speed (distance covered in
 # LIVE_TRACKING_PREVIEW_MINUTES), clamped to [MIN, MAX]. MAX mirrors the
@@ -187,7 +187,7 @@ POSITION_SOURCE_ORDER = _parse_position_source_order(
 LIVE_TRACKING_PREVIEW_MINUTES = float(os.environ.get("LIVE_TRACKING_PREVIEW_MINUTES", "5"))
 LIVE_TRACKING_MIN_RADIUS_KM = float(os.environ.get("LIVE_TRACKING_MIN_RADIUS_KM", "8"))
 LIVE_TRACKING_MAX_RADIUS_KM = float(os.environ.get("LIVE_TRACKING_MAX_RADIUS_KM", "48"))
- 
+
 # NASA FIRMS free MAP_KEY for wildfire detections on the radar.
 # https://firms.modaps.eosdis.nasa.gov/api/map_key/
 FIRMS_MAP_KEY = os.environ.get("FIRMS_MAP_KEY", "")

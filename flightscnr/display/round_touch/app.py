@@ -957,7 +957,7 @@ class RoundTouchDisplay:
         now = time.time()
         callsign = (display_data.get("callsign") or "").strip()
         icao24 = (display_data.get("icao_hex") or "").strip()
- 
+
         if now - self._live_map_last_fetch >= 1.0 and (callsign or icao24):
             last_lat = display_data.get("plane_latitude")
             last_lon = display_data.get("plane_longitude")
@@ -979,13 +979,13 @@ class RoundTouchDisplay:
                 self._live_map_last_source = source
                 if entry:
                     self._live_map_last_result = entry
- 
+
         result = self._live_map_last_result or display_data
         lat = result.get("plane_latitude")
         lon = result.get("plane_longitude")
         heading = result.get("heading", 0) or 0
         radius_km = self._live_map_last_radius_km
- 
+
         draw.fill_background(self.surface)
         if lat is None or lon is None:
             # Nothing to center on yet (e.g. very first frame after opening
@@ -993,7 +993,7 @@ class RoundTouchDisplay:
             # crash; next throttled fetch will likely fill this in.
             nav.draw_breadcrumb(self.surface, ["Radar", "Track", "Live"])
             return
- 
+
         if settings.live_map_heading_up():
             # live_map.render_live_tracking_map() is intentionally north-up
             # only (see its docstring) — heading-up rotation is deferred to
@@ -1030,7 +1030,7 @@ class RoundTouchDisplay:
                 flight=result,
             )
         nav.draw_breadcrumb(self.surface, ["Radar", "Track", "Live"])
- 
+
     def _timeout_duration_s(self) -> float | None:
         """Active secondary-screen timeout in seconds, or None if no countdown."""
         if time.time() < self._boot_until:
@@ -1046,7 +1046,7 @@ class RoundTouchDisplay:
         if self.screen == SCREEN_FIRE:
             return float(settings.flight_detail_timeout_s())
         return float(SECONDARY_TIMEOUT_S)
- 
+
     def _timeout_remaining_fraction(self) -> float | None:
         """Fraction of secondary-screen timeout remaining, or None if not applicable."""
         timeout_s = self._timeout_duration_s()
@@ -1056,10 +1056,10 @@ class RoundTouchDisplay:
             return None
         elapsed = time.time() - self._secondary_activity
         return max(0.0, (timeout_s - elapsed) / timeout_s)
- 
+
     def _stage(self, name: str, seconds: float) -> None:
         frame_debug.stage(name, seconds)
- 
+
     def _note_frame_time(self, draw_s: float) -> None:
         """Log draw cost and achieved interval every 2s (FLIGHTSCNR_FRAME_DEBUG=1)."""
         now = time.perf_counter()

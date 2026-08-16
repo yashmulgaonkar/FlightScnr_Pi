@@ -1394,7 +1394,7 @@ const POSITION_SOURCE_LABELS = {
     adsbexchange: "ADS-B Exchange",
     fr24: "FlightRadar24",
 };
- 
+
 function renderPositionSourceList(order) {
     const list = $("position-source-list");
     if (!list) return;
@@ -1417,7 +1417,7 @@ function renderPositionSourceList(order) {
     }
     attachDragReorder(list);
 }
- 
+
 function attachDragReorder(list) {
     let dragEl = null;
     list.querySelectorAll(".drag-item").forEach((item) => {
@@ -1441,7 +1441,7 @@ function attachDragReorder(list) {
         }
     });
 }
- 
+
 async function savePositionSources() {
     clearStatus("position-sources-status");
     try {
@@ -1468,7 +1468,7 @@ async function savePositionSources() {
         showStatus("position-sources-status", e.message, true);
     }
 }
- 
+
 async function resetPositionSources() {
     renderPositionSourceList(DEFAULT_POSITION_SOURCE_ORDER);
     await savePositionSources();

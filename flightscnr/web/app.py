@@ -662,7 +662,7 @@ def stats_position_sources():
     headers by hand."""
     try:
         from utilities.position_source_stats import usage_today, usage_history
- 
+
         return jsonify({"today": usage_today(), "history": usage_history(days=7)})
     except Exception as e:
         return jsonify({"today": {}, "history": {}, "error": str(e)}), 500
