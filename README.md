@@ -177,7 +177,7 @@ Optional **LiveATC** streams to a USB or Bluetooth speaker — pick airport and 
 </tr>
 </table>
 
-Also included: wildfire markers (CAL FIRE / NIFC / NASA FIRMS), alert mode, facing / orientation, favorite locations, and a boot safety disclaimer. See the [Features wiki](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Features) for the full list.
+Also included: wildfire markers (CAL FIRE / NIFC / NASA FIRMS), global earthquake epicenters (USGS), alert mode, facing / orientation, favorite locations, and a boot safety disclaimer. See the [Features wiki](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Features) for the full list.
 
 ---
 
@@ -187,7 +187,7 @@ Also included: wildfire markers (CAL FIRE / NIFC / NASA FIRMS), alert mode, faci
 
 | Topic | Wiki page |
 | ----- | --------- |
-| Screens, gestures, radar, marine, ATC, wildfires | [Features](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Features) |
+| Screens, gestures, radar, marine, ATC, wildfires, earthquakes | [Features](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Features) |
 | Bill of materials | [Hardware](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Hardware) |
 | Physical assembly | [Hardware Assembly](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Hardware-Assembly) |
 | OS, display overlay, install, Wi‑Fi, config | [Software Setup](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Software-Setup) |

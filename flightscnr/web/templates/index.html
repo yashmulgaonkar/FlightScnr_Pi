@@ -53,6 +53,7 @@
         .btn:disabled{opacity:.6;cursor:wait}
         .chk{display:flex;align-items:center;gap:.6rem;padding:.7rem 0;border-bottom:1px solid rgba(120,120,120,.22);}
         .chk:last-of-type{border-bottom:none;}
+        .chk.is-disabled{opacity:.45;pointer-events:none;}
         .chk label{margin:0;font-size:.9rem;color:var(--text);flex:1;}
         .drag-list{list-style:none;margin:.5rem 0 0;padding:0;}
         .drag-item{display:flex;align-items:center;gap:.6rem;padding:.6rem .5rem;margin-bottom:.4rem;
@@ -224,6 +225,11 @@
                 <option value="off">OFF</option>
             </select>
             <p class="hint">Callsign/type/altitude on aircraft, and vessel name tags. Turn off to declutter a busy radar; tap a symbol for details.</p>
+            <div class="chk" id="show_tag_leaders_row">
+                <label for="show_tag_leaders">Show tag leaders</label>
+                <span class="switch"><input id="show_tag_leaders" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">Hockey-stick underline and diagonal from each callsign tag to its aircraft or vessel. Same color as the blip. Only drawn when traffic labels are on.</p>
             <label for="facing_deg">Facing direction (degrees)</label>
             <input id="facing_deg" type="number" min="0" max="359" step="1" value="0">
             <p class="hint">Real-world direction at the top of the screen (0 = north, 90 = east, 180 = south, 270 = west). You can also set this on the device under Settings → Display → Facing.</p>
@@ -241,6 +247,11 @@
                 <span class="switch"><input id="show_wildfires" type="checkbox"><span class="track"></span></span>
             </div>
             <p class="hint">In California: <a href="https://www.fire.ca.gov/incidents" target="_blank" rel="noopener">CAL FIRE</a> (no API key). Rest of USA/Canada: <a href="https://data-nifc.opendata.arcgis.com/" target="_blank" rel="noopener">NIFC WFIGS</a> / <a href="https://fire.airnow.gov/" target="_blank" rel="noopener">AirNow</a> large fires (no API key). Outside USA/Canada: <a href="https://firms.modaps.eosdis.nasa.gov/api/area/" target="_blank" rel="noopener">NASA FIRMS</a> hotspots (free <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener">MAP_KEY</a> in API Keys). Tap a fire for details. Refreshes every 15 minutes and on recenter.</p>
+            <div class="chk">
+                <label for="show_earthquakes">Show earthquakes</label>
+                <span class="switch"><input id="show_earthquakes" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">Global M2.5+ epicenters from the <a href="https://earthquake.usgs.gov/" target="_blank" rel="noopener">USGS</a> catalog (no API key), last 24 hours — same default window as the USGS live map. PAGER impact alerts and tsunami bulletins show on the detail page. Tap a marker for magnitude, depth, and place. Refreshes every minute and on recenter. Voice alerts are under Display, screens &amp; volume (device: Settings → HUD &amp; Volume).</p>
             <div class="chk">
                 <label for="show_airport_centerlines">Show airport centerlines</label>
                 <span class="switch"><input id="show_airport_centerlines" type="checkbox"><span class="track"></span></span>
@@ -407,7 +418,7 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#9788;</span>Display &amp; screens<span class="sum">brightness, rotation, timeouts</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9788;</span>Display, screens &amp; volume<span class="sum">brightness, rotation, timeouts, volume</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <label for="bright_pct">Screen brightness <span id="bright_pct_label">100%</span></label>
             <input id="bright_pct" type="range" min="3" max="100" step="1" value="100">
@@ -488,6 +499,14 @@
             <label for="military_sfx_volume">Military sound volume <span id="military_sfx_volume_label">80%</span></label>
             <input id="military_sfx_volume" type="range" min="0" max="100" step="1" value="80">
             <p class="hint">Plays once when a new military aircraft appears in radar range.</p>
+            <div class="chk">
+                <label for="earthquake_voice">Earthquake alert</label>
+                <button class="btn btn-sm" id="btn-earthquake-voice-preview" type="button">Preview</button>
+                <span class="switch"><input id="earthquake_voice" type="checkbox"><span class="track"></span></span>
+            </div>
+            <label for="earthquake_voice_volume">Earthquake alert volume <span id="earthquake_voice_volume_label">80%</span></label>
+            <input id="earthquake_voice_volume" type="range" min="0" max="100" step="1" value="80">
+            <p class="hint">Off by default. Plays a voice clip once per new USGS event M3.0+ in radar range. Not earthquake early warning — catalog events can be minutes old. Silent during quiet hours and display off-hours. Needs the earthquake layer on, plus a USB or Bluetooth speaker.</p>
             <button class="btn btn-primary" id="btn-save-reload" style="margin-top:.7rem" type="button">Save &amp; reload on display</button>
             <div id="display-status" class="status"></div>
         </div>
@@ -1081,8 +1100,11 @@ async function loadAll() {
         if ($("traffic_labels")) $("traffic_labels").value = r.traffic_labels || (r.show_aircraft_tag === false ? "off" : "both");
         $("facing_deg").value = String(Math.round(Number(r.facing_deg) || 0) % 360);
         $("show_sweep").checked = !!r.show_sweep_line;
+        if ($("show_tag_leaders")) $("show_tag_leaders").checked = r.show_tag_leaders !== false;
+        syncTagLeadersControl();
         $("show_precip").checked = r.show_precipitation !== false;
         if ($("show_wildfires")) $("show_wildfires").checked = !!r.show_wildfires;
+        if ($("show_earthquakes")) $("show_earthquakes").checked = !!r.show_earthquakes;
         if ($("show_airport_centerlines")) $("show_airport_centerlines").checked = !!r.show_airport_centerlines;
         if ($("show_airport_icons")) $("show_airport_icons").checked = !!r.show_airport_icons;
         if ($("show_ground_vehicles")) $("show_ground_vehicles").checked = r.show_ground_vehicles !== false;
@@ -1124,6 +1146,10 @@ async function loadAll() {
         if ($("military_sfx")) $("military_sfx").checked = d.military_sfx_enabled !== false;
         if ($("military_sfx_volume")) {
             $("military_sfx_volume").value = String(d.military_sfx_volume ?? 80);
+        }
+        if ($("earthquake_voice")) $("earthquake_voice").checked = !!d.earthquake_voice_enabled;
+        if ($("earthquake_voice_volume")) {
+            $("earthquake_voice_volume").value = String(d.earthquake_voice_volume ?? 80);
         }
         syncChimeVolumeLabel();
     } catch (_) {}
@@ -1233,11 +1259,21 @@ function syncChimeVolumeLabel() {
     if (tel && $("traffic_sfx_volume")) tel.textContent = `${$("traffic_sfx_volume").value}%`;
     const mel = $("military_sfx_volume_label");
     if (mel && $("military_sfx_volume")) mel.textContent = `${$("military_sfx_volume").value}%`;
+    const qel = $("earthquake_voice_volume_label");
+    if (qel && $("earthquake_voice_volume")) qel.textContent = `${$("earthquake_voice_volume").value}%`;
 }
 
 function syncVfrOpacityLabel() {
     const el = $("vfr_opacity_label");
     if (el && $("vfr_opacity")) el.textContent = `${$("vfr_opacity").value}%`;
+}
+
+function syncTagLeadersControl() {
+    const labelsOn = $("traffic_labels") ? $("traffic_labels").value !== "off" : true;
+    const input = $("show_tag_leaders");
+    const row = $("show_tag_leaders_row");
+    if (input) input.disabled = !labelsOn;
+    if (row) row.classList.toggle("is-disabled", !labelsOn);
 }
 
 /** Match device speed labels from unit preset (…_kts / …_mph / …_kph). */
@@ -1316,8 +1352,10 @@ async function saveRadar() {
                 traffic_labels: $("traffic_labels") ? $("traffic_labels").value : "both",
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,
+                show_tag_leaders: $("show_tag_leaders") ? $("show_tag_leaders").checked : true,
                 show_precipitation: $("show_precip").checked,
                 show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
+                show_earthquakes: $("show_earthquakes") ? $("show_earthquakes").checked : false,
                 show_airport_centerlines: $("show_airport_centerlines") ? $("show_airport_centerlines").checked : false,
                 show_airport_icons: $("show_airport_icons") ? $("show_airport_icons").checked : false,
                 show_ground_vehicles: $("show_ground_vehicles") ? $("show_ground_vehicles").checked : true,
@@ -1494,8 +1532,10 @@ async function saveAndReloadSettings() {
                 traffic_labels: $("traffic_labels") ? $("traffic_labels").value : "both",
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,
+                show_tag_leaders: $("show_tag_leaders") ? $("show_tag_leaders").checked : true,
                 show_precipitation: $("show_precip").checked,
                 show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
+                show_earthquakes: $("show_earthquakes") ? $("show_earthquakes").checked : false,
                 show_airport_centerlines: $("show_airport_centerlines") ? $("show_airport_centerlines").checked : false,
                 show_airport_icons: $("show_airport_icons") ? $("show_airport_icons").checked : false,
                 show_ground_vehicles: $("show_ground_vehicles") ? $("show_ground_vehicles").checked : true,
@@ -1526,6 +1566,8 @@ async function saveAndReloadSettings() {
                 traffic_sfx_volume: $("traffic_sfx_volume") ? Number($("traffic_sfx_volume").value) : 80,
                 military_sfx_enabled: $("military_sfx") ? $("military_sfx").checked : true,
                 military_sfx_volume: $("military_sfx_volume") ? Number($("military_sfx_volume").value) : 80,
+                earthquake_voice_enabled: $("earthquake_voice") ? $("earthquake_voice").checked : false,
+                earthquake_voice_volume: $("earthquake_voice_volume") ? Number($("earthquake_voice_volume").value) : 80,
             }),
         });
         const loc = ($("radar_center").value || "").trim();
@@ -2371,6 +2413,7 @@ if ($("radar_hud_opacity")) $("radar_hud_opacity").addEventListener("input", syn
 if ($("hourly_chime_volume")) $("hourly_chime_volume").addEventListener("input", syncChimeVolumeLabel);
 if ($("traffic_sfx_volume")) $("traffic_sfx_volume").addEventListener("input", syncChimeVolumeLabel);
 if ($("military_sfx_volume")) $("military_sfx_volume").addEventListener("input", syncChimeVolumeLabel);
+if ($("earthquake_voice_volume")) $("earthquake_voice_volume").addEventListener("input", syncChimeVolumeLabel);
 if ($("btn-chime-preview")) {
     $("btn-chime-preview").addEventListener("click", async () => {
         clearStatus("display-status");
@@ -2420,6 +2463,24 @@ if ($("btn-military-sfx-preview")) {
                 body: JSON.stringify({ military_sfx_volume: volume }),
             });
             showStatus("display-status", data.message || "Playing military sound preview.");
+        } catch (err) {
+            showStatus("display-status", err.message || String(err), true);
+        }
+    });
+}
+if ($("btn-earthquake-voice-preview")) {
+    $("btn-earthquake-voice-preview").addEventListener("click", async () => {
+        clearStatus("display-status");
+        try {
+            const volume = $("earthquake_voice_volume")
+                ? Number($("earthquake_voice_volume").value)
+                : 80;
+            const data = await jsonFetch("/display/earthquake-voice-preview", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ earthquake_voice_volume: volume }),
+            });
+            showStatus("display-status", data.message || "Playing earthquake alert preview.");
         } catch (err) {
             showStatus("display-status", err.message || String(err), true);
         }
@@ -2678,6 +2739,8 @@ if ($("btn-bt-scan")) $("btn-bt-scan").addEventListener("click", bluetoothScan);
 if ($("btn-bt-use")) $("btn-bt-use").addEventListener("click", bluetoothUsePreferred);
 if ($("btn-bt-usb")) $("btn-bt-usb").addEventListener("click", bluetoothUseUsb);
 if ($("btn-bt-disconnect")) $("btn-bt-disconnect").addEventListener("click", bluetoothDisconnect);
+
+if ($("traffic_labels")) $("traffic_labels").addEventListener("change", syncTagLeadersControl);
 
 document.addEventListener("DOMContentLoaded", () => {
     wireRgbGroup("theme");

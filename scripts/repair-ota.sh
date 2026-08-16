@@ -20,6 +20,10 @@
 # if that is not enough, .git is re-cloned from GitHub (local repo edits are
 # discarded — they are unrecoverable anyway).
 #
+# It also clears a leftover update.lock / update-status.json "running" flag
+# (issue #100) when no update worker is alive, so the kiosk overlay and
+# portal Wipe/Update buttons unstick after a killed OTA.
+#
 # This script does NOT need a successful pull first — fetch it from GitHub:
 #
 #   curl -fsSL https://raw.githubusercontent.com/yashmulgaonkar/FlightScnr_Pi/main/scripts/repair-ota.sh | bash
@@ -49,7 +53,7 @@ while [ $# -gt 0 ]; do
             fi
             ;;
         -h|--help)
-            sed -n '2,31p' "$0"
+            sed -n '2,36p' "$0"
             exit 0
             ;;
         *)
@@ -124,6 +128,50 @@ run_git() {
 
 remote_url() {
     run_git config --get remote.origin.url 2>/dev/null || echo "$GITHUB_URL"
+}
+
+# Drop a dead update.lock and rewrite leftover state=running so the display
+# overlay / portal stop claiming an update is in progress (issue #100).
+# Leaves a live worker alone.
+clear_stale_update_banner() {
+    local data_dir="${FLIGHTSCNR_DATA_DIR:-/var/lib/flightscnr}"
+    local lock="$data_dir/update.lock"
+    local status="$data_dir/update-status.json"
+    local pid=""
+
+    if [ -f "$lock" ]; then
+        pid="$(tr -d '[:space:]' <"$lock" 2>/dev/null || true)"
+        if printf '%s' "$pid" | grep -Eq '^[1-9][0-9]*$' \
+            && kill -0 "$pid" 2>/dev/null; then
+            echo "Update worker still running (pid $pid) — leaving status alone"
+            return 0
+        fi
+        rm -f "$lock"
+        echo "Removed stale update.lock"
+    fi
+
+    [ -f "$status" ] || return 0
+    python3 - "$status" <<'PY' || true
+import json, sys
+from datetime import datetime, timezone
+
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+except Exception:
+    data = {}
+if not isinstance(data, dict) or data.get("state") != "running":
+    raise SystemExit(0)
+payload = {
+    "state": "failed",
+    "message": "Update interrupted (no live worker). Safe to retry.",
+    "updated_at": datetime.now(timezone.utc).isoformat(),
+}
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(payload, fh, indent=2)
+print("Cleared stale update-status.json (was running)")
+PY
 }
 
 # True if the repo has the power-loss signature: zero-byte object files, or
@@ -251,6 +299,8 @@ repair_object_db() {
     echo "Git repository repaired."
 }
 
+clear_stale_update_banner
+
 if repo_corrupt; then
     repair_object_db
 fi
@@ -277,6 +327,8 @@ if [ "$(id -u)" -eq 0 ]; then
 else
     sudo bash "$REPO_ROOT/install-pi.sh" update
 fi
+
+clear_stale_update_banner
 
 echo ""
 echo "Done. VERSION=$(tr -d '[:space:]' <VERSION 2>/dev/null || echo '?')"

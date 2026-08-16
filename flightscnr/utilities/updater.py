@@ -39,6 +39,9 @@ _REMOTE_CACHE_STALE_S = 24 * 3600
 NOTIFY_PATH = os.path.join(DATA_DIR, "update-notify.json")
 # Three checks per day from the display process.
 CHECK_INTERVAL_S = 8 * 3600
+# After Python writes state=running there is a short window before portal-update.sh
+# takes the lock. Longer than that with no live PID means the worker is gone.
+_STALE_RUNNING_S = 90.0
 _AUTO_RESYNC_DELAY_S = 12.0
 _auto_resync_started = False
 
@@ -502,23 +505,92 @@ def _write_status(state: str, message: str = "", **extra) -> dict:
     return payload
 
 
-def update_running() -> bool:
-    if os.path.isfile(LOCK_PATH):
+def _lock_held() -> bool:
+    """True when update.lock names a live PID. Removes a dead lock file."""
+    if not os.path.isfile(LOCK_PATH):
+        return False
+    try:
+        with open(LOCK_PATH, encoding="utf-8") as fh:
+            pid = int((fh.read() or "").strip() or "0")
+    except (OSError, ValueError):
+        pid = 0
+    if pid > 0:
         try:
-            with open(LOCK_PATH, encoding="utf-8") as fh:
-                pid = int((fh.read() or "").strip() or "0")
-        except (OSError, ValueError):
-            pid = 0
-        if pid > 0:
-            try:
-                os.kill(pid, 0)
-                return True
-            except OSError:
-                pass
-        try:
-            os.remove(LOCK_PATH)
+            os.kill(pid, 0)
+            return True
         except OSError:
             pass
+    try:
+        os.remove(LOCK_PATH)
+    except OSError:
+        pass
+    return False
+
+
+def _parse_status_updated_at(status: dict) -> float | None:
+    raw = str(status.get("updated_at") or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def _system_boot_time() -> float:
+    """Unix time of this boot from /proc/stat ``btime``, or 0 if unknown."""
+    try:
+        with open("/proc/stat", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("btime "):
+                    return float(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0.0
+
+
+def _running_status_is_stale(status: dict, *, now: float | None = None) -> bool:
+    """True when status says running but no worker can still be starting."""
+    if status.get("state") != "running":
+        return False
+    ts = time.time() if now is None else now
+    updated = _parse_status_updated_at(status)
+    if updated is None:
+        return True
+    boot = _system_boot_time()
+    if boot > 0 and updated < boot:
+        return True
+    return (ts - updated) > _STALE_RUNNING_S
+
+
+def recover_stale_update_state() -> bool:
+    """Clear orphaned ``running`` status. Returns True if a stale state was cleared."""
+    if _lock_held():
+        return False
+    status = _read_status()
+    if not _running_status_is_stale(status):
+        return False
+    logger.warning(
+        "Clearing stale update status (state=running, no live worker): %s",
+        status.get("message") or "",
+    )
+    mark_update_finished(
+        False,
+        "Update interrupted (no live worker). Safe to retry.",
+    )
+    return True
+
+
+def update_running() -> bool:
+    if _lock_held():
+        return True
+    if recover_stale_update_state():
+        return False
     status = _read_status()
     return status.get("state") == "running"
 

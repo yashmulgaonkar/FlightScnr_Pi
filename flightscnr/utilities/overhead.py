@@ -403,7 +403,10 @@ def _enrich_entry_from_zone_feed(entry: dict, lf: LiveFlight, stats: dict | None
         enriched = True
 
     plane = (lf.aircraft_code or "").strip()
-    if plane and not (entry.get("plane") or "").strip():
+    existing_plane = (entry.get("plane") or "").strip()
+    if plane and plane.upper() != existing_plane.upper():
+        # FR24 live type wins over dump1090/adsb.fi ``t`` (hex DB is often stale —
+        # EVA007 B789 was showing as DH8C / Dash 8 from local aircraft.csv).
         entry["plane"] = plane
         enriched = True
 

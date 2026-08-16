@@ -418,13 +418,19 @@ def location_set():
         except Exception:
             pass
         try:
-            from display.round_touch import wildfire_overlay, map_bg, rainviewer_overlay
+            from display.round_touch import (
+                earthquake_overlay,
+                wildfire_overlay,
+                map_bg,
+                rainviewer_overlay,
+            )
 
             # Invalidate only — display process rebuilds overlays (portal has no
             # pygame display surface for precip tiles).
             map_bg.invalidate()
             rainviewer_overlay.invalidate()
             wildfire_overlay.invalidate()
+            earthquake_overlay.invalidate()
         except Exception:
             print("Map/precip invalidate after location save failed")
         payload = {
@@ -571,11 +577,17 @@ def favourites_select():
         except Exception:
             pass
         try:
-            from display.round_touch import wildfire_overlay, map_bg, rainviewer_overlay
+            from display.round_touch import (
+                earthquake_overlay,
+                wildfire_overlay,
+                map_bg,
+                rainviewer_overlay,
+            )
 
             map_bg.invalidate()
             rainviewer_overlay.invalidate()
             wildfire_overlay.invalidate()
+            earthquake_overlay.invalidate()
         except Exception:
             print("Map/precip invalidate after favourite select failed")
         label = entry.get("name") or entry.get("icao") or "favourite"
@@ -868,6 +880,8 @@ def display_json():
             "traffic_sfx_volume": settings.traffic_sfx_volume(),
             "military_sfx_enabled": settings.military_sfx_enabled(),
             "military_sfx_volume": settings.military_sfx_volume(),
+            "earthquake_voice_enabled": settings.earthquake_voice_enabled(),
+            "earthquake_voice_volume": settings.earthquake_voice_volume(),
         }
     )
 
@@ -924,6 +938,17 @@ def display_save():
             settings.set_military_sfx_volume(int(data.get("military_sfx_volume")))
         except (TypeError, ValueError):
             return jsonify({"message": "military_sfx_volume must be a number"}), 400
+    if "earthquake_voice_enabled" in data:
+        from display.round_touch import earthquake_overlay
+
+        settings.set_earthquake_voice_enabled(bool(data.get("earthquake_voice_enabled")))
+        if settings.earthquake_voice_enabled():
+            earthquake_overlay.prime_voice_seen()
+    if "earthquake_voice_volume" in data:
+        try:
+            settings.set_earthquake_voice_volume(int(data.get("earthquake_voice_volume")))
+        except (TypeError, ValueError):
+            return jsonify({"message": "earthquake_voice_volume must be a number"}), 400
     return jsonify(
         {
             "ok": True,
@@ -943,6 +968,8 @@ def display_save():
             "traffic_sfx_volume": settings.traffic_sfx_volume(),
             "military_sfx_enabled": settings.military_sfx_enabled(),
             "military_sfx_volume": settings.military_sfx_volume(),
+            "earthquake_voice_enabled": settings.earthquake_voice_enabled(),
+            "earthquake_voice_volume": settings.earthquake_voice_volume(),
             "message": "Display settings saved.",
         }
     )
@@ -1011,6 +1038,27 @@ def display_military_sfx_preview():
     )
 
 
+@app.post("/display/earthquake-voice-preview")
+def display_earthquake_voice_preview():
+    """Play the earthquake alert voice clip once."""
+    from display.round_touch import earthquake_overlay, settings
+
+    data = request.get_json(silent=True) or {}
+    if "earthquake_voice_volume" in data:
+        try:
+            settings.set_earthquake_voice_volume(int(data.get("earthquake_voice_volume")))
+        except (TypeError, ValueError):
+            return jsonify({"message": "earthquake_voice_volume must be a number"}), 400
+    earthquake_overlay.play_voice_preview()
+    return jsonify(
+        {
+            "ok": True,
+            "earthquake_voice_volume": settings.earthquake_voice_volume(),
+            "message": "Playing earthquake alert preview.",
+        }
+    )
+
+
 @app.post("/settings/reload")
 def settings_reload():
     """Signal the on-device display to re-apply settings / location from disk."""
@@ -1056,8 +1104,11 @@ def radar_json():
             "traffic_labels": settings.traffic_labels(),
             "facing_deg": settings.facing_deg(),
             "show_sweep_line": settings.show_sweep_line(),
+            "show_tag_leaders": settings.tag_leaders_preferred(),
             "show_precipitation": settings.show_precipitation(),
             "show_wildfires": settings.show_wildfires(),
+            "show_earthquakes": settings.show_earthquakes(),
+            "earthquake_voice_enabled": settings.earthquake_voice_enabled(),
             "show_airport_centerlines": settings.show_airport_centerlines(),
             "show_airport_icons": settings.show_airport_icons(),
             "show_ground_vehicles": settings.show_ground_vehicles(),
@@ -1104,10 +1155,12 @@ def radar_save():
         map_bg.request_background()
         rainviewer_overlay.request_overlay()
         try:
-            from display.round_touch import wildfire_overlay
+            from display.round_touch import earthquake_overlay, wildfire_overlay
 
             wildfire_overlay.invalidate()
             wildfire_overlay.request_refresh(force=True)
+            earthquake_overlay.invalidate()
+            earthquake_overlay.request_refresh(force=True)
         except Exception:
             pass
     elif "scale_index" in data:
@@ -1116,10 +1169,12 @@ def radar_save():
         map_bg.request_background()
         rainviewer_overlay.request_overlay()
         try:
-            from display.round_touch import wildfire_overlay
+            from display.round_touch import earthquake_overlay, wildfire_overlay
 
             wildfire_overlay.invalidate()
             wildfire_overlay.request_refresh(force=True)
+            earthquake_overlay.invalidate()
+            earthquake_overlay.request_refresh(force=True)
         except Exception:
             pass
     if "min_height_ft" in data:
@@ -1155,6 +1210,8 @@ def radar_save():
         settings.set_facing_deg(data.get("facing_deg"))
     if "show_sweep_line" in data:
         settings.set_show_sweep_line(bool(data.get("show_sweep_line")))
+    if "show_tag_leaders" in data:
+        settings.set_show_tag_leaders(bool(data.get("show_tag_leaders")))
     if "show_precipitation" in data:
         settings.set_show_precipitation(bool(data.get("show_precipitation")))
         rainviewer_overlay.invalidate()
@@ -1167,6 +1224,19 @@ def radar_save():
         wildfire_overlay.invalidate()
         if settings.show_wildfires():
             wildfire_overlay.request_refresh(force=True)
+    if "show_earthquakes" in data:
+        from display.round_touch import earthquake_overlay
+
+        settings.set_show_earthquakes(bool(data.get("show_earthquakes")))
+        earthquake_overlay.invalidate()
+        if settings.show_earthquakes():
+            earthquake_overlay.request_refresh(force=True)
+    if "earthquake_voice_enabled" in data:
+        from display.round_touch import earthquake_overlay
+
+        settings.set_earthquake_voice_enabled(bool(data.get("earthquake_voice_enabled")))
+        if settings.earthquake_voice_enabled():
+            earthquake_overlay.prime_voice_seen()
     if "show_airport_centerlines" in data or "show_airport_icons" in data:
         from display.round_touch import airport_overlay
 

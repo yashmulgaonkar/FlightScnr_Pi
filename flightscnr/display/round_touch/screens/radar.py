@@ -26,6 +26,7 @@ from display.round_touch import (
     settings,
     theme,
     wildfire_overlay,
+    earthquake_overlay,
 )
 from display.round_touch import alert_prefs, frame_debug
 from display.round_touch import vessel_declutter
@@ -192,6 +193,7 @@ def _build_frame_layer(build: pygame.Surface, backdrop, flights, offset) -> bool
     build.blit(backdrop, (0, 0))
     _t = _rebuild_stage("2r_blit", _t)
     wildfire_overlay.draw_fires(build, pan_offset=offset)
+    earthquake_overlay.draw_quakes(build, pan_offset=offset)
     _t = _rebuild_stage("2r_fires", _t)
     _draw_flights(build, flights)
     _t = _rebuild_stage("2r_flights", _t)
@@ -418,6 +420,7 @@ def draw_radar(
     map_bg.request_background()
     rainviewer_overlay.request_overlay()
     wildfire_overlay.request_refresh()
+    earthquake_overlay.request_refresh()
 
     if pan_mode:
         _draw_map_pan_overlay(
@@ -464,6 +467,7 @@ def draw_radar(
         else:
             airport_overlay.draw_airports(surface, pan_offset=offset)
             wildfire_overlay.draw_fires(surface, pan_offset=offset)
+            earthquake_overlay.draw_quakes(surface, pan_offset=offset)
             _draw_flights(surface, flights)
             _draw_status(surface, flights)
             _draw_map_attribution(surface)
@@ -571,6 +575,226 @@ def _tag_block_metrics():
     return block_h, offsets, main_font, sub_font
 
 
+def _preferred_tag_on_right(x: int) -> bool:
+    """Default: tag toward the radar center (left-half blip → right side)."""
+    return x < theme.CENTER_X
+
+
+def _tag_anchor(x: int, on_right: bool) -> int:
+    """X of the tag's inner edge, clamped so text stays inside the bezel."""
+    symbol_half = theme.AIRCRAFT_ICON_RADIUS
+    margin = theme.s(20)
+    if on_right:
+        return min(
+            x + symbol_half + theme.AIRCRAFT_LABEL_GAP,
+            theme.CENTER_X + theme.VISIBLE_RADIUS - margin,
+        )
+    return max(
+        x - symbol_half - theme.AIRCRAFT_LABEL_GAP,
+        theme.CENTER_X - theme.VISIBLE_RADIUS + margin,
+    )
+
+
+def _tag_rect(x: int, y: int, width: int, height: int, on_right: bool) -> pygame.Rect:
+    """Axis-aligned box for a tag block vertically centered on the blip."""
+    anchor = _tag_anchor(x, on_right)
+    top = y - height // 2
+    if on_right:
+        return pygame.Rect(anchor, top, width, height)
+    return pygame.Rect(anchor - width, top, width, height)
+
+
+def _tag_clearance() -> int:
+    """Keep stacked tags from sitting flush — that makes the bracket a divider."""
+    return theme.s(8)
+
+
+def _tag_overlap_area(a: pygame.Rect, b: pygame.Rect, pad: int = 0) -> int:
+    if pad:
+        a = a.inflate(pad * 2, pad * 2)
+        b = b.inflate(pad * 2, pad * 2)
+    inter = a.clip(b)
+    if inter.width <= 0 or inter.height <= 0:
+        return 0
+    return inter.width * inter.height
+
+
+def _choose_tag_side(
+    pref_right: bool,
+    rect_left: pygame.Rect,
+    rect_right: pygame.Rect,
+    placed: list[pygame.Rect],
+) -> bool:
+    """True = put the tag on the right. Ties keep the toward-center default."""
+    pad = _tag_clearance()
+    overlap_left = sum(_tag_overlap_area(rect_left, p, pad) for p in placed)
+    overlap_right = sum(_tag_overlap_area(rect_right, p, pad) for p in placed)
+    if overlap_left == overlap_right:
+        return pref_right
+    return overlap_right < overlap_left
+
+
+def _pick_tag_rect(
+    x: int, y: int, width: int, height: int, placed: list[pygame.Rect]
+) -> tuple[bool, pygame.Rect]:
+    pref_right = _preferred_tag_on_right(x)
+    rect_left = _tag_rect(x, y, width, height, False)
+    rect_right = _tag_rect(x, y, width, height, True)
+    on_right = _choose_tag_side(pref_right, rect_left, rect_right, placed)
+    return on_right, (rect_right if on_right else rect_left)
+
+
+def _tag_leader_color(text_rgb: tuple[int, int, int]) -> tuple[int, int, int]:
+    """Use the blip color at full strength — dimmed grid-green disappears on the map."""
+    return (int(text_rgb[0]), int(text_rgb[1]), int(text_rgb[2]))
+
+
+def _icon_rim_toward(x: int, y: int, tx: int, ty: int) -> tuple[int, int]:
+    """Point on the icon circle facing ``(tx, ty)``."""
+    icon_r = theme.AIRCRAFT_ICON_RADIUS
+    dx = tx - x
+    dy = ty - y
+    dist = math.hypot(dx, dy)
+    if dist <= 1:
+        return (x + icon_r, y)
+    return (
+        int(round(x + icon_r * dx / dist)),
+        int(round(y + icon_r * dy / dist)),
+    )
+
+
+def _tag_leader_geometry(
+    x: int,
+    y: int,
+    rect: pygame.Rect,
+    on_right: bool,
+    underline_w: int | None = None,
+) -> dict:
+    """Hockey-stick: underline under the altitude line, diagonal to the blip."""
+    gap = max(2, theme.s(3))
+    underline_y = rect.bottom + gap
+    width = rect.width if underline_w is None else max(1, min(int(underline_w), rect.width))
+    if on_right:
+        left = rect.left
+        right = rect.left + width
+        elbow = (left, underline_y)
+    else:
+        right = rect.right
+        left = rect.right - width
+        elbow = (right, underline_y)
+    underline = ((left, underline_y), (right, underline_y))
+    rim = _icon_rim_toward(x, y, elbow[0], elbow[1])
+    stem = None
+    if math.hypot(elbow[0] - rim[0], elbow[1] - rim[1]) > 2:
+        stem = (rim, elbow)
+    return {
+        "stem": stem,
+        "underline": underline,
+        "elbow": elbow,
+    }
+
+
+def _seg_dist2(
+    px: int, py: int, ax: int, ay: int, bx: int, by: int
+) -> float:
+    """Squared distance from point ``(px, py)`` to segment ``(ax,ay)–(bx,by)``."""
+    dx = bx - ax
+    dy = by - ay
+    length2 = dx * dx + dy * dy
+    if length2 <= 0:
+        ox, oy = px - ax, py - ay
+        return float(ox * ox + oy * oy)
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length2))
+    ox = px - (ax + t * dx)
+    oy = py - (ay + t * dy)
+    return float(ox * ox + oy * oy)
+
+
+def _tag_leader_hits_blip(
+    x: int,
+    y: int,
+    rect: pygame.Rect,
+    on_right: bool,
+    blips: list[tuple[int, int]] | None,
+) -> bool:
+    """True when another aircraft sits on the bracket or in the icon–tag gap."""
+    if not blips:
+        return False
+    geo_pts = _tag_leader_geometry(x, y, rect, on_right)
+    keepout = theme.AIRCRAFT_ICON_RADIUS + theme.AIRCRAFT_LABEL_GAP + theme.s(10)
+    r2 = keepout * keepout
+    cluster_r2 = (theme.AIRCRAFT_ICON_RADIUS * 2) ** 2
+    segs = [geo_pts["underline"]]
+    if geo_pts["stem"] is not None:
+        segs.append(geo_pts["stem"])
+    inner = rect.left if on_right else rect.right
+    for bx, by in blips:
+        if abs(bx - x) <= 1 and abs(by - y) <= 1:
+            continue
+        if (bx - x) * (bx - x) + (by - y) * (by - y) <= cluster_r2:
+            return True
+        for (x0, y0), (x1, y1) in segs:
+            if _seg_dist2(bx, by, x0, y0, x1, y1) <= r2:
+                return True
+        if on_right and x <= bx <= inner and abs(by - y) <= keepout:
+            return True
+        if not on_right and inner <= bx <= x and abs(by - y) <= keepout:
+            return True
+    return False
+
+
+def _tag_leader_crowded(
+    x: int,
+    y: int,
+    rect: pygame.Rect,
+    on_right: bool,
+    blips: list[tuple[int, int]] | None = None,
+    placed: list[pygame.Rect] | None = None,
+) -> bool:
+    """True when the bracket would cut through another icon or a stacked tag."""
+    if _tag_leader_hits_blip(x, y, rect, on_right, blips):
+        return True
+    pad = _tag_clearance()
+    near = rect.inflate(pad * 2, pad * 2)
+    for other in placed or ():
+        if near.colliderect(other):
+            return True
+    return False
+
+
+def _tag_stem_segment(
+    x: int, y: int, rect: pygame.Rect, on_right: bool
+) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Icon rim → underline elbow, even when the gap is too short for a stem skip."""
+    geo_pts = _tag_leader_geometry(x, y, rect, on_right)
+    if geo_pts["stem"] is not None:
+        return geo_pts["stem"]
+    return (_icon_rim_toward(x, y, geo_pts["elbow"][0], geo_pts["elbow"][1]), geo_pts["elbow"])
+
+
+def _draw_tag_leader(
+    surface,
+    x: int,
+    y: int,
+    rect: pygame.Rect,
+    on_right: bool,
+    text_rgb: tuple[int, int, int],
+    blips: list[tuple[int, int]] | None = None,
+    placed: list[pygame.Rect] | None = None,
+    underline_w: int | None = None,
+) -> None:
+    """2px hockey-stick: underline the altitude line, diagonal to the blip."""
+    if not settings.show_tag_leaders():
+        return
+    color = _tag_leader_color(text_rgb)
+    geo_pts = _tag_leader_geometry(x, y, rect, on_right, underline_w)
+    if geo_pts["stem"] is not None:
+        pygame.draw.line(surface, color, geo_pts["stem"][0], geo_pts["stem"][1], 2)
+    pygame.draw.line(
+        surface, color, geo_pts["underline"][0], geo_pts["underline"][1], 2
+    )
+
+
 def _above_min_height(flight) -> bool:
     if flight.get("kind") == "vessel":
         return vessel_declutter.should_show_on_radar(flight)
@@ -599,11 +823,57 @@ def _above_min_height(flight) -> bool:
         return True
 
 
-def _draw_vessel_tag(surface, x, y, flight):
+def _blit_tag_block(
+    surface,
+    x,
+    y,
+    lines,
+    block_h,
+    placed: list[pygame.Rect],
+    blips: list[tuple[int, int]] | None = None,
+    leader_rgb: tuple[int, int, int] | None = None,
+):
+    """Measure both sides, pick the less-overlapping one, blit, record the rect."""
+    rendered_rows: list[tuple[pygame.Surface, int]] = []
+    max_w = 0
+    for text, color, font, row_y in lines:
+        if not text:
+            continue
+        rendered = draw.render_text_cached(font, text, color)
+        rendered_rows.append((rendered, row_y))
+        max_w = max(max_w, rendered.get_width())
+    if not rendered_rows:
+        return None
+    on_right, rect = _pick_tag_rect(x, y, max_w, block_h, placed)
+    anchor_x = _tag_anchor(x, on_right)
+    ly = y - block_h // 2
+    if leader_rgb is None:
+        leader_rgb = _overlay_color_for_basemap(theme.AIRCRAFT)
+    underline_w = rendered_rows[-1][0].get_width()
+    _draw_tag_leader(
+        surface, x, y, rect, on_right, leader_rgb, blips, placed, underline_w
+    )
+    for rendered, row_y in rendered_rows:
+        if on_right:
+            surface.blit(rendered, (anchor_x, ly + row_y))
+        else:
+            surface.blit(rendered, rendered.get_rect(topright=(anchor_x, ly + row_y)))
+    placed.append(rect)
+    return rect
+
+
+def _draw_vessel_tag(
+    surface,
+    x,
+    y,
+    flight,
+    placed: list[pygame.Rect],
+    blips: list[tuple[int, int]] | None = None,
+):
     """One-line vessel name (no MMSI, no type/speed when short tags are on)."""
     name = vessel_declutter.display_name(flight)
     if not name:
-        return
+        return None
     if vessel_declutter.short_tags_enabled():
         name = vessel_declutter.truncate_name(name, 14)
         font = draw.load_font(theme.FONT_TAG, bold=True)
@@ -611,21 +881,27 @@ def _draw_vessel_tag(surface, x, y, flight):
         if vessel_declutter.hierarchy_enabled() and vessel_declutter.is_parked(flight):
             color = _overlay_color_for_basemap(theme.HINT)
         rendered = draw.render_text_cached(font, name, color)
-        tag_on_right = x < theme.CENTER_X
-        symbol_half = theme.AIRCRAFT_ICON_RADIUS
-        if tag_on_right:
-            anchor_x = min(
-                x + symbol_half + theme.AIRCRAFT_LABEL_GAP,
-                theme.CENTER_X + theme.VISIBLE_RADIUS - theme.s(20),
-            )
-            surface.blit(rendered, (anchor_x, y - rendered.get_height() // 2))
+        on_right, rect = _pick_tag_rect(
+            x, y, rendered.get_width(), rendered.get_height(), placed
+        )
+        _draw_tag_leader(
+            surface,
+            x,
+            y,
+            rect,
+            on_right,
+            _flight_icon_color(flight, compact=False),
+            blips,
+            placed,
+        )
+        if on_right:
+            surface.blit(rendered, (rect.x, rect.y))
         else:
-            anchor_x = max(
-                x - symbol_half - theme.AIRCRAFT_LABEL_GAP,
-                theme.CENTER_X - theme.VISIBLE_RADIUS + theme.s(20),
+            surface.blit(
+                rendered, rendered.get_rect(midright=(_tag_anchor(x, False), y))
             )
-            surface.blit(rendered, rendered.get_rect(midright=(anchor_x, y)))
-        return
+        placed.append(rect)
+        return rect
 
     # Legacy multi-line vessel tag (still never uses MMSI).
     block_h, offsets, main_font, sub_font = _tag_block_metrics()
@@ -635,46 +911,41 @@ def _draw_vessel_tag(surface, x, y, flight):
         alt = f"{float(sog):.0f} kt" if sog is not None else (flight.get("nav_status_name") or "")
     except (TypeError, ValueError):
         alt = flight.get("nav_status_name") or ""
-    ly = y - block_h // 2
-    tag_on_right = x < theme.CENTER_X
-    symbol_half = theme.AIRCRAFT_ICON_RADIUS
-    if tag_on_right:
-        anchor_x = min(
-            x + symbol_half + theme.AIRCRAFT_LABEL_GAP,
-            theme.CENTER_X + theme.VISIBLE_RADIUS - theme.s(20),
-        )
-        align = "left"
-    else:
-        anchor_x = max(
-            x - symbol_half - theme.AIRCRAFT_LABEL_GAP,
-            theme.CENTER_X - theme.VISIBLE_RADIUS + theme.s(20),
-        )
-        align = "right"
     lines = [
         (name, _overlay_color_for_basemap(theme.GRID), main_font, offsets[0]),
         (plane_type, _overlay_color_for_basemap(theme.TAG_TYPE), sub_font, offsets[1]),
         (alt, _overlay_color_for_basemap(theme.TAG_ALT_ASCEND), sub_font, offsets[2]),
     ]
-    for text, color, font, row_y in lines:
-        if not text:
-            continue
-        rendered = font.render(text, True, color)
-        if align == "left":
-            surface.blit(rendered, (anchor_x, ly + row_y))
-        else:
-            surface.blit(rendered, rendered.get_rect(topright=(anchor_x, ly + row_y)))
+    return _blit_tag_block(
+        surface,
+        x,
+        y,
+        lines,
+        block_h,
+        placed,
+        blips,
+        leader_rgb=_flight_icon_color(flight, compact=False),
+    )
 
 
-def _draw_aircraft_tag(surface, x, y, flight):
+def _draw_aircraft_tag(
+    surface,
+    x,
+    y,
+    flight,
+    placed: list[pygame.Rect] | None = None,
+    blips: list[tuple[int, int]] | None = None,
+):
+    if placed is None:
+        placed = []
     if flight.get("kind") == "vessel":
         if not settings.show_marine_labels():
-            return
+            return None
         if not vessel_declutter.should_label(flight):
-            return
-        _draw_vessel_tag(surface, x, y, flight)
-        return
+            return None
+        return _draw_vessel_tag(surface, x, y, flight, placed, blips)
     if not settings.show_aircraft_labels():
-        return
+        return None
 
     block_h, offsets, main_font, sub_font = _tag_block_metrics()
     try:
@@ -686,30 +957,26 @@ def _draw_aircraft_tag(surface, x, y, flight):
     alt = aircraft.format_altitude(flight.get("altitude"))
     alt_color = aircraft.altitude_tag_color(flight.get("vertical_speed"))
 
-    ly = y - block_h // 2
-    tag_on_right = x < theme.CENTER_X
-    symbol_half = theme.AIRCRAFT_ICON_RADIUS
-
-    if tag_on_right:
-        anchor_x = min(x + symbol_half + theme.AIRCRAFT_LABEL_GAP, theme.CENTER_X + theme.VISIBLE_RADIUS - theme.s(20))
-        align = "left"
-    else:
-        anchor_x = max(x - symbol_half - theme.AIRCRAFT_LABEL_GAP, theme.CENTER_X - theme.VISIBLE_RADIUS + theme.s(20))
-        align = "right"
-
-    lines = [
+    lines = []
+    raw_lines = [
         (callsign, _overlay_color_for_basemap(theme.GRID), main_font, offsets[0]),
         (plane_type, _overlay_color_for_basemap(theme.TAG_TYPE), sub_font, offsets[1]),
         (alt, _overlay_color_for_basemap(alt_color), sub_font, offsets[2]),
     ]
-    for i, (text, color, font, row_y) in enumerate(lines):
+    for i, (text, color, font, row_y) in enumerate(raw_lines):
         if not text or text == "—" and i == 1:
             continue
-        rendered = draw.render_text_cached(font, text, color)
-        if align == "left":
-            surface.blit(rendered, (anchor_x, ly + row_y))
-        else:
-            surface.blit(rendered, rendered.get_rect(topright=(anchor_x, ly + row_y)))
+        lines.append((text, color, font, row_y))
+    return _blit_tag_block(
+        surface,
+        x,
+        y,
+        lines,
+        block_h,
+        placed,
+        blips,
+        leader_rgb=_flight_icon_color(flight, compact=False),
+    )
 
 
 def _visible_flights(flights):
@@ -890,8 +1157,10 @@ def _draw_flights(surface, flights):
             aircraft.draw_plane_icon(surface, x, y, heading, color, flight=flight)
         _t = frame_debug.end("2r_f_icons", _t)
 
+        placed_tags: list[pygame.Rect] = []
+        blips = [(x, y) for _, _, (x, y) in inner_items]
         for _, flight, (x, y) in inner_items:
-            _draw_aircraft_tag(surface, x, y, flight)
+            _draw_aircraft_tag(surface, x, y, flight, placed_tags, blips)
         frame_debug.end("2r_f_tags", _t)
         frame_debug.count("targets_drawn", len(rim_items) + len(inner_items))
         frame_debug.count("targets_inner", len(inner_items))
@@ -1172,6 +1441,9 @@ def _draw_map_attribution(surface):
     firms_text = wildfire_overlay.attribution_text()
     if firms_text:
         parts.append(firms_text)
+    quake_text = earthquake_overlay.attribution_text()
+    if quake_text:
+        parts.append(quake_text)
     if not parts:
         return
     text = " · ".join(parts)

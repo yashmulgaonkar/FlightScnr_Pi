@@ -185,10 +185,6 @@ def draw_flight_detail(surface, flights, selected_index, scroll_offset: int = 0)
     )
     nav.draw_page_dots(surface, idx, len(flights), active_color=theme.LABEL)
 
-    has_photo = bool((f.get("photo_path") or "").strip())
-    show_logo = (not is_vessel) and bool(SHOW_AIRLINE_LOGOS) and not has_photo
-    show_flag = is_vessel and not has_photo
-
     rows = (
         _vessel_rows(f, title_font, body_font, detail_font)
         if is_vessel
@@ -197,26 +193,29 @@ def draw_flight_detail(surface, flights, selected_index, scroll_offset: int = 0)
         )
     )
 
-    if has_photo:
-        header_h = theme.s(112)
-    elif show_logo or show_flag:
-        header_h = theme.s(36) if show_flag else theme.s(32)
-    else:
-        header_h = 0
-    rows_h = sum(font.get_height() + line_gap for _, font, _ in rows) - line_gap
-    total_h = header_h + theme.s(4) + rows_h
-    max_scroll = max(0, total_h - (bottom - chrome_top))
-
-    y = chrome_top - scroll_offset
-    y = common.draw_logo(
-        surface, f, y, allow_airline_logo=bool(SHOW_AIRLINE_LOGOS)
-    )
-    for text, font, color in rows:
-        h = font.get_height()
-        # Full line must clear the footer so HDG can't sit under the radar button.
-        if y >= chrome_top and y + h <= bottom:
-            common.draw_center_row(surface, text, int(y), font, color)
-        y += h + line_gap
+    clip_prev = common.begin_detail_body_clip(surface, chrome_top, bottom)
+    try:
+        y = chrome_top - scroll_offset
+        y = common.draw_logo(
+            surface, f, y, allow_airline_logo=bool(SHOW_AIRLINE_LOGOS)
+        )
+        y = common.draw_detail_rows(
+            surface,
+            rows,
+            y,
+            chrome_top=chrome_top,
+            bottom=bottom,
+            line_gap=line_gap,
+        )
+    finally:
+        max_scroll = common.finish_detail_scroll(
+            surface,
+            chrome_top=chrome_top,
+            bottom=bottom,
+            content_end=y,
+            scroll_offset=scroll_offset,
+            clip_prev=clip_prev,
+        )
 
     nav.draw_footer_buttons(surface, list(FOOTER_BUTTONS))
     return max_scroll

@@ -9,7 +9,9 @@
 
 """Shared helpers for round-touch flight screens."""
 
-from display.round_touch import draw, logos, settings, theme
+import pygame
+
+from display.round_touch import draw, logos, nav, settings, theme
 
 
 def format_speed(ground_speed, *, allow_zero: bool = False) -> str | None:
@@ -60,6 +62,96 @@ def draw_center_row(surface, text: str, y: int, font, color) -> int:
     rendered = font.render(line, True, color)
     surface.blit(rendered, rendered.get_rect(midtop=(theme.CENTER_X, y)))
     return h
+
+
+def split_detail_chunks(text: str) -> list[str]:
+    """Hard-break CAL FIRE-style ``A; B; C`` admin/location strings."""
+    parts = [p.strip() for p in str(text).split(";")]
+    return [p for p in parts if p] or [str(text)]
+
+
+def take_fitting_prefix(words: list[str], font, max_w: int) -> tuple[str, list[str]]:
+    """Consume as many leading words as fit in ``max_w`` (at least one)."""
+    if not words:
+        return "", []
+    taken = [words[0]]
+    rest = list(words[1:])
+    while rest:
+        trial = " ".join(taken + rest[:1])
+        if font.size(trial)[0] <= max_w:
+            taken.append(rest.pop(0))
+        else:
+            break
+    return " ".join(taken), rest
+
+
+def wrap_detail_text(text: str, font, max_w: int) -> list[str]:
+    """Split on ``;`` then word-wrap each chunk to ``max_w``."""
+    lines: list[str] = []
+    for chunk in split_detail_chunks(text):
+        remaining = chunk.split() or [chunk]
+        while remaining:
+            line, remaining = take_fitting_prefix(remaining, font, max_w)
+            if line:
+                lines.append(line)
+    return lines or [str(text)]
+
+
+def begin_detail_body_clip(surface, top: int, bottom: int):
+    """Clip scrolling detail content to the body band (below chrome, above footer)."""
+    prev = surface.get_clip()
+    surface.set_clip(
+        pygame.Rect(0, int(top), surface.get_width(), max(0, int(bottom - top)))
+    )
+    return prev
+
+
+def draw_detail_rows(
+    surface,
+    rows: list[tuple[str, object, tuple]],
+    y: int,
+    *,
+    chrome_top: int,
+    bottom: int,
+    line_gap: int,
+) -> int:
+    """Draw rows that intersect the body band. Partial lines are clipped.
+
+    Long fields wrap to the circle width at each line; ``;`` is a hard break
+    (CAL FIRE admin units list several agencies on one string).
+    """
+    for text, font, color in rows:
+        h = font.get_height()
+        for chunk in split_detail_chunks(text):
+            remaining = chunk.split() or [chunk]
+            while remaining:
+                max_w = max(20, draw.circle_half_width_at_row(int(y), h) * 2)
+                line, remaining = take_fitting_prefix(remaining, font, max_w)
+                if y + h > chrome_top and y < bottom:
+                    draw_center_row(surface, line, int(y), font, color)
+                y += h + line_gap
+    return y
+
+
+def finish_detail_scroll(
+    surface,
+    *,
+    chrome_top: int,
+    bottom: int,
+    content_end: int,
+    scroll_offset: int,
+    clip_prev,
+) -> int:
+    """Restore clip, draw the overflow scrollbar, and return max_scroll."""
+    surface.set_clip(clip_prev)
+    content_h = (content_end + scroll_offset) - chrome_top + theme.s(8)
+    viewport = max(0, bottom - chrome_top)
+    max_scroll = max(0, int(content_h) - viewport)
+    if max_scroll > 0:
+        nav.draw_scroll_overflow_cues(
+            surface, chrome_top, bottom, scroll_offset, max_scroll
+        )
+    return max_scroll
 
 
 def draw_logo(

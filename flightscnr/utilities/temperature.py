@@ -437,9 +437,13 @@ _REFRESH_REQUEST_PATH = _os.path.join(_DATA_DIR, "weather_refresh.request")
 
 
 def request_manual_refresh() -> None:
-    """Ask the display process to fetch weather now (cross-process)."""
+    """Ask the display process to fetch weather now (cross-process).
+
+    Does not wipe weather caches. The display fetch uses ``force=True`` to
+    bypass TTL; clearing first left the HUD empty when Tomorrow.io still
+    returned 429.
+    """
     allow_immediate_fetch()
-    invalidate_caches()
     try:
         _os.makedirs(_DATA_DIR, exist_ok=True)
         with open(_REFRESH_REQUEST_PATH, "w", encoding="utf-8") as fh:

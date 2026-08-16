@@ -71,6 +71,10 @@ class TestProbeClientWifi(unittest.TestCase):
             self.assertEqual(w.probe_client_wifi(), "up")
             self.assertTrue(w.active_client_wifi())
 
+    def test_wifi_powersave_nmcli_args_disable(self) -> None:
+        self.assertEqual(w.WIFI_POWERSAVE_DISABLE, 2)
+        self.assertEqual(w.wifi_powersave_nmcli_args(), ["wifi.powersave", "2"])
+
     def test_link_probe_uses_short_timeout(self) -> None:
         seen: list[float] = []
 

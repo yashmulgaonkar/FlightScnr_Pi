@@ -164,7 +164,8 @@ install_apt_packages() {
         bluez \
         libspa-0.2-bluetooth \
         pulseaudio-utils \
-        rfkill
+        rfkill \
+        iw
     log_ok "System packages ready"
 }
 
@@ -208,6 +209,64 @@ ensure_bluetooth_ready() {
     if command -v bluetoothctl >/dev/null 2>&1; then
         run_with_timeout 5 15 bluetoothctl power on >/dev/null 2>&1 || true
         run_with_timeout 5 15 bluetoothctl pairable on >/dev/null 2>&1 || true
+    fi
+}
+
+install_wifi_powersave_off() {
+    # Wall-powered kiosk: IEEE 802.11 power save stalls phone hotspots and
+    # Bluetooth coexistence on brcmfmac (BCM43455). 2 = disable.
+    # Does not bounce NetworkManager / wlan0 — live iw + profile update only.
+    local nm_conf_src="$SETUP_DIR/wifi-powersave-off.conf"
+    local nm_conf_dest="/etc/NetworkManager/conf.d/99-wifi-powersave-off.conf"
+    local disp_src="$SETUP_DIR/99-wifi-powersave-off"
+    local disp_dest="/etc/NetworkManager/dispatcher.d/99-wifi-powersave-off"
+    local name type iface
+
+    log_step "Wi-Fi power save off (kiosk)"
+
+    mkdir -p /etc/NetworkManager/conf.d /etc/NetworkManager/dispatcher.d
+
+    if [ -f "$nm_conf_src" ]; then
+        cp "$nm_conf_src" "$nm_conf_dest"
+        chmod 0644 "$nm_conf_dest"
+        log_ok "Installed $nm_conf_dest"
+    else
+        printf '%s\n' \
+            '[connection]' \
+            'wifi.powersave=2' \
+            > "$nm_conf_dest"
+        chmod 0644 "$nm_conf_dest"
+        log_ok "Wrote $nm_conf_dest (inline)"
+    fi
+
+    if [ -f "$disp_src" ]; then
+        cp "$disp_src" "$disp_dest"
+        chmod 0755 "$disp_dest"
+        log_ok "Installed $disp_dest"
+    else
+        log_warn "dispatcher script missing — $disp_src"
+    fi
+
+    if command -v nmcli >/dev/null 2>&1; then
+        nmcli general reload >/dev/null 2>&1 || true
+        while IFS=: read -r name type; do
+            [ "$type" = "802-11-wireless" ] || continue
+            [ -n "$name" ] || continue
+            nmcli connection modify "$name" wifi.powersave 2 >/dev/null 2>&1 || true
+        done < <(nmcli -t -f NAME,TYPE connection show 2>/dev/null || true)
+        log_ok "wifi.powersave=2 on saved Wi-Fi profiles"
+    fi
+
+    if command -v iw >/dev/null 2>&1; then
+        shopt -s nullglob
+        for iface in /sys/class/net/wl* /sys/class/net/wlan*; do
+            [ -e "$iface" ] || continue
+            iw dev "$(basename "$iface")" set power_save off >/dev/null 2>&1 || true
+        done
+        shopt -u nullglob
+        log_ok "iw power_save off on live Wi-Fi interfaces"
+    else
+        log_warn "iw not installed — live power_save not changed this run"
     fi
 }
 
@@ -1521,6 +1580,7 @@ cmd_install() {
     prefer_x11_session
     setup_env_file
     ensure_bluetooth_ready
+    install_wifi_powersave_off
     suppress_desktop_bluetooth_popups
     suppress_desktop_panel_for_kiosk
     suppress_openbox_decorations_for_kiosk

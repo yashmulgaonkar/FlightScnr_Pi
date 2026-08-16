@@ -619,7 +619,7 @@ class HudSettingsRowTests(unittest.TestCase):
     def test_sound_toggles_share_the_volume_rows(self):
         from display.round_touch.screens import info
 
-        for action in ("hourly_chime", "traffic_sfx", "military_sfx"):
+        for action in ("hourly_chime", "traffic_sfx", "military_sfx", "earthquake_voice"):
             self.assertNotIn(action, info.HUD_ACTIONS)
         for action in info._HUD_VOLUME_ACTIONS:
             self.assertIn(action, info.HUD_ACTIONS)
@@ -640,6 +640,7 @@ class HudSettingsRowTests(unittest.TestCase):
             "chime_volume": "hourly_chime",
             "traffic_sfx_volume": "traffic_sfx",
             "military_sfx_volume": "military_sfx",
+            "earthquake_voice_volume": "earthquake_voice",
         }
         for action, toggle in expected.items():
             ry = info._hud_volume_row_y(action)

@@ -78,14 +78,15 @@ DISPLAY_ACTIONS = (
     "compass",
     "range_rings",
     "sweep",
+    "tag_leaders",
     "color_by_altitude",
     "units",
     "range",
     "rotate",
     "brightness",
 )
-# Radar clock HUD + hourly chime + enter-range / military SFX. Each sound is one
-# row: an on/off switch beside its volume slider.
+# Radar clock HUD + hourly chime + enter-range / military / quake SFX.
+# Each sound is one row: an on/off switch beside its volume slider.
 HUD_ACTIONS = (
     "radar_hud",
     "hud_position",
@@ -94,6 +95,7 @@ HUD_ACTIONS = (
     "chime_volume",
     "traffic_sfx_volume",
     "military_sfx_volume",
+    "earthquake_voice_volume",
 )
 # Filter / map controls — kept short so rows fit the round viewport.
 OPTIONS_ACTIONS = (
@@ -111,6 +113,7 @@ LAYERS_ACTIONS = (
     "traffic",
     "precipitation",
     "wildfires",
+    "earthquakes",
     "airport_centerlines",
     "airport_icons",
     "ground_vehicles",
@@ -252,7 +255,7 @@ def _breadcrumb(page: int) -> list[str]:
     if page == PAGE_DISPLAY:
         trail.append("Display")
     elif page == PAGE_HUD:
-        trail.append("HUD")
+        trail.append("HUD & Volume")
     elif page == PAGE_OPTIONS:
         trail.append("Options")
     elif page == PAGE_LAYERS:
@@ -1121,7 +1124,7 @@ def _chime_volume_slider_metrics() -> tuple[int, int, int, int]:
     # Widest HUD volume label so all SFX sliders share geometry.
     label_w = max(
         body_font.size(lbl)[0]
-        for lbl in ("Chime volume", "Tracked volume", "Military volume")
+        for lbl in ("Chime volume", "Tracked volume", "Military volume", "Quake volume")
     )
     value_w = body_font.size("100%")[0]
     # Shorter than the other sliders — each row also carries an on/off switch.
@@ -1130,12 +1133,18 @@ def _chime_volume_slider_metrics() -> tuple[int, int, int, int]:
     return track_w, row_h, label_w, value_w
 
 
-_HUD_VOLUME_ACTIONS = ("chime_volume", "traffic_sfx_volume", "military_sfx_volume")
+_HUD_VOLUME_ACTIONS = (
+    "chime_volume",
+    "traffic_sfx_volume",
+    "military_sfx_volume",
+    "earthquake_voice_volume",
+)
 # Volume row -> the sound toggle drawn as a switch at the head of that row.
 _HUD_VOLUME_TOGGLES = {
     "chime_volume": "hourly_chime",
     "traffic_sfx_volume": "traffic_sfx",
     "military_sfx_volume": "military_sfx",
+    "earthquake_voice_volume": "earthquake_voice",
 }
 
 
@@ -1159,6 +1168,12 @@ def _hud_volume_meta(action: str):
             settings.military_sfx_volume,
             settings.set_military_sfx_volume,
         )
+    if action == "earthquake_voice_volume":
+        return (
+            "Quake volume",
+            settings.earthquake_voice_volume,
+            settings.set_earthquake_voice_volume,
+        )
     return None
 
 
@@ -1170,6 +1185,8 @@ def hud_sound_enabled(action: str) -> bool:
         return settings.traffic_sfx_enabled()
     if action == "military_sfx_volume":
         return settings.military_sfx_enabled()
+    if action == "earthquake_voice_volume":
+        return settings.earthquake_voice_enabled()
     return True
 
 
@@ -1608,6 +1625,11 @@ def _display_row_labels() -> list[str]:
         "Compass Rose",
         "Radar Range Rings",
         "Radar Sweep Line",
+        (
+            "Tag Leaders"
+            if settings.show_aircraft_tag()
+            else "Tag Leaders (labels off)"
+        ),
         "Color by Altitude",
         f"Units: {settings.unit_preset_label()}",
         f"Radar Range: {settings.scale_label()}",
@@ -1628,6 +1650,7 @@ def _hud_row_labels() -> list[str]:
         "",  # chime switch + volume slider
         "",  # traffic switch + volume slider
         "",  # military switch + volume slider
+        "",  # earthquake voice switch + volume slider
     ]
 
 
@@ -1653,6 +1676,7 @@ def _layers_row_labels() -> list[str]:
         f"Select Traffic: {settings.traffic_mode_label()}",
         "Show Precipitation",
         "Show Wildfires",
+        "Show Earthquakes",
         "Show Airport Centerlines",
         "Show Airport Icons",
         "Show Ground Vehicles",
@@ -1669,10 +1693,12 @@ _TOGGLE_ROW_STATE = {
     "compass": settings.show_compass_rose,
     "range_rings": settings.show_range_rings,
     "sweep": settings.show_sweep_line,
+    "tag_leaders": settings.show_tag_leaders,
     "color_by_altitude": settings.color_by_altitude,
     "radar_hud": settings.radar_hud_enabled,
     "precipitation": settings.show_precipitation,
     "wildfires": settings.show_wildfires,
+    "earthquakes": settings.show_earthquakes,
     "airport_centerlines": settings.show_airport_centerlines,
     "airport_icons": settings.show_airport_icons,
     "ground_vehicles": settings.show_ground_vehicles,
@@ -1746,6 +1772,9 @@ def _draw_settings_rows(
     military_vol_idx = (
         hud_volume_row_index("military_sfx_volume") if draw_chime_volume_slider else -1
     )
+    quake_vol_idx = (
+        hud_volume_row_index("earthquake_voice_volume") if draw_chime_volume_slider else -1
+    )
     vfr_idx = vfr_opacity_row_index() if draw_vfr_opacity_slider else -1
     volume_idx = atc_volume_row_index() if draw_atc_volume_slider else -1
     # Clip to the body band so scrolled rows never bleed over the footer buttons.
@@ -1775,6 +1804,11 @@ def _draw_settings_rows(
             if draw_chime_volume_slider and i == military_vol_idx:
                 _draw_hud_volume_slider_row(
                     surface, int(ry), display_focus == i, "military_sfx_volume"
+                )
+                continue
+            if draw_chime_volume_slider and i == quake_vol_idx:
+                _draw_hud_volume_slider_row(
+                    surface, int(ry), display_focus == i, "earthquake_voice_volume"
                 )
                 continue
             if draw_vfr_opacity_slider and i == vfr_idx:
@@ -1814,47 +1848,8 @@ def _draw_scroll_overflow_cues(
     scroll_offset: int,
     max_scroll: int,
 ) -> None:
-    """Modern thin scrollbar on the right when settings rows overflow."""
-    if max_scroll <= 0:
-        return
-
-    track_top = int(top + theme.s(10))
-    track_bottom = int(bottom - theme.s(10))
-    track_h = track_bottom - track_top
-    if track_h < theme.s(24):
-        return
-
-    # Sit on the right of the round viewport, clear of centered labels.
-    track_x = theme.CENTER_X + int(theme.VISIBLE_RADIUS * 0.78)
-    track_w = max(3, theme.s(4))
-    radius = max(2, track_w // 2)
-
-    # Viewport fraction of total content (content = viewport + max_scroll).
-    viewport_h = max(1, bottom - top)
-    content_h = viewport_h + max_scroll
-    thumb_h = max(theme.s(18), int(round(track_h * (viewport_h / content_h))))
-    thumb_h = min(thumb_h, track_h)
-    travel = max(0, track_h - thumb_h)
-    t = 0.0 if max_scroll <= 0 else min(1.0, max(0.0, scroll_offset / float(max_scroll)))
-    thumb_y = track_top + int(round(travel * t))
-
-    track_rect = pygame.Rect(track_x - track_w // 2, track_top, track_w, track_h)
-    thumb_rect = pygame.Rect(track_x - track_w // 2, thumb_y, track_w, thumb_h)
-
-    # Frosted track + solid thumb (reads on light and dark themes).
-    track_surf = pygame.Surface((track_w, track_h), pygame.SRCALPHA)
-    pygame.draw.rect(
-        track_surf,
-        (*theme.HINT[:3], 70),
-        track_surf.get_rect(),
-        border_radius=radius,
-    )
-    surface.blit(track_surf, track_rect.topleft)
-
-    thumb_color = theme.MUTED if hasattr(theme, "MUTED") else theme.LABEL
-    pygame.draw.rect(surface, thumb_color, thumb_rect, border_radius=radius)
-    # Hairline edge for contrast on similar backgrounds.
-    pygame.draw.rect(surface, theme.GRID, thumb_rect, max(1, theme.s(1)), border_radius=radius)
+    """Thin right-edge scrollbar when settings rows overflow."""
+    nav.draw_scroll_overflow_cues(surface, top, bottom, scroll_offset, max_scroll)
 
 
 def _draw_brightness_slider_row(surface, ry: int, focused: bool) -> None:

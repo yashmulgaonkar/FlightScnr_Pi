@@ -510,3 +510,37 @@ class TestZoneFeedEnrichment:
         assert entry["plane"] == "B38M"
         assert entry.get("owner_icao") == "AMX"
         assert entry.get("distance") is not None
+
+    def test_enrich_prefers_fr24_type_over_adsb_t(self):
+        from utilities.fr24_client import LiveFlight
+        from utilities.overhead import _enrich_entry_from_zone_feed
+
+        lf = LiveFlight(
+            flight_id="eva",
+            latitude=37.62,
+            longitude=-122.37,
+            altitude=800,
+            ground_speed=180,
+            heading=280,
+            vertical_speed=1200,
+            callsign="EVA007",
+            registration="B-17881",
+            origin_airport_iata="SFO",
+            destination_airport_iata="TPE",
+            airline_icao="EVA",
+            airline_iata="BR",
+            aircraft_code="B789",
+            on_ground=False,
+            eta=0,
+        )
+        entry = {
+            "callsign": "EVA007",
+            "plane": "DH8C",
+            "plane_latitude": 37.62,
+            "plane_longitude": -122.37,
+            "data_source": "dump1090",
+        }
+        assert _enrich_entry_from_zone_feed(entry, lf) is True
+        assert entry["plane"] == "B789"
+        assert entry["origin"] == "SFO"
+        assert entry["destination"] == "TPE"

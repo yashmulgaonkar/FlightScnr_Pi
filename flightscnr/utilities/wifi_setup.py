@@ -55,6 +55,8 @@ JOIN_BUSY_STALE_S = 180.0
 AP_CONNECTION_NAME = "flightscnr-setup-ap"
 AP_SSID_PREFIX = "FlightScnr-Setup"
 WLAN_IFACE = os.environ.get("FLIGHTSCNR_WLAN", "wlan0")
+# NetworkManager wifi.powersave: 2 = disable IEEE 802.11 PSM (kiosk / hotspot).
+WIFI_POWERSAVE_DISABLE = 2
 DNSMASQ_SHARED_DIR = "/etc/NetworkManager/dnsmasq-shared.d"
 DNSMASQ_CAPTIVE_CONF = os.path.join(DNSMASQ_SHARED_DIR, "flightscnr-captive.conf")
 
@@ -88,6 +90,11 @@ class ApCredentials:
     @property
     def portal_url(self) -> str:
         return f"http://{self.gateway}/wifi"
+
+
+def wifi_powersave_nmcli_args() -> list[str]:
+    """Disable IEEE 802.11 power save on client profiles (wall-powered kiosk)."""
+    return ["wifi.powersave", str(WIFI_POWERSAVE_DISABLE)]
 
 
 def _run(cmd: list[str], *, timeout: float = 30.0) -> subprocess.CompletedProcess:
@@ -986,6 +993,7 @@ def connect_to_wifi(ssid: str, password: str = "") -> tuple[bool, str]:
             "auto",
             "connection.autoconnect",
             "no",
+            *wifi_powersave_nmcli_args(),
         ]
         if password:
             add_cmd.extend(
@@ -1030,6 +1038,7 @@ def connect_to_wifi(ssid: str, password: str = "") -> tuple[bool, str]:
                 con_name,
                 "connection.autoconnect",
                 "yes",
+                *wifi_powersave_nmcli_args(),
                 timeout=15.0,
             )
             _set_status(f"Connected to “{ssid}”")
