@@ -1081,66 +1081,6 @@ class RoundTouchDisplay:
         if FRAME_DEBUG:
             self._frame_draws.append(draw_s)
 
-
-    def _draw_reboot_progress_overlay(self) -> None:
-        from utilities import system_control
-
-        copy = system_control.reboot_progress_copy()
-        if copy is None:
-            return
-        title, detail = copy
-        info.draw_reboot_progress_popup(self.surface, title, detail)
-
-    def _timeout_duration_s(self) -> float | None:
-        """Active secondary-screen timeout in seconds, or None if no countdown."""
-        if time.time() < self._boot_until:
-            return None
-        if self.screen in (SCREEN_WIFI_SETUP, SCREEN_DISCLAIMER):
-            return None
-        if self.screen in (SCREEN_RADAR, SCREEN_CLOCK, SCREEN_CLOCK_SETTINGS, SCREEN_FORECAST):
-            return None
-        if self.screen == SCREEN_TRACKED and tracked.is_pinned():
-            return None
-        if self.screen == SCREEN_FLIGHT:
-            return float(settings.flight_detail_timeout_s())
-        if self.screen == SCREEN_FIRE:
-            return float(settings.flight_detail_timeout_s())
-        return float(SECONDARY_TIMEOUT_S)
-
-    def _timeout_remaining_fraction(self) -> float | None:
-        """Fraction of secondary-screen timeout remaining, or None if not applicable."""
-        timeout_s = self._timeout_duration_s()
-        if timeout_s is None:
-            return None
-        if timeout_s <= 0:
-            return None
-        elapsed = time.time() - self._secondary_activity
-        return max(0.0, (timeout_s - elapsed) / timeout_s)
-
-    def _stage(self, name: str, seconds: float) -> None:
-        frame_debug.stage(name, seconds)
-
-    def _note_frame_time(self, draw_s: float) -> None:
-        """Log draw cost and achieved interval every 2s (FLIGHTSCNR_FRAME_DEBUG=1)."""
-        now = time.perf_counter()
-        gap = (now - self._frame_prev_at) if self._frame_prev_at else 0.0
-        if self._frame_prev_at and gap >= _HITCH_GAP_S:
-            try:
-                with open(_HITCH_LOG, "a", encoding="utf-8") as fh:
-                    fh.write(
-                        f"{time.time():.3f}\tgap_ms={gap * 1000:.0f}\t"
-                        f"draw_ms={draw_s * 1000:.0f}\t"
-                        f"proc={int(bool(self.overhead.processing))}\t"
-                        f"grab={self.overhead.grab_seq}\n"
-                    )
-            except Exception:
-                pass
-        if self._frame_prev_at and FRAME_DEBUG:
-            self._frame_gaps.append(gap)
-        self._frame_prev_at = now
-        if FRAME_DEBUG:
-            self._frame_draws.append(draw_s)
-
         if not FRAME_DEBUG:
             return
 
@@ -1217,6 +1157,15 @@ class RoundTouchDisplay:
                 radar.take_rebuild_counts(),
                 counter_txt,
             )
+
+    def _draw_reboot_progress_overlay(self) -> None:
+        from utilities import system_control
+
+        copy = system_control.reboot_progress_copy()
+        if copy is None:
+            return
+        title, detail = copy
+        info.draw_reboot_progress_popup(self.surface, title, detail)
 
     @staticmethod
     def _bound(collection, cap: int = 200) -> None:

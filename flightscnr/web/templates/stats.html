@@ -232,7 +232,48 @@
                 tbody.appendChild(tr);
             }
         }
+        async function loadPositionSourceStats() {
+            const tbody = document.getElementById('position-sources-body');
+            if (!tbody) return;
 
+            try {
+                const res = await fetch('/stats/position-sources');
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
+                }
+
+                const data = await res.json();
+                const today = data.today || {};
+
+                tbody.innerHTML = '';
+
+                const entries = Object.entries(today);
+
+                if (!entries.length) {
+                    tbody.innerHTML =
+                        '<tr><td colspan="2" style="color:#888">No live-tracking activity yet today.</td></tr>';
+                    return;
+                }
+
+                for (const [source, count] of entries) {
+                    const tr = document.createElement('tr');
+
+                    const sourceTd = document.createElement('td');
+                    sourceTd.textContent = POSITION_SOURCE_LABELS[source] || source;
+
+                    const countTd = document.createElement('td');
+                    countTd.textContent = count;
+
+                    tr.appendChild(sourceTd);
+                    tr.appendChild(countTd);
+                    tbody.appendChild(tr);
+                }
+            } catch (err) {
+                console.error('Failed to load position-source stats:', err);
+                tbody.innerHTML =
+                   '<tr><td colspan="2" style="color:#888">Could not load live-position source statistics.</td></tr>';
+            }
+        }
         document.addEventListener('DOMContentLoaded', loadAll);
 	document.addEventListener('DOMContentLoaded', loadPositionSourceStats);
     </script>
