@@ -976,12 +976,35 @@ class RoundTouchDisplay:
         callsign = (display_data.get("callsign") or "").strip()
         icao24 = (display_data.get("icao_hex") or "").strip()
 
+        previous = self._live_map_last_result or {}
+
+        last_lat = display_data.get("plane_latitude")
+        if last_lat is None:
+            last_lat = display_data.get("latitude")
+        if last_lat is None:
+            last_lat = previous.get("plane_latitude")
+        if last_lat is None:
+            last_lat = previous.get("latitude")
+
+        last_lon = display_data.get("plane_longitude")
+        if last_lon is None:
+            last_lon = display_data.get("longitude")
+        if last_lon is None:
+            last_lon = previous.get("plane_longitude")
+        if last_lon is None:
+            last_lon = previous.get("longitude")
+
+        last_speed = previous.get("ground_speed")
+        if last_speed is None:
+            last_speed = previous.get("ground_speed")
+
         if now - self._live_map_last_fetch >= 1.0 and (callsign or icao24):
-            last_lat = display_data.get("plane_latitude")
-            last_lon = display_data.get("plane_longitude")
-            last_speed = display_data.get("ground_speed")
             if last_lat is not None and last_lon is not None:
                 try:
+                    logger.info(
+                        "[live_map] speed used for radius: %s kt",
+                        last_speed,
+                    )
                     entry, source, radius_km = position_source.fetch_live_position(
                         callsign=callsign,
                         icao24=icao24,
@@ -989,26 +1012,47 @@ class RoundTouchDisplay:
                         last_known_lon=float(last_lon),
                         last_known_speed_kt=last_speed,
                     )
+                    logger.info(
+                        "[live_map] source=%s radius=%.1f km live_speed=%s kt",
+                        source,
+                        radius_km,
+                        entry.get("ground_speed") if entry else None,
+                    )
                 except Exception:
                     logger.exception("[live_map] fetch_live_position failed")
-                    entry, source, radius_km = None, None, self._live_map_last_radius_km
+                    entry, source, radius_km = (
+                        None,
+                        None,
+                        self._live_map_last_radius_km,
+                    )
+
                 self._live_map_last_fetch = now
                 self._live_map_last_radius_km = radius_km
                 self._live_map_last_source = source
+
                 if entry:
                     self._live_map_last_result = entry
 
         result = self._live_map_last_result or display_data
+
         lat = result.get("plane_latitude")
+        if lat is None:
+            lat = result.get("latitude")
+
         lon = result.get("plane_longitude")
+        if lon is None:
+            lon = result.get("longitude")
+
         heading = result.get("heading", 0) or 0
         radius_km = self._live_map_last_radius_km
 
         draw.fill_background(self.surface)
+
         if lat is None or lon is None:
             # Nothing to center on yet (e.g. very first frame after opening
             # this page) — fall back to a plain background rather than a
             # crash; next throttled fetch will likely fill this in.
+            tracked.draw_footer(self.surface, display_data)
             nav.draw_breadcrumb(self.surface, ["Radar", "Track", "Live"])
             return
 
@@ -1018,22 +1062,41 @@ class RoundTouchDisplay:
             # the caller ("the screen module"), which is this method.
             side = theme.VISIBLE_RADIUS * 2
             map_surf = live_map.render_live_tracking_map(
-                lat=float(lat), lon=float(lon), heading=float(heading),
-                radius_km=float(radius_km), width=side, height=side, flight=result,
+                lat=float(lat),
+                lon=float(lon),
+                heading=float(heading),
+                radius_km=float(radius_km),
+                width=side,
+                height=side,
+                flight=result,
             )
+
             if map_surf is not None:
                 # Rotate the whole composed surface by -heading so the
-                # aircraft (drawn at `heading` inside render_live_tracking_map)
-                # ends up pointing straight up, with everything else rotating
-                # around it — same convention as heading-up radar modes.
+                # aircraft ends up pointing straight up.
                 rotated = pygame.transform.rotate(map_surf, -float(heading))
-                crop_rect = rotated.get_rect(center=(rotated.get_width() // 2, rotated.get_height() // 2))
+                crop_rect = rotated.get_rect(
+                    center=(rotated.get_width() // 2, rotated.get_height() // 2)
+                )
                 crop = pygame.Surface((side, side))
-                crop.blit(rotated, (0, 0), area=pygame.Rect(
-                    crop_rect.centerx - side // 2, crop_rect.centery - side // 2, side, side,
-                ))
+                crop.blit(
+                    rotated,
+                    (0, 0),
+                    area=pygame.Rect(
+                        crop_rect.centerx - side // 2,
+                        crop_rect.centery - side // 2,
+                        side,
+                        side,
+                    ),
+                )
+
                 mask = pygame.Surface((side, side), pygame.SRCALPHA)
-                pygame.draw.circle(mask, (255, 255, 255, 255), (side // 2, side // 2), side // 2)
+                pygame.draw.circle(
+                    mask,
+                    (255, 255, 255, 255),
+                    (side // 2, side // 2),
+                    side // 2,
+                )
                 clipped = crop.copy()
                 clipped.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
                 rect = clipped.get_rect(center=(theme.CENTER_X, theme.CENTER_Y))
@@ -1047,6 +1110,8 @@ class RoundTouchDisplay:
                 radius_km=float(radius_km),
                 flight=result,
             )
+
+        tracked.draw_footer(self.surface, display_data)
         nav.draw_breadcrumb(self.surface, ["Radar", "Track", "Live"])
 
     def _timeout_duration_s(self) -> float | None:
@@ -3206,12 +3271,18 @@ class RoundTouchDisplay:
                     opened = self._open_flight_or_fire_at(swipe_start[0], swipe_start[1])
                 if opened:
                     self._safe_draw()
-        elif swipe == input_handler.SWIPE_LEFT and self.screen == SCREEN_TRACKED:
+        elif swipe == input_handler.SWIPE_RIGHT and self.screen == SCREEN_TRACKED:
             if self._tracked_page == 0:
-                # First left-swipe within Tracked goes to the live map
+                # First right-swipe within Tracked goes to the live map
                 # (extended tracking) instead of leaving the screen.
                 self._tracked_page = 1
                 self._live_map_last_fetch = 0.0  # force an immediate fetch
+                self._note_activity()
+                self._safe_draw()
+        elif swipe == input_handler.SWIPE_LEFT and self.screen == SCREEN_TRACKED:
+            if self._tracked_page == 1:
+                # Back out of the live map to the Tracked overview first, instead of jumping straight to Radar.
+                self._tracked_page = 0
                 self._note_activity()
                 self._safe_draw()
             else:

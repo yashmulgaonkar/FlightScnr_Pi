@@ -94,6 +94,17 @@ def tap_footer_action(x: int, y: int, tracked_data=None) -> str | None:
         return None
     return buttons[idx]
 
+def draw_footer(surface: pygame.Surface, tracked_data=None) -> None:
+    """Draw the shared Tracked footer, including the pin state."""
+    nav.draw_footer_buttons(
+        surface,
+        list(footer_button_kinds(tracked_data)),
+        y_offset=_TRACKED_FOOTER_Y_OFFSET,
+        button_size=_TRACKED_FOOTER_BUTTON_SIZE,
+        button_gap=_TRACKED_FOOTER_BUTTON_GAP,
+        pin_active=is_pinned(),
+    )
+
 # Nearest-city cache for progress-bar landmark labels.
 _city_cache = {"lat": None, "lon": None, "result": None}
 _CITY_CACHE_THRESHOLD = 0.01
