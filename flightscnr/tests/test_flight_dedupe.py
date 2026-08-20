@@ -393,6 +393,101 @@ class TestFlightDedupe(unittest.TestCase):
             out = aircraft_alert.dedupe_flights([fr24, adsb])
         self.assertEqual(len(out), 2)
 
+    def test_callsign_keys_uae_to_ek(self):
+        from utilities.aircraft_alert import callsign_match_keys
+
+        keys = callsign_match_keys("UAE51N")
+        self.assertIn("UAE51N", keys)
+        self.assertIn("EK51N", keys)
+        keys_ek = callsign_match_keys("EK225")
+        self.assertIn("EK225", keys_ek)
+        self.assertIn("UAE225", keys_ek)
+
+    def test_dedupe_merges_uae_callsign_with_ek_flight_number(self):
+        """ATC callsign UAE51N vs marketing EK225 must collapse (same A388)."""
+        from utilities import aircraft_alert
+
+        fr24 = {
+            "callsign": "UAE51N",
+            "flight_number": "EK225",
+            "plane": "A388",
+            "plane_latitude": 37.55,
+            "plane_longitude": -122.25,
+            "altitude": 12000,
+            "data_source": "fr24_grpc",
+        }
+        adsb = {
+            "callsign": "EK225",
+            "plane": "A388",
+            "plane_latitude": 37.50,
+            "plane_longitude": -122.30,
+            "altitude": 12100,
+            "data_source": "adsb_fi",
+            "icao_hex": "896ABC",
+        }
+        # Identity already overlaps via flight_number; still assert merge.
+        with mock.patch.object(aircraft_alert.geo, "distance_km", return_value=8.0):
+            out = aircraft_alert.dedupe_flights([fr24, adsb])
+        self.assertEqual(len(out), 1)
+
+    def test_dedupe_merges_uae_vs_ek_without_shared_flight_id(self):
+        """FR24 ATC-only vs ADS-B IATA-only — same airline + type + alt."""
+        from utilities import aircraft_alert
+
+        fr24 = {
+            "callsign": "UAE51N",
+            "plane": "A388",
+            "plane_latitude": 37.55,
+            "plane_longitude": -122.25,
+            "altitude": 12000,
+            "data_source": "fr24_grpc",
+        }
+        adsb = {
+            "callsign": "EK225",
+            "plane": "A388",
+            "plane_latitude": 37.50,
+            "plane_longitude": -122.30,
+            "altitude": 12100,
+            "data_source": "adsb_fi",
+            "icao_hex": "896ABC",
+        }
+        self.assertFalse(
+            aircraft_alert.flights_share_identity(fr24, adsb),
+            "suffixes differ — identity alone must not match",
+        )
+        self.assertTrue(aircraft_alert.flights_share_airline(fr24, adsb))
+        with mock.patch.object(aircraft_alert.geo, "distance_km", return_value=8.0):
+            out = aircraft_alert.dedupe_flights([fr24, adsb])
+        self.assertEqual(len(out), 1)
+        self.assertTrue(
+            (out[0].get("callsign") or "") in ("UAE51N", "EK225")
+            or (out[0].get("flight_number") or "") == "EK225"
+        )
+
+    def test_dedupe_keeps_two_emirates_at_different_alts(self):
+        from utilities import aircraft_alert
+
+        a = {
+            "callsign": "UAE51N",
+            "plane": "A388",
+            "plane_latitude": 37.55,
+            "plane_longitude": -122.25,
+            "altitude": 12000,
+            "data_source": "fr24_grpc",
+        }
+        b = {
+            "callsign": "EK226",
+            "plane": "A388",
+            "plane_latitude": 37.50,
+            "plane_longitude": -122.30,
+            "altitude": 35000,
+            "data_source": "adsb_fi",
+            "icao_hex": "896DEF",
+        }
+        with mock.patch.object(aircraft_alert.geo, "distance_km", return_value=8.0):
+            out = aircraft_alert.dedupe_flights([a, b])
+        self.assertEqual(len(out), 2)
+
     def test_callsign_keys_icao_to_iata(self):
         from utilities.aircraft_alert import callsign_match_keys
 

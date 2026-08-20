@@ -190,13 +190,18 @@
             <p class="hint">Sets RUNWAY_DARKMAP — runway centerline color on the dark basemap (skipped on VFR).</p>
             <label for="map_style">Map style</label>
             <select id="map_style">
-                <option value="dark">Dark (CARTO)</option>
-                <option value="black">Flat black</option>
-                <option value="light">Light (CARTO)</option>
-                <option value="voyager">Voyager (CARTO)</option>
-                <option value="vfr">VFR sectional (FAA)</option>
+                <option value="dark">Dark: Carto</option>
+                <option value="osm">Dark: OSM</option>
+                <option value="stadia_dark">Dark: Stadia (needs STADIA_MAPS_API_KEY)</option>
+                <option value="black">Dark: Flat</option>
+                <option value="light">Light: Carto</option>
+                <option value="toner">Light: Toner (needs STADIA_MAPS_API_KEY)</option>
+                <option value="vfr">Light: VFR (FAA)</option>
+                <option value="streets">Street: Esri</option>
+                <option value="voyager">Street: Voyager (CARTO)</option>
+                <option value="satellite">Satellite: Esri</option>
             </select>
-            <p class="hint">VFR sectionals are free public-domain FAA charts (US coverage). Outside the US, use dark, light, Voyager, or flat black.</p>
+            <p class="hint">Dark/Light/Street/Satellite Carto, OSM, Esri, Voyager, Flat, and VFR need no key. Dark: Stadia and Light: Toner need a free STADIA_MAPS_API_KEY. VFR sectionals are public-domain FAA charts (US coverage).</p>
             <label for="vfr_opacity">VFR map opacity <span id="vfr_opacity_label">45%</span></label>
             <input id="vfr_opacity" type="range" min="15" max="100" step="1" value="45">
             <p class="hint">How strong the VFR chart appears under traffic (lower = paler). Applies when map style is VFR.</p>

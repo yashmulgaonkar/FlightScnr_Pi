@@ -1075,17 +1075,32 @@ def _is_tracked(flight) -> bool:
 
 
 def _light_basemap() -> bool:
-    """Pale street / VFR charts need a dedicated high-contrast overlay palette."""
+    """Pale street / VFR / imagery charts need high-contrast tags (not icon color)."""
     try:
-        return settings.map_style() in ("light", "voyager", "vfr")
+        return settings.map_style() in (
+            "light",
+            "voyager",
+            "vfr",
+            "toner",
+            "satellite",
+            "streets",
+        )
+    except Exception:
+        return False
+
+
+def _amber_icon_basemap() -> bool:
+    """Basemaps that use dark-amber aircraft icons instead of radar yellow."""
+    try:
+        return settings.map_style() in ("light", "vfr")
     except Exception:
         return False
 
 
 # High-contrast overlay for busy pale charts (VFR / light / Voyager CARTO).
-# Near-black silhouettes drown in sectional ink (airspace, labels); amber
-# matches dark-radar traffic and stays off the chart's blue/green palette.
-_LIGHT_MAP_ICON = (234, 88, 12)         # vivid amber-orange
+# Near-black tags stay readable on sectional ink and pale street maps.
+# Aircraft icons: yellow on most basemaps; dark amber only on Light: Carto / VFR.
+_LIGHT_MAP_ICON = (234, 88, 12)         # dark amber (Light: Carto / VFR)
 _LIGHT_MAP_ICON_UNKNOWN = (146, 64, 14)  # darker amber for unmapped types
 _LIGHT_MAP_TRACKED = (22, 163, 74)      # vivid green (tracked)
 _LIGHT_MAP_CALLSIGN = (15, 23, 42)      # near-black tags
@@ -1102,13 +1117,22 @@ _LIGHT_MAP_ALERT_EMERGENCY = _LIGHT_MAP_ALERT_MIL  # solid red, same as military
 def _overlay_color_for_basemap(color: tuple) -> tuple:
     """Map dark-radar accents to legible colors on light/VFR basemaps."""
     r, g, b = int(color[0]), int(color[1]), int(color[2])
+    key = (r, g, b)
+    icon_keys = (
+        tuple(theme.AIRCRAFT[:3]),
+        tuple(theme.AIRCRAFT_UNKNOWN[:3]),
+        tuple(theme.VESSEL_MOVING[:3]),
+    )
+    # Icon color is per basemap: amber only on Light: Carto / VFR; else yellow.
+    if key in icon_keys:
+        if _amber_icon_basemap():
+            if key == tuple(theme.AIRCRAFT_UNKNOWN[:3]):
+                return _LIGHT_MAP_ICON_UNKNOWN
+            return _LIGHT_MAP_ICON
+        return (r, g, b)
     if not _light_basemap():
         return (r, g, b)
-    key = (r, g, b)
     mapping = {
-        tuple(theme.AIRCRAFT[:3]): _LIGHT_MAP_ICON,
-        tuple(theme.AIRCRAFT_UNKNOWN[:3]): _LIGHT_MAP_ICON_UNKNOWN,
-        tuple(theme.VESSEL_MOVING[:3]): _LIGHT_MAP_ICON,
         tuple(theme.SWEEP[:3]): _LIGHT_MAP_TRACKED,
         tuple(theme.GRID[:3]): _LIGHT_MAP_CALLSIGN,
         tuple(theme.TAG_TYPE[:3]): _LIGHT_MAP_TYPE,

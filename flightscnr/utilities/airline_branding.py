@@ -40,9 +40,22 @@ MARKETING_BRANDS = {
     "EI": "Aer Lingus",
     "AY": "Finnair",
     "AC": "Air Canada",
+    "EK": "Emirates",
+    "EY": "Etihad Airways",
+    "QR": "Qatar Airways",
+    "SQ": "Singapore Airlines",
+    "CX": "Cathay Pacific",
+    "QF": "Qantas",
+    "NH": "ANA",
+    "JL": "Japan Airlines",
+    "TK": "Turkish Airlines",
+    "LX": "SWISS",
+    "OS": "Austrian",
+    "TP": "TAP Air Portugal",
+    "VS": "Virgin Atlantic",
 }
 
-# Marketing IATA prefix → ICAO code (logo filename)
+# Marketing IATA prefix → ICAO code (logo filename / callsign alias)
 IATA_TO_ICAO = {
     "AA": "AAL",
     "UA": "UAL",
@@ -62,6 +75,18 @@ IATA_TO_ICAO = {
     "AY": "FIN",
     "AC": "ACA",
     "QR": "QTR",
+    "EK": "UAE",
+    "EY": "ETD",
+    "SQ": "SIA",
+    "CX": "CPA",
+    "QF": "QFA",
+    "NH": "ANA",
+    "JL": "JAL",
+    "TK": "THY",
+    "LX": "SWR",
+    "OS": "AUA",
+    "TP": "TAP",
+    "VS": "VIR",
 }
 
 

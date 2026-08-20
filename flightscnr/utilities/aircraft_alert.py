@@ -105,7 +105,7 @@ def callsign_match_keys(callsign: str) -> frozenset[str]:
         icao = IATA_TO_ICAO.get(cs[:2])
         if icao:
             keys.add(icao + cs[2:])
-    # ICAO → IATA (UAL123 → UA123)
+    # ICAO → IATA (UAL123 → UA123; UAE51N → EK51N)
     if len(cs) >= 4 and cs[:3].isalpha() and cs[3].isdigit():
         icao_prefix = cs[:3]
         for iata, icao in IATA_TO_ICAO.items():
@@ -240,6 +240,41 @@ def _callsign_keys(flight: dict) -> frozenset[str]:
     return frozenset(keys)
 
 
+def _airline_codes_from_callsign_keys(keys: frozenset[str]) -> frozenset[str]:
+    """IATA + ICAO airline codes present in callsign/flight-number keys."""
+    if not keys:
+        return frozenset()
+    try:
+        from utilities.airline_branding import IATA_TO_ICAO
+    except ImportError:
+        IATA_TO_ICAO = {}
+    icao_to_iata = {icao: iata for iata, icao in IATA_TO_ICAO.items()}
+    codes: set[str] = set()
+    for cs in keys:
+        if looks_like_registration(cs):
+            continue
+        if len(cs) >= 3 and cs[:2].isalpha() and cs[2].isdigit():
+            iata = cs[:2]
+            codes.add(iata)
+            icao = IATA_TO_ICAO.get(iata)
+            if icao:
+                codes.add(icao)
+        elif len(cs) >= 4 and cs[:3].isalpha() and cs[3].isdigit():
+            icao = cs[:3]
+            codes.add(icao)
+            iata = icao_to_iata.get(icao)
+            if iata:
+                codes.add(iata)
+    return frozenset(codes)
+
+
+def flights_share_airline(a: dict, b: dict) -> bool:
+    """True when both assert the same airline (UAE51N ↔ EK225)."""
+    left = _airline_codes_from_callsign_keys(_callsign_keys(a))
+    right = _airline_codes_from_callsign_keys(_callsign_keys(b))
+    return bool(left and right and (left & right))
+
+
 def _normalized_type(flight: dict) -> str:
     return "".join(str(flight.get("plane") or "").upper().split())
 
@@ -269,9 +304,16 @@ def position_merge_threshold_km(a: dict, b: dict, *, near_km: float = 1.2) -> fl
     keys_a = _callsign_keys(a)
     keys_b = _callsign_keys(b)
     # Extended radius only when at least one side lacks a callsign, or they agree.
-    # Disagreeing callsigns (QTR5Q vs N653ND) stay on the tight threshold.
+    # Disagreeing callsigns (QTR5Q vs UAL100) stay on the tight threshold — unless
+    # both are the same airline with a marketing vs ATC id (UAE51N vs EK225).
     if keys_a and keys_b and keys_a.isdisjoint(keys_b):
-        return near_km
+        if not (
+            flights_share_airline(a, b)
+            and _types_compatible(a, b)
+            and _altitudes_match(a, b)
+        ):
+            return near_km
+        return _CROSS_FEED_THRESHOLD_KM
     # Departure/climb: FR24 can sit at 600 ft near the runway while ADS-B is
     # already at 2,000+ ft a few km out. Same ICAO type + a blank ident is
     # enough to use the wide radius without an altitude gate.
@@ -366,9 +408,13 @@ def dedupe_flights(flights: list[dict], *, threshold_km: float = 1.2) -> list[di
         return score
 
     cell_deg = max(0.005, threshold_km / 111.0)
+    wide_cell_deg = max(cell_deg, _CROSS_FEED_THRESHOLD_KM / 111.0)
 
     def _cell(lat: float, lon: float) -> tuple[int, int]:
         return (int(lat / cell_deg), int(lon / cell_deg))
+
+    def _wide_cell(lat: float, lon: float) -> tuple[int, int]:
+        return (int(lat / wide_cell_deg), int(lon / wide_cell_deg))
 
     def _is_fr24(flight: dict) -> bool:
         return (flight.get("data_source") or "").startswith("fr24")
@@ -380,6 +426,7 @@ def dedupe_flights(flights: list[dict], *, threshold_km: float = 1.2) -> list[di
     kept: list[dict] = []
     by_identity: dict[str, int] = {}
     by_cell: dict[tuple[int, int], list[int]] = {}
+    by_wide_cell: dict[tuple[int, int], list[int]] = {}
     wide_idxs: list[int] = []
 
     def _index(idx: int, flight: dict) -> None:
@@ -392,6 +439,7 @@ def dedupe_flights(flights: list[dict], *, threshold_km: float = 1.2) -> list[di
             lat = lon = None
         if lat is not None:
             by_cell.setdefault(_cell(lat, lon), []).append(idx)
+            by_wide_cell.setdefault(_wide_cell(lat, lon), []).append(idx)
         if _needs_wide(flight) or _is_fr24(flight):
             if idx not in wide_idxs:
                 wide_idxs.append(idx)
@@ -406,12 +454,13 @@ def dedupe_flights(flights: list[dict], *, threshold_km: float = 1.2) -> list[di
         except (KeyError, TypeError, ValueError):
             lat = lon = None
         if lat is not None:
-            bucket = by_cell.get(_cell(lat, lon))
-            if bucket:
-                try:
-                    bucket.remove(idx)
-                except ValueError:
-                    pass
+            for grid, cell_fn in ((by_cell, _cell), (by_wide_cell, _wide_cell)):
+                bucket = grid.get(cell_fn(lat, lon))
+                if bucket:
+                    try:
+                        bucket.remove(idx)
+                    except ValueError:
+                        pass
         try:
             wide_idxs.remove(idx)
         except ValueError:
@@ -439,9 +488,23 @@ def dedupe_flights(flights: list[dict], *, threshold_km: float = 1.2) -> list[di
                         flight, kept[idx], near_km=threshold_km
                     ):
                         return idx
-        # Wide cross-feed: blank-callsign vs lagged opposite feed (up to ~15 km).
-        # Identified ADS-B is kept off wide_idxs (avoids FR24×ADS-B O(n·m)), so
-        # also pair identified ADS-B with blank FR24 ghosts in both input orders.
+        # Wide cross-feed grid (~15 km cells): catches lagged FR24 vs ADS-B when
+        # ATC callsign and IATA flight number disagree (UAE51N vs EK225).
+        wy, wx = _wide_cell(lat, lon)
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                for idx in by_wide_cell.get((wy + dy, wx + dx), ()):
+                    if idx in checked:
+                        continue
+                    checked.add(idx)
+                    other = kept[idx]
+                    if not is_cross_feed_pair(flight, other):
+                        continue
+                    if flights_match_by_position(
+                        flight, other, near_km=threshold_km
+                    ):
+                        return idx
+        # Legacy blank-callsign wide list (covers odd orderings / missing coords).
         flight_fr24 = _is_fr24(flight)
         flight_blank = _needs_wide(flight)
         if flight_blank or flight_fr24:
