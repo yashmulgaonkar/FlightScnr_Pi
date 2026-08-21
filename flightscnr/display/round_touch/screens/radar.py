@@ -377,6 +377,7 @@ def _backdrop_cache_key(*, pan_mode: bool, calibrate: bool):
         settings.theme_custom(),
         settings.theme_rgb(),
         settings.runway_darkmap_rgb(),
+        settings.runway_light_rgb(),
         settings.show_airport_icons(),
         settings.show_airport_centerlines(),
         settings.distance_units(),

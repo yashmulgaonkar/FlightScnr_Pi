@@ -10,9 +10,7 @@
 """Unit tests for display/round_touch/live_map.py (extended tracking map).
 
 Runs headless (SDL_VIDEODRIVER=dummy) and without network access — the
-zoom/crop/center math is tested directly; actual tile fetching is
-exercised separately by quick_test_live_map.py (interactive, needs a
-real display + internet).
+zoom/crop/center math is tested directly; tile fetching is not exercised.
 """
 
 from __future__ import annotations
@@ -82,17 +80,55 @@ class TestStickyViewport(unittest.TestCase):
         from display.round_touch import live_map
 
         bounds = live_map._bounds_for_center(53.63, 9.99, 20.0 * live_map._OVERSCAN)
-        vp = {"bounds": bounds}
+        vp = {"bounds": bounds, "radius_km": 20.0}
         # ~1km drift, well inside an overscanned 36km half-span.
-        self.assertFalse(live_map._needs_new_viewport(vp, 53.639, 9.99))
+        self.assertFalse(live_map._needs_new_viewport(vp, 53.639, 9.99, 20.0))
 
     def test_large_drift_triggers_refetch(self):
         from display.round_touch import live_map
 
         bounds = live_map._bounds_for_center(53.63, 9.99, 20.0 * live_map._OVERSCAN)
-        vp = {"bounds": bounds}
+        vp = {"bounds": bounds, "radius_km": 20.0}
         # Far outside even the overscanned area.
-        self.assertTrue(live_map._needs_new_viewport(vp, 54.5, 9.99))
+        self.assertTrue(live_map._needs_new_viewport(vp, 54.5, 9.99, 20.0))
+
+    def test_small_radius_noise_does_not_trigger_refetch(self):
+        from display.round_touch import live_map
+
+        bounds = live_map._bounds_for_center(53.63, 9.99, 20.0 * live_map._OVERSCAN)
+        vp = {"bounds": bounds, "radius_km": 20.0}
+        # ~1km radius jitter — inside hysteresis.
+        self.assertFalse(live_map._needs_new_viewport(vp, 53.63, 9.99, 21.0))
+
+    def test_large_radius_change_triggers_refetch(self):
+        from display.round_touch import live_map
+
+        bounds = live_map._bounds_for_center(53.63, 9.99, 20.0 * live_map._OVERSCAN)
+        vp = {"bounds": bounds, "radius_km": 20.0}
+        self.assertTrue(live_map._needs_new_viewport(vp, 53.63, 9.99, 35.0))
+
+
+class TestStabilizeRadius(unittest.TestCase):
+    def test_holds_previous_when_speed_missing(self):
+        from display.round_touch import live_map
+
+        self.assertEqual(
+            live_map.stabilize_radius_km(22.0, 8.0, have_speed=False), 22.0
+        )
+
+    def test_ignores_small_jitter(self):
+        from display.round_touch import live_map
+
+        self.assertEqual(
+            live_map.stabilize_radius_km(20.0, 21.5, have_speed=True), 20.0
+        )
+
+    def test_accepts_real_speed_change(self):
+        from display.round_touch import live_map
+
+        self.assertEqual(
+            live_map.stabilize_radius_km(20.0, 35.0, have_speed=True), 35.0
+        )
 
 
 class TestAircraftAlwaysCentered(unittest.TestCase):
@@ -137,6 +173,57 @@ class TestAircraftAlwaysCentered(unittest.TestCase):
                 )
                 self.assertIsNotNone(surf)
                 self.assertEqual(surf.get_size(), (w, h))
+        finally:
+            live_map.invalidate()
+
+
+class TestFollowProjection(unittest.TestCase):
+    """lat_lon_to_follow_panel maps the aircraft to panel center after render."""
+
+    @classmethod
+    def setUpClass(cls):
+        import pygame
+
+        pygame.init()
+        pygame.display.set_mode((64, 64))
+
+    @classmethod
+    def tearDownClass(cls):
+        import pygame
+
+        pygame.quit()
+
+    def test_aircraft_projects_to_panel_center(self):
+        import pygame
+        from display.round_touch import live_map
+        from display.round_touch import route_map as _rm
+
+        w = h = 200
+        lat, lon = 37.5, -122.2
+        style = _rm._route_map_style()
+        bounds = live_map._bounds_for_center(lat, lon, 20.0 * live_map._OVERSCAN)
+        key = live_map._viewport_key(w, h, style)
+        live_map._viewport[key] = {
+            "bounds": bounds,
+            "raster": pygame.Surface((int(w * live_map._OVERSCAN), int(h * live_map._OVERSCAN))),
+            "raster_w": int(w * live_map._OVERSCAN),
+            "raster_h": int(h * live_map._OVERSCAN),
+        }
+        try:
+            surf = live_map.render_live_tracking_map(
+                lat=lat,
+                lon=lon,
+                heading=0.0,
+                radius_km=20.0,
+                width=w,
+                height=h,
+                flight={"callsign": "TEST1"},
+            )
+            self.assertIsNotNone(surf)
+            pos = live_map.lat_lon_to_follow_panel(lat, lon)
+            self.assertIsNotNone(pos)
+            self.assertAlmostEqual(pos[0], w / 2, delta=2)
+            self.assertAlmostEqual(pos[1], h / 2, delta=2)
         finally:
             live_map.invalidate()
 

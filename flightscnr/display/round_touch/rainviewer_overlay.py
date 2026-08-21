@@ -671,6 +671,10 @@ def invalidate() -> None:
         _meta_provider_id = None
         _meta_ts = 0.0
     _provider_fail_until.clear()
+    with _follow_lock:
+        global _follow_viewport, _follow_loading
+        _follow_viewport = None
+        _follow_loading = False
 
 
 def cache_token() -> object:
@@ -737,3 +741,298 @@ def attribution_text() -> str | None:
     if provider is None:
         return "© LibreWXR / RainViewer"
     return str(provider["attribution"])
+
+
+# --- Follow (aircraft-centered) precip ---------------------------------------
+# Sticky overscanned rain raster + per-frame crop (same idea as live_map):
+# fetch occasionally, pan under the aircraft every frame so rain does not lag
+# behind the basemap.
+
+_follow_lock = threading.Lock()
+_follow_viewport: dict[str, Any] | None = None
+_follow_loading = False
+
+# Match live_map overscan so rain has headroom to pan until sticky refetch.
+_FOLLOW_OVERSCAN = 1.8
+_FOLLOW_STICKY_MARGIN = 0.55  # of overscanned half-span
+_FOLLOW_RADIUS_HYST_KM = 2.0
+_FOLLOW_RADIUS_HYST_FRAC = 0.15
+
+
+def _follow_bounds_for_center(
+    lat: float, lon: float, radius_km: float
+) -> tuple[float, float, float, float]:
+    """Geographic box around (lat, lon) spanning ``radius_km`` (half-side)."""
+    km_per_deg_lat = 111.0
+    lat_delta = radius_km / km_per_deg_lat
+    km_per_deg_lon = km_per_deg_lat * math.cos(math.radians(lat))
+    lon_delta = radius_km / km_per_deg_lon if km_per_deg_lon > 0.01 else lat_delta
+    return lat - lat_delta, lat + lat_delta, lon - lon_delta, lon + lon_delta
+
+
+def _follow_needs_refetch(
+    vp: dict[str, Any] | None,
+    lat: float,
+    lon: float,
+    radius_km: float,
+    frame_time: int | None,
+    provider_id: str | None,
+) -> bool:
+    """True when the sticky rain raster should be rebuilt."""
+    if vp is None or vp.get("raster") is None:
+        return True
+    if frame_time is not None and int(vp.get("frame_time") or 0) != int(frame_time):
+        return True
+    if provider_id and str(vp.get("provider_id") or "") != str(provider_id):
+        return True
+    try:
+        old_r = float(vp.get("radius_km") or 0)
+        new_r = float(radius_km)
+    except (TypeError, ValueError):
+        old_r, new_r = 0.0, 0.0
+    if old_r > 0 and new_r > 0:
+        if abs(new_r - old_r) >= max(
+            _FOLLOW_RADIUS_HYST_KM, old_r * _FOLLOW_RADIUS_HYST_FRAC
+        ):
+            return True
+    try:
+        min_lat, max_lat, min_lon, max_lon = vp["bounds"]
+    except (KeyError, TypeError, ValueError):
+        return True
+    lat_half = (max_lat - min_lat) / 2.0
+    lon_half = (max_lon - min_lon) / 2.0
+    if lat_half <= 0 or lon_half <= 0:
+        return True
+    center_lat = (max_lat + min_lat) / 2.0
+    center_lon = (max_lon + min_lon) / 2.0
+    d_lat = abs(lat - center_lat) / lat_half
+    d_lon = abs(lon - center_lon) / lon_half
+    return max(d_lat, d_lon) > _FOLLOW_STICKY_MARGIN
+
+
+def _build_follow_overlay(
+    lat: float,
+    lon: float,
+    radius_km: float,
+    host: str,
+    path: str,
+    provider: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Fetch/crop an overscanned rain raster centered on the aircraft.
+
+    Returns a viewport dict ``{raster, bounds, raster_w, raster_h, radius_km, ...}``
+    or None on failure. The raster covers ``radius_km * _FOLLOW_OVERSCAN`` so
+    blit can pan a visible ``radius_km`` window under the plane each frame.
+    """
+    zoom = MAX_ZOOM
+    tile_mode = str(provider.get("tile_mode") or "maps")
+    if tile_mode == "slippy":
+        tile = _fetch_slippy_composite(host, path, lat, lon, zoom)
+    else:
+        tile = _fetch_maps_tile(host, path, lat, lon, zoom)
+    if tile is None:
+        return None
+
+    tile_km = TILE_SIZE * _meters_per_pixel(lat, zoom) / 1000.0
+    if tile_km <= 0:
+        return None
+    overscan_radius_km = max(1.0, float(radius_km) * _FOLLOW_OVERSCAN)
+    diameter_km = overscan_radius_km * 2.0
+    crop_px = max(8, int(round(TILE_SIZE * (diameter_km / tile_km))))
+    crop_px = min(crop_px, TILE_SIZE)
+    tw, th = tile.get_size()
+    cx, cy = tw // 2, th // 2
+    half = crop_px // 2
+    rect = pygame.Rect(cx - half, cy - half, crop_px, crop_px).clip(tile.get_rect())
+    if rect.w <= 0 or rect.h <= 0:
+        return None
+    cropped = tile.subsurface(rect).copy()
+    raster = _with_alpha(cropped, OVERLAY_ALPHA)
+    bounds = _follow_bounds_for_center(lat, lon, overscan_radius_km)
+    return {
+        "raster": raster,
+        "bounds": bounds,
+        "raster_w": int(raster.get_width()),
+        "raster_h": int(raster.get_height()),
+        "radius_km": float(radius_km),
+        "lat": float(lat),
+        "lon": float(lon),
+    }
+
+
+def _crop_follow_window(
+    vp: dict[str, Any],
+    lat: float,
+    lon: float,
+    panel_w: int,
+    panel_h: int,
+) -> tuple[pygame.Surface, int, int] | None:
+    """Crop a panel-sized (pre-scale) window from the sticky rain raster.
+
+    Returns ``(window_surface, crop_x, crop_y)`` in raster pixel space, or None.
+    Window size is ``raster / OVERSCAN`` so scaling to the panel shows
+    ``radius_km`` geographically (matching the sticky fetch).
+    """
+    raster = vp.get("raster")
+    if raster is None:
+        return None
+    try:
+        min_lat, max_lat, min_lon, max_lon = vp["bounds"]
+        raster_w = int(vp["raster_w"])
+        raster_h = int(vp["raster_h"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if raster_w < 8 or raster_h < 8:
+        return None
+
+    from display.round_touch import route_map as _rm
+
+    px, py = _rm._mercator_to_panel(
+        lat,
+        lon,
+        min_lat=min_lat,
+        max_lat=max_lat,
+        min_lon=min_lon,
+        max_lon=max_lon,
+        left=0,
+        top=0,
+        width=raster_w,
+        height=raster_h,
+    )
+    # Visible window ≈ raster / overscan (panel geographic radius).
+    win_w = max(8, int(round(raster_w / _FOLLOW_OVERSCAN)))
+    win_h = max(8, int(round(raster_h / _FOLLOW_OVERSCAN)))
+    if panel_w > 0 and panel_h > 0 and panel_w != panel_h:
+        aspect = panel_w / float(panel_h)
+        if aspect >= 1.0:
+            win_w = max(8, int(round(win_h * aspect)))
+        else:
+            win_h = max(8, int(round(win_w / aspect)))
+    crop_x = int(round(px - win_w / 2))
+    crop_y = int(round(py - win_h / 2))
+    crop_x = max(0, min(crop_x, raster_w - win_w))
+    crop_y = max(0, min(crop_y, raster_h - win_h))
+    rect = pygame.Rect(crop_x, crop_y, win_w, win_h).clip(raster.get_rect())
+    if rect.w <= 0 or rect.h <= 0:
+        return None
+    window = raster.subsurface(rect).copy()
+    if rect.w != win_w or rect.h != win_h:
+        padded = pygame.Surface((win_w, win_h), pygame.SRCALPHA)
+        padded.blit(window, (0, 0))
+        window = padded
+    return window, crop_x, crop_y
+
+
+def _follow_worker(lat: float, lon: float, radius_km: float) -> None:
+    global _follow_viewport, _follow_loading
+    try:
+        meta, provider_id = _cached_metadata()
+        if meta is None or not provider_id or _metadata_stale():
+            for provider in PROVIDERS:
+                if not _provider_available(str(provider["id"])):
+                    continue
+                fetched = _fetch_metadata_for(provider)
+                if fetched is None:
+                    _mark_provider_failed(str(provider["id"]))
+                    continue
+                _set_metadata(fetched, str(provider["id"]))
+                _mark_provider_ok(str(provider["id"]))
+                meta, provider_id = fetched, str(provider["id"])
+                break
+            else:
+                meta, provider_id = _cached_metadata()
+        if meta is None or not provider_id:
+            return
+        frame = _latest_frame(meta)
+        if frame is None:
+            return
+        host, path, frame_time = frame
+        provider = _provider_by_id(provider_id)
+        if provider is None:
+            return
+        with _follow_lock:
+            vp = _follow_viewport
+        if not _follow_needs_refetch(vp, lat, lon, radius_km, frame_time, provider_id):
+            return
+        built = _build_follow_overlay(lat, lon, radius_km, host, path, provider)
+        if built is None:
+            return
+        built["frame_time"] = int(frame_time)
+        built["provider_id"] = str(provider_id)
+        with _follow_lock:
+            _follow_viewport = built
+    except Exception:
+        logger.exception("[follow] precip build failed")
+    finally:
+        with _follow_lock:
+            _follow_loading = False
+
+
+def blit_follow_overlay(
+    surface: pygame.Surface,
+    *,
+    lat: float,
+    lon: float,
+    radius_km: float,
+    width: int,
+    height: int,
+) -> None:
+    """Blit aircraft-centered precip onto a Follow panel (north-up).
+
+    Pans a sticky overscanned rain raster under the aircraft each frame so
+    precip stays locked to the basemap while the plane is centered.
+    """
+    global _follow_loading
+    if not _enabled():
+        return
+    try:
+        from display.round_touch import settings as _settings
+
+        if not _settings.show_precipitation():
+            return
+    except Exception:
+        return
+
+    side = min(width, height)
+    meta, provider_id = _cached_metadata()
+    frame = _latest_frame(meta)
+    frame_time = frame[2] if frame is not None else None
+
+    with _follow_lock:
+        vp = _follow_viewport
+        loading = _follow_loading
+
+    if (
+        _follow_needs_refetch(vp, lat, lon, radius_km, frame_time, provider_id)
+        and not loading
+    ):
+        with _follow_lock:
+            if not _follow_loading:
+                _follow_loading = True
+                threading.Thread(
+                    target=_follow_worker,
+                    args=(lat, lon, radius_km),
+                    daemon=True,
+                    name="follow-rain",
+                ).start()
+
+    with _follow_lock:
+        vp = _follow_viewport
+    if vp is None or vp.get("raster") is None:
+        return
+
+    cropped = _crop_follow_window(vp, lat, lon, width, height)
+    if cropped is None:
+        return
+    window, _crop_x, _crop_y = cropped
+    try:
+        scaled = pygame.transform.smoothscale(window, (side, side))
+    except pygame.error:
+        scaled = pygame.transform.scale(window, (side, side))
+    mask = pygame.Surface((side, side), pygame.SRCALPHA)
+    pygame.draw.circle(
+        mask, (255, 255, 255, 255), (side // 2, side // 2), side // 2
+    )
+    clipped = scaled.copy()
+    clipped.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    surface.blit(clipped, clipped.get_rect(center=(width // 2, height // 2)))

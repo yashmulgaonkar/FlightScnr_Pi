@@ -9,11 +9,10 @@
 
 """Extended tracking: live-centered map, full round panel.
 
-Reached by swiping left twice from Radar (Radar -> Track -> this screen),
-per the feature discussed for the "erweiterte Tracking" mode: instead of
-just the compact route-progress map on the Track screen, this shows the
-aircraft fixed at the panel center with the map itself panning underneath
-it, following the aircraft in real time.
+Own screen to the left of Tracked (Radar <- Tracked <- Live): swipe right
+from Track to open it. Instead of the compact route-progress map on Track,
+this shows the aircraft fixed at the panel center with the map itself
+panning underneath it, following the aircraft in real time.
 
 Two things are deliberately NOT reused from route_map.py, because that
 module is tuned for a very different scale (a whole flown route, often
@@ -68,6 +67,14 @@ _OVERSCAN = 1.8
 # you can actually see", not before, not long after.
 _STICKY_MARGIN = 0.55
 
+# Radius (zoom) hysteresis: ADS-B ground speed jitters a few knots every
+# second; without this, sticky basemap refetches (triggered by position
+# drift) suddenly adopt a different speed-derived radius and the map
+# appears to "randomly" change zoom. Also ignore a missing/zero speed
+# reading so we don't snap to the 8km floor.
+_RADIUS_HYST_FRAC = 0.15
+_RADIUS_HYST_KM = 2.0
+
 # Zoom ceiling appropriate for this screen's scale (street/neighborhood
 # level), unlike route_map.py's z_hi=7 (continent-scale route overviews).
 # 18 is close to the practical max most tile providers serve; the tile-
@@ -79,10 +86,67 @@ _MAX_LIVE_TILES = 81  # 9x9 tiles - generous for an 8-48km box, still Pi-friendl
 # Cached viewport state: bounds actually fetched, the raster surface, and
 # its pixel size. Keyed by (panel_width, panel_height, style) so switching
 # map style / panel size starts a fresh viewport instead of reusing a
-# mismatched one.
+# mismatched one. Each entry also stores the radius_km used for the fetch
+# so a real speed-derived zoom change can invalidate the sticky raster.
 _viewport: dict[tuple, dict] = {}
 _inflight: set[tuple] = set()
 _lock = threading.Lock()
+
+# Last crop used by render_live_tracking_map — for overlay projection.
+_last_panel_view: dict | None = None
+
+
+def lat_lon_to_follow_panel(lat: float, lon: float) -> tuple[float, float] | None:
+    """Map a lat/lon into the current Follow panel pixel space (0..w, 0..h).
+
+    Uses the sticky viewport + crop from the most recent render. Returns None
+    when no view is ready yet.
+    """
+    view = _last_panel_view
+    if not view:
+        return None
+    try:
+        min_lat, max_lat, min_lon, max_lon = view["bounds"]
+        px, py = _rm._mercator_to_panel(
+            float(lat),
+            float(lon),
+            min_lat=min_lat,
+            max_lat=max_lat,
+            min_lon=min_lon,
+            max_lon=max_lon,
+            left=0,
+            top=0,
+            width=int(view["raster_w"]),
+            height=int(view["raster_h"]),
+        )
+        return float(px) - float(view["crop_x"]), float(py) - float(view["crop_y"])
+    except Exception:
+        return None
+
+
+def stabilize_radius_km(
+    previous: float, candidate: float, *, have_speed: bool
+) -> float:
+    """Hold Follow map zoom steady through noisy or missing ground speed.
+
+    Returns ``previous`` when speed is missing/zero (avoid snapping to the
+    min-radius floor) or when ``candidate`` only moved within hysteresis.
+    """
+    try:
+        prev = float(previous)
+    except (TypeError, ValueError):
+        prev = 0.0
+    try:
+        cand = float(candidate)
+    except (TypeError, ValueError):
+        return prev if prev > 0 else 8.0
+    if not have_speed:
+        return prev if prev > 0 else cand
+    if prev <= 0:
+        return cand
+    if abs(cand - prev) < max(_RADIUS_HYST_KM, prev * _RADIUS_HYST_FRAC):
+        return prev
+    return cand
 
 
 def _bounds_for_center(lat: float, lon: float, radius_km: float) -> tuple[float, float, float, float]:
@@ -101,9 +165,21 @@ def _viewport_key(width: int, height: int, style: str) -> tuple:
     return (int(width), int(height), style)
 
 
-def _needs_new_viewport(vp: dict | None, lat: float, lon: float) -> bool:
+def _needs_new_viewport(
+    vp: dict | None, lat: float, lon: float, radius_km: float | None = None
+) -> bool:
     if vp is None:
         return True
+    # Significant speed-derived radius change → new tile zoom / extent.
+    if radius_km is not None:
+        try:
+            old_r = float(vp.get("radius_km") or 0)
+            new_r = float(radius_km)
+        except (TypeError, ValueError):
+            old_r, new_r = 0.0, 0.0
+        if old_r > 0 and new_r > 0:
+            if abs(new_r - old_r) >= max(_RADIUS_HYST_KM, old_r * _RADIUS_HYST_FRAC):
+                return True
     min_lat, max_lat, min_lon, max_lon = vp["bounds"]
     lat_half = (max_lat - min_lat) / 2.0
     lon_half = (max_lon - min_lon) / 2.0
@@ -119,9 +195,11 @@ def _needs_new_viewport(vp: dict | None, lat: float, lon: float) -> bool:
 def invalidate() -> None:
     """Call when the tracked aircraft changes (new callsign) so the old
     aircraft's viewport isn't shown for a frame before the new one loads."""
+    global _last_panel_view
     with _lock:
         _viewport.clear()
         _inflight.clear()
+    _last_panel_view = None
 
 
 def _pick_zoom_for_live_map(
@@ -231,7 +309,7 @@ def _request_live_viewport(
     key = _viewport_key(width, height, style)
     with _lock:
         vp = _viewport.get(key)
-        stale = _needs_new_viewport(vp, lat, lon)
+        stale = _needs_new_viewport(vp, lat, lon, radius_km)
         if not stale:
             return vp
         if key in _inflight:
@@ -242,6 +320,7 @@ def _request_live_viewport(
     raster_h = max(1, int(height * _OVERSCAN))
     overscan_radius_km = radius_km * _OVERSCAN
     bounds = _bounds_for_center(lat, lon, overscan_radius_km)
+    fetch_radius_km = float(radius_km)
 
     def _work():
         try:
@@ -252,12 +331,15 @@ def _request_live_viewport(
                     if len(_viewport) > 6:
                         _viewport.pop(next(iter(_viewport)), None)
                     _viewport[key] = {
-                        "bounds": bounds, "raster": raster,
-                        "raster_w": raster_w, "raster_h": raster_h,
+                        "bounds": bounds,
+                        "raster": raster,
+                        "raster_w": raster_w,
+                        "raster_h": raster_h,
+                        "radius_km": fetch_radius_km,
                     }
                 logger.info(
                     "[live_map] viewport ready %dx%d (raster %dx%d) radius=%.0fkm style=%s",
-                    width, height, raster_w, raster_h, radius_km, style,
+                    width, height, raster_w, raster_h, fetch_radius_km, style,
                 )
         except Exception:
             logger.exception("[live_map] basemap fetch failed")
@@ -290,9 +372,10 @@ def render_live_tracking_map(
     North-up by default (matches route_map.py and the earlier design
     decision to keep both tracking views consistently oriented); heading-
     up rotation is applied by the caller (see display/round_touch/app.py's
-    _draw_tracked_live_map) on the returned surface, not baked in here —
+    _draw_live_tracking) on the returned surface, not baked in here —
     kept explicit for testability.
     """
+    global _last_panel_view
     if width < 40 or height < 40:
         return None
 
@@ -302,6 +385,7 @@ def render_live_tracking_map(
     surf = pygame.Surface((width, height))
     surf.fill(_PANEL_BG)
 
+    crop_x = crop_y = 0
     if vp is not None:
         raster = vp["raster"]
         min_lat, max_lat, min_lon, max_lon = vp["bounds"]
@@ -341,6 +425,40 @@ def render_live_tracking_map(
             dim_alpha = 40 if style in ("light", "voyager", "vfr") else 70
             dim.fill((0, 0, 0, dim_alpha))
             surf.blit(dim, (0, 0))
+
+        _last_panel_view = {
+            "bounds": vp["bounds"],
+            "raster_w": raster_w,
+            "raster_h": raster_h,
+            "crop_x": crop_x,
+            "crop_y": crop_y,
+            "width": width,
+            "height": height,
+            "lat": lat,
+            "lon": lon,
+            "radius_km": radius_km,
+            "heading": float(heading or 0),
+        }
+    else:
+        _last_panel_view = None
+
+    # Rain / airports / fires / quakes — north-up panel space so heading-up
+    # rotation in the caller spins them with the basemap.
+    if _last_panel_view is not None:
+        try:
+            from display.round_touch import follow_overlays
+
+            follow_overlays.draw_on_follow_panel(
+                surf,
+                lat=lat,
+                lon=lon,
+                radius_km=radius_km,
+                width=width,
+                height=height,
+                project=lat_lon_to_follow_panel,
+            )
+        except Exception:
+            logger.debug("[live_map] follow overlays failed", exc_info=True)
 
     # Aircraft is drawn at the exact panel center — always, unconditionally,
     # independent of raster freshness (this is the actual fix for the

@@ -52,6 +52,8 @@ DEFAULT_THEME_INDEX = 2  # Green (legacy; UI is RGB-only now)
 DEFAULT_CUSTOM_RGB = THEMES[DEFAULT_THEME_INDEX]["sweep"]
 # Default dark-basemap runway centerline (white).
 DEFAULT_RUNWAY_DARKMAP_RGB = (255, 255, 255)
+# Default light-basemap runway centerline (dark navy for pale charts).
+DEFAULT_RUNWAY_LIGHT_RGB = (35, 55, 95)
 
 # Bump when THEME_NAMES / index order changes so saved indices can remapped.
 THEME_PALETTE_V = 3
@@ -140,6 +142,12 @@ def migrate_theme_index(state: dict) -> bool:
         changed = True
     else:
         state["runway_darkmap_rgb"] = list(normalize_rgb(state.get("runway_darkmap_rgb")))
+
+    if "runway_light_rgb" not in state:
+        state["runway_light_rgb"] = list(DEFAULT_RUNWAY_LIGHT_RGB)
+        changed = True
+    else:
+        state["runway_light_rgb"] = list(normalize_rgb(state.get("runway_light_rgb")))
 
     state["theme_palette_v"] = THEME_PALETTE_V
     # Always treat accent as custom RGB after presets were removed.

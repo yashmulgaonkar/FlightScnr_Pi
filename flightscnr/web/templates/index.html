@@ -366,7 +366,7 @@
     <details class="card">
         <summary><span class="ico">&#128506;</span>Position Sources<span class="sum">extended tracking map</span><span class="chev">&#9656;</span></summary>
         <div class="body">
-            <p class="hint">Fallback order for the live-centered map (Radar &gt; Track &gt; swipe to live map). First source that has a fresh position for the tracked aircraft wins. Drag to reorder; a source with no key/URL configured is skipped automatically even if left in the list.</p>
+            <p class="hint">Fallback order for the live-centered map (Radar &gt; Track &gt; Live). First source that has a fresh position for the tracked aircraft wins. Drag to reorder; a source with no key/URL configured is skipped automatically even if left in the list.</p>
             <ul id="position-source-list" class="drag-list">
                 <!-- populated by loadPositionSourceOrder() -->
             </ul>
@@ -660,7 +660,7 @@
             <p class="hint">Route enrichment only when FR24/AirLabs lack origin/destination — not a live radar feed. Soft monthly spend ceiling protects free credit.</p>
             <p class="hint" id="flightaware-usage"></p>
             <div class="chk">
-                <label for="use-opensky-api">Use OpenSky Network (route fallback)</label>
+                <label for="use-opensky-api">Use OpenSky Network (route + live position)</label>
                 <span class="switch"><input id="use-opensky-api" type="checkbox" checked><span class="track"></span></span>
             </div>
             <label for="opensky-client-id">OpenSky API client ID (optional)</label>
@@ -669,7 +669,15 @@
             <label for="opensky-client-secret">OpenSky API client secret (optional)</label>
             <input type="password" id="opensky-client-secret" placeholder="client_secret" autocomplete="off">
             <p class="hint" id="opensky-client-secret-hint"></p>
-            <p class="hint">Further route fallback when FR24/AirLabs/FlightAware lack origin/destination. Create an API client under Account → API Client on <a href="https://opensky-network.org/" target="_blank" rel="noopener">opensky-network.org</a> (separate from feeder credentials). Destination is often empty while airborne.</p>
+            <p class="hint">Route enrichment fallback when FR24/AirLabs/FlightAware lack origin/destination, and optional live-position source for extended tracking. Create an API client under Account → API Client on <a href="https://opensky-network.org/" target="_blank" rel="noopener">opensky-network.org</a> (separate from feeder credentials). Destination is often empty while airborne.</p>
+            <div class="chk">
+                <label for="use-adsbexchange-api">Use ADS-B Exchange (live position)</label>
+                <span class="switch"><input id="use-adsbexchange-api" type="checkbox"><span class="track"></span></span>
+            </div>
+            <label for="adsbexchange-key">ADS-B Exchange RapidAPI key (optional)</label>
+            <input type="password" id="adsbexchange-key" placeholder="API key" autocomplete="off">
+            <p class="hint" id="adsbexchange-hint"></p>
+            <p class="hint">Optional live-position fallback for extended tracking (after OpenSky in the default order). RapidAPI plan/quota varies — leave empty to skip. See <a href="https://rapidapi.com/adsbx/api/adsb-exchange" target="_blank" rel="noopener">ADS-B Exchange on RapidAPI</a>.</p>
             <div class="chk">
                 <label for="use-aisstream-api">Use aisstream.io API key</label>
                 <span class="switch"><input id="use-aisstream-api" type="checkbox" checked><span class="track"></span></span>
@@ -875,11 +883,14 @@ function applyKeyHints(keys) {
         FLIGHTAWARE_API_KEY: "flightaware-hint",
         OPENSKY_API_CLIENT_ID: "opensky-client-id-hint",
         OPENSKY_API_CLIENT_SECRET: "opensky-client-secret-hint",
+        ADSBEXCHANGE_API_KEY: "adsbexchange-hint",
         FIRMS_MAP_KEY: "firms-hint",
     };
     Object.entries(map).forEach(([key, id]) => {
+        const el = $(id);
+        if (!el) return;
         const info = keys[key] || {};
-        $(id).textContent = info.configured ? `Current: ${info.masked} (${info.source})` : "Not set";
+        el.textContent = info.configured ? `Current: ${info.masked} (${info.source})` : "Not set";
     });
 }
 
@@ -1256,12 +1267,15 @@ async function loadAll() {
         if ($("use-opensky-api")) {
             $("use-opensky-api").checked = toggles.USE_OPENSKY_API !== false;
         }
+        if ($("use-adsbexchange-api")) {
+            $("use-adsbexchange-api").checked = !!toggles.USE_ADSBEXCHANGE_API;
+        }
         const rso = keys.route_source_order || {};
         if ($("route_source_order")) {
             $("route_source_order").value = rso.ROUTE_SOURCE_ORDER || "";
         }
-	renderPositionSourceList(keys.position_source_order || DEFAULT_POSITION_SOURCE_ORDER);
-	const faUsage = keys.flightaware_usage;
+        renderPositionSourceList(keys.position_source_order || DEFAULT_POSITION_SOURCE_ORDER);
+        const faUsage = keys.flightaware_usage;
         if ($("flightaware-usage") && faUsage) {
             $("flightaware-usage").textContent =
                 `FlightAware this month: $${Number(faUsage.spend_usd || 0).toFixed(2)} / $${Number(faUsage.monthly_limit_usd || 4.5).toFixed(2)} (${faUsage.calls || 0} calls)`;
@@ -1826,6 +1840,7 @@ async function saveApiKeys(restart) {
                 flightaware_api_key: $("flightaware-key") ? $("flightaware-key").value : "",
                 opensky_api_client_id: $("opensky-client-id") ? $("opensky-client-id").value : "",
                 opensky_api_client_secret: $("opensky-client-secret") ? $("opensky-client-secret").value : "",
+                adsbexchange_api_key: $("adsbexchange-key") ? $("adsbexchange-key").value : "",
                 firms_map_key: $("firms-key") ? $("firms-key").value : "",
                 use_fr24_api: $("use-fr24-api").checked,
                 use_tomorrow_weather: $("use-tomorrow-weather").checked,
@@ -1833,6 +1848,7 @@ async function saveApiKeys(restart) {
                 use_aisstream_api: $("use-aisstream-api").checked,
                 use_flightaware_api: $("use-flightaware-api") ? $("use-flightaware-api").checked : false,
                 use_opensky_api: $("use-opensky-api") ? $("use-opensky-api").checked : true,
+                use_adsbexchange_api: $("use-adsbexchange-api") ? $("use-adsbexchange-api").checked : false,
                 restart: !!restart,
             }),
         });
@@ -1843,6 +1859,7 @@ async function saveApiKeys(restart) {
         if ($("flightaware-key")) $("flightaware-key").value = "";
         if ($("opensky-client-id")) $("opensky-client-id").value = "";
         if ($("opensky-client-secret")) $("opensky-client-secret").value = "";
+        if ($("adsbexchange-key")) $("adsbexchange-key").value = "";
         if ($("firms-key")) $("firms-key").value = "";
         if (data.keys) applyKeyHints(data.keys);
         showStatus("api-keys-status", data.message || "API keys saved.");

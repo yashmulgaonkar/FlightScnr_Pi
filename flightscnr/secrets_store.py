@@ -344,7 +344,7 @@ def _parse_position_source_order(raw) -> tuple:
 
 def position_source_order_settings() -> tuple:
     """Current live-position fallback order for the extended tracking map
-    (Radar > Track > swipe to live map).
+    (Radar > Track > Live).
 
     Unlike route_source_order_setting() above, this is re-read fresh from
     secrets.json on *every* call rather than just exposed for the portal —

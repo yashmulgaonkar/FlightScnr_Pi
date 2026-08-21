@@ -105,6 +105,271 @@ def draw_footer(surface: pygame.Surface, tracked_data=None) -> None:
         pin_active=is_pinned(),
     )
 
+
+def _draw_live_text_line(
+    surface,
+    text: str,
+    y: int,
+    font,
+    color,
+    *,
+    max_w: int | None = None,
+) -> int:
+    """Centered label; contrast comes from the Follow scrim behind the band."""
+    if not text:
+        return y
+    h = font.get_height()
+    if max_w is None:
+        max_w = draw.circle_half_width_at_row(int(y), h) * 2 - theme.s(8)
+    line = draw.fit_text(text, font, max(theme.s(40), max_w))
+    img = font.render(line, True, color)
+    surface.blit(img, img.get_rect(midtop=(theme.CENTER_X, int(y))))
+    return int(y) + h
+
+
+def _live_line_metrics(
+    text: str, font, y: int, *, max_w: int | None = None
+) -> tuple[str, int, int]:
+    """Return ``(fitted_text, width, height)`` for a Follow chrome line."""
+    h = font.get_height()
+    if not text:
+        return "", 0, h
+    if max_w is None:
+        max_w = draw.circle_half_width_at_row(int(y), h) * 2 - theme.s(8)
+    line = draw.fit_text(text, font, max(theme.s(40), max_w))
+    return line, font.size(line)[0], h
+
+
+def _draw_live_scrim(
+    surface: pygame.Surface, *, center_y: int, width: int, height: int
+) -> None:
+    """Soft dark plate behind a Follow text cluster."""
+    if width <= 0 or height <= 0:
+        return
+    pad_x = theme.s(10)
+    pad_y = theme.s(6)
+    w = min(
+        width + pad_x * 2,
+        draw.circle_half_width_at_row(int(center_y - height // 2), height) * 2,
+    )
+    if w < theme.s(24):
+        return
+    h = height + pad_y * 2
+    plate = pygame.Surface((w, h), pygame.SRCALPHA)
+    pygame.draw.rect(
+        plate,
+        (0, 0, 0, 110),
+        plate.get_rect(),
+        border_radius=max(6, theme.s(8)),
+    )
+    surface.blit(plate, plate.get_rect(center=(theme.CENTER_X, int(center_y))))
+
+
+def draw_live_details(surface: pygame.Surface, data: dict) -> None:
+    """Compact flight chrome for the Live map screen — no vertical scroll.
+
+    Top band: identity + type/status + route. Bottom band (above footer):
+    telemetry and ETA/distance. Text is ellipsized to the round width so
+    nothing requires scrolling or a marquee. Soft scrims behind the top and
+    bottom bands keep labels readable over rain / busy basemap colors.
+    """
+    if not data:
+        return
+
+    title_font = draw.load_font(theme.s(14), bold=True)
+    body_font = draw.load_font(theme.s(12))
+    detail_font = draw.load_font(theme.s(11))
+
+    top = nav.content_top_y() + theme.s(2)
+    gap = theme.s(2)
+
+    # --- Build top / bottom line lists first so we can scrim behind them. ---
+    top_rows: list[tuple[str, object, tuple[int, int, int]]] = []
+    name = _flight_display_name(data)
+    if name:
+        top_rows.append((name, title_font, theme.LABEL))
+
+    plane_type = format_aircraft_type(data.get("aircraft_type") or "")
+    status = _status_label(data)
+    status_color = theme.MUTED
+    if status == "LIVE":
+        status_color = _pulse_live_color()
+    elif status == "LANDED":
+        status_color = theme.TAG_ALT_DESCEND
+    mid_parts = [p for p in (plane_type, status) if p]
+    if mid_parts:
+        mid = "  ·  ".join(mid_parts)
+        color = status_color if status in ("LIVE", "LANDED") else theme.MUTED
+        top_rows.append((mid, detail_font, color))
+
+    origin = (data.get("origin") or "").strip()
+    dest = (data.get("destination") or "").strip()
+    if origin or dest:
+        route_lines = route_display_lines(origin or "???", dest or "???")
+        route = (
+            route_lines[0]
+            if len(route_lines) == 1
+            else f"{route_lines[0]} {route_lines[1]}"
+        )
+        top_rows.append((route, body_font, theme.ROUTE))
+
+    bottom_lines: list[tuple[str, tuple[int, int, int]]] = []
+    telemetry = "  ·  ".join(_telemetry_parts(data))
+    if telemetry:
+        bottom_lines.append((telemetry, theme.LABEL))
+
+    dist = _format_dist_remaining(data.get("dist_remaining"))
+    eta = data.get("time_remaining")
+    landmark = _nearest_city_label(data)
+    eta_bits = [
+        p
+        for p in (
+            f"ETA {eta}" if eta else None,
+            dist,
+            landmark or None,
+        )
+        if p
+    ]
+    if eta_bits:
+        bottom_lines.append(("  ·  ".join(eta_bits), theme.MUTED))
+    elif data.get("is_scheduled"):
+        for text, color in _scheduled_rows(data):
+            bottom_lines.append((text, color))
+    elif landmark:
+        bottom_lines.append((landmark, theme.MUTED))
+
+    # Top scrim + text.
+    if top_rows:
+        y = top
+        max_w = 0
+        measured: list[tuple[str, object, tuple[int, int, int], int]] = []
+        for text, font, color in top_rows:
+            line, tw, th = _live_line_metrics(text, font, y)
+            measured.append((line, font, color, th))
+            max_w = max(max_w, tw)
+            y += th + gap
+        block_h = y - top - gap
+        _draw_live_scrim(
+            surface,
+            center_y=top + block_h // 2,
+            width=max_w,
+            height=block_h,
+        )
+        y = top
+        for line, font, color, th in measured:
+            img = font.render(line, True, color)
+            surface.blit(img, img.get_rect(midtop=(theme.CENTER_X, int(y))))
+            y += th + gap
+
+    # Bottom scrim + text.
+    if not bottom_lines:
+        return
+
+    content_bottom = nav.content_bottom_y(footer_y_offset=_TRACKED_FOOTER_Y_OFFSET)
+    line_h = detail_font.get_height()
+    block_h = len(bottom_lines) * line_h + max(0, len(bottom_lines) - 1) * gap
+    y_bot = content_bottom - block_h - theme.s(4)
+    max_w = 0
+    fitted: list[tuple[str, tuple[int, int, int]]] = []
+    y_m = y_bot
+    for text, color in bottom_lines:
+        line, tw, _th = _live_line_metrics(text, detail_font, y_m)
+        fitted.append((line, color))
+        max_w = max(max_w, tw)
+        y_m += line_h + gap
+    _draw_live_scrim(
+        surface,
+        center_y=y_bot + block_h // 2,
+        width=max_w,
+        height=block_h,
+    )
+    for line, color in fitted:
+        y_bot = _draw_live_text_line(surface, line, y_bot, detail_font, color)
+        y_bot += gap
+
+
+_FOLLOW_PHOTO_CLOSE_RECT: pygame.Rect | None = None
+
+
+def follow_aircraft_hit(x: int, y: int, *, hit_r: int | None = None) -> bool:
+    """True when a tap is near the Follow map center (tracked aircraft blip)."""
+    r = hit_r if hit_r is not None else max(theme.TAP_PICK_RADIUS, theme.s(36))
+    return math.hypot(x - theme.CENTER_X, y - theme.CENTER_Y) <= r
+
+
+def follow_photo_close_hit(x: int, y: int) -> bool:
+    rect = _FOLLOW_PHOTO_CLOSE_RECT
+    return bool(rect is not None and rect.collidepoint(x, y))
+
+
+def draw_follow_photo_popup(surface: pygame.Surface, data: dict | None) -> None:
+    """Centered aircraft photo card with an X close control."""
+    global _FOLLOW_PHOTO_CLOSE_RECT
+    _FOLLOW_PHOTO_CLOSE_RECT = None
+    if not data:
+        return
+
+    # Dim the map behind the card.
+    veil = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
+    veil.fill((0, 0, 0, 160))
+    surface.blit(veil, (0, 0))
+
+    max_w = int(theme.VISIBLE_RADIUS * 1.35)
+    max_h = int(theme.VISIBLE_RADIUS * 1.1)
+    photo = None
+    photo_path = (data.get("photo_path") or "").strip()
+    if photo_path:
+        from display.round_touch import aircraft_photos
+
+        photo = aircraft_photos.load_photo_surface(
+            photo_path, max_h, max_w=max_w, radius=theme.s(8)
+        )
+
+    pad = theme.s(12)
+    title_font = draw.load_font(theme.s(13), bold=True)
+    hint_font = draw.load_font(theme.s(11))
+    title = _flight_display_name(data) or display_flight_id_for_flight(data)
+    title_img = title_font.render(draw.fit_text(title, title_font, max_w), True, theme.LABEL)
+
+    if photo is not None:
+        card_w = max(photo.get_width(), title_img.get_width()) + pad * 2
+        card_h = photo.get_height() + title_img.get_height() + pad * 3
+    else:
+        missing = hint_font.render("No photo available", True, theme.MUTED)
+        card_w = max(missing.get_width(), title_img.get_width()) + pad * 2
+        card_h = title_img.get_height() + missing.get_height() + pad * 3
+        photo = missing
+
+    card_w = min(card_w, theme.VISIBLE_RADIUS * 2 - theme.s(24))
+    card_h = min(card_h, theme.VISIBLE_RADIUS * 2 - theme.s(48))
+    card = pygame.Rect(0, 0, card_w, card_h)
+    card.center = (theme.CENTER_X, theme.CENTER_Y)
+    pygame.draw.rect(surface, (18, 24, 32), card, border_radius=theme.s(10))
+    pygame.draw.rect(surface, theme.GRID, card, max(1, theme.s(1)), border_radius=theme.s(10))
+
+    surface.blit(title_img, title_img.get_rect(midtop=(card.centerx, card.top + pad)))
+    if isinstance(photo, pygame.Surface):
+        surface.blit(
+            photo,
+            photo.get_rect(midtop=(card.centerx, card.top + pad * 2 + title_img.get_height())),
+        )
+
+    # Circular X close affordance at the top-right of the card.
+    close_r = max(theme.s(14), theme.s(12))
+    close_c = (card.right - close_r - theme.s(4), card.top + close_r + theme.s(4))
+    pygame.draw.circle(surface, (40, 48, 58), close_c, close_r)
+    pygame.draw.circle(surface, theme.LABEL, close_c, close_r, max(1, theme.s(1)))
+    x_font = draw.load_font(theme.s(14), bold=True)
+    x_img = x_font.render("×", True, theme.LABEL)
+    surface.blit(x_img, x_img.get_rect(center=close_c))
+    _FOLLOW_PHOTO_CLOSE_RECT = pygame.Rect(
+        close_c[0] - close_r - theme.s(4),
+        close_c[1] - close_r - theme.s(4),
+        close_r * 2 + theme.s(8),
+        close_r * 2 + theme.s(8),
+    )
+
+
 # Nearest-city cache for progress-bar landmark labels.
 _city_cache = {"lat": None, "lon": None, "result": None}
 _CITY_CACHE_THRESHOLD = 0.01
@@ -404,21 +669,30 @@ def _format_dist_remaining(dist) -> str | None:
 
 
 def _nearest_city_label(data) -> str:
-    lat = data.get("latitude")
-    lon = data.get("longitude")
+    lat = data.get("plane_latitude")
+    if lat is None:
+        lat = data.get("latitude")
+    lon = data.get("plane_longitude")
+    if lon is None:
+        lon = data.get("longitude")
     if lat is None or lon is None:
+        return ""
+    try:
+        lat_f = float(lat)
+        lon_f = float(lon)
+    except (TypeError, ValueError):
         return ""
     if (
         _city_cache["lat"] is None
-        or abs(lat - _city_cache["lat"]) > _CITY_CACHE_THRESHOLD
-        or abs(lon - _city_cache["lon"]) > _CITY_CACHE_THRESHOLD
+        or abs(lat_f - _city_cache["lat"]) > _CITY_CACHE_THRESHOLD
+        or abs(lon_f - _city_cache["lon"]) > _CITY_CACHE_THRESHOLD
     ):
-        _city_cache["lat"] = lat
-        _city_cache["lon"] = lon
+        _city_cache["lat"] = lat_f
+        _city_cache["lon"] = lon_f
         try:
             from utilities.cities import get_nearest_city
 
-            _city_cache["result"] = get_nearest_city(lat, lon)
+            _city_cache["result"] = get_nearest_city(lat_f, lon_f)
         except Exception:
             _city_cache["result"] = None
     nearest = _city_cache["result"]

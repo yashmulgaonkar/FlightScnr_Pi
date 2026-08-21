@@ -259,7 +259,10 @@ def _fallback_mark(surface: pygame.Surface, x: int, y: int) -> None:
 
 
 def _runway_color():
-    if _map_style() in ("light", "voyager", "toner", "satellite", "streets"):
+    # Pale basemaps need dark centerlines; dark / imagery need bright ones.
+    # Satellite is dark imagery — use dark-map (bright) color, not light-map navy.
+    style = _map_style()
+    if style in ("light", "voyager", "streets"):
         return getattr(theme, "RUNWAY_LIGHT", (35, 55, 95))
     return getattr(theme, "RUNWAY_DARKMAP", getattr(theme, "AIRPORT", (120, 150, 175)))
 
@@ -287,7 +290,7 @@ def _draw_runway(
         return
     width = (
         max(2, theme.s(3))
-        if _map_style() in ("light", "voyager", "toner", "satellite", "streets")
+        if _map_style() in ("light", "voyager", "streets", "toner", "satellite")
         else max(1, theme.s(2))
     )
     pygame.draw.line(surface, _runway_color(), (x0, y0), (x1, y1), width)

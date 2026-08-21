@@ -994,13 +994,15 @@ def _theme_section_gaps() -> tuple[int, int, int]:
     return theme.s(4), theme.s(10), theme.s(20)
 
 
-# RGB slider groups on the Colors page (Radar Theme, then runway color).
+# RGB slider groups on the Colors page.
 RGB_GROUP_THEME = "theme"
 RGB_GROUP_RUNWAY = "runway"
-_RGB_GROUP_ORDER = (RGB_GROUP_THEME, RGB_GROUP_RUNWAY)
+RGB_GROUP_RUNWAY_LIGHT = "runway_light"
+_RGB_GROUP_ORDER = (RGB_GROUP_THEME, RGB_GROUP_RUNWAY, RGB_GROUP_RUNWAY_LIGHT)
 _RGB_GROUP_TITLES = {
     RGB_GROUP_THEME: "Radar Theme",
-    RGB_GROUP_RUNWAY: "Runway Centerline Color for Dark Map",
+    RGB_GROUP_RUNWAY: "Runway Centerline — Dark Map",
+    RGB_GROUP_RUNWAY_LIGHT: "Runway Centerline — Light Map",
 }
 
 
@@ -2376,9 +2378,11 @@ def draw_info(
     elif page == PAGE_COLORS:
         theme_rgb = settings.theme_rgb()
         runway_rgb = settings.runway_darkmap_rgb()
+        runway_light_rgb = settings.runway_light_rgb()
         group_rgbs = {
             RGB_GROUP_THEME: theme_rgb,
             RGB_GROUP_RUNWAY: runway_rgb,
+            RGB_GROUP_RUNWAY_LIGHT: runway_light_rgb,
         }
         swatch_size = theme.s(18)
         track_w, slider_h, label_w, value_w = _theme_slider_metrics()

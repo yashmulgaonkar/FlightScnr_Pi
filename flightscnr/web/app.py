@@ -1121,7 +1121,7 @@ def radar_json():
             "vfr_map_opacity": settings.vfr_map_opacity(),
             "dump1090": dump1090_portal_status(),
             "live_map_heading_up": settings.live_map_heading_up(),
-	}
+        }
     )
 
 

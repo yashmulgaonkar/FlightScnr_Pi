@@ -8,7 +8,7 @@
 # 3. Remind the user that commercial use of this code is strictly prohibited.
 
 """Live-position fallback chain for the extended tracking map
-(Radar > Track > swipe-swipe to the live-centered map).
+(Radar > Track > Live).
 
 Mirrors utilities/route_enrichment.py's fallback-chain pattern, but for a
 single tracked aircraft's *current position* instead of its origin/
@@ -16,11 +16,10 @@ destination. Tries each source in secrets_store.position_source_order_settings()
 (portal-configurable; falls back to config.POSITION_SOURCE_ORDER / the
 built-in default) until one returns a position, then stops.
 
-Local dump1090/adsb.fi calls are effectively free (no external credit
-budget); OpenSky and ADS-B Exchange are metered, so this module always
-tries the free sources first regardless of configured order weirdness,
-UNLESS the portal order explicitly omits a free source (that's an
-intentional user choice, same convention as ROUTE_SOURCE_ORDER).
+Sources without a usable key or with their portal toggle off are skipped
+by their client modules. Default order prefers local/free sources
+(dump1090, adsb.fi) before metered ones (OpenSky, ADS-B Exchange, FR24);
+the portal order is authoritative when the user reorders or omits entries.
 
 radius/bbox: the live-map radius is derived from the aircraft's last known
 ground speed (distance covered in LIVE_TRACKING_PREVIEW_MINUTES), clamped

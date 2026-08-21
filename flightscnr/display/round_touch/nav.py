@@ -179,6 +179,7 @@ def draw_breadcrumb(
     parts: list[str],
     *,
     active_color=None,
+    with_scrim: bool = False,
 ):
     if not parts:
         return
@@ -207,8 +208,13 @@ def draw_breadcrumb(
     if total_w > max_w:
         line = draw.fit_text(sep_str.join(parts), font, max_w)
         img = font.render(line, True, theme.MUTED)
+        if with_scrim:
+            _draw_breadcrumb_scrim(surface, y=y, width=img.get_width(), height=h)
         surface.blit(img, img.get_rect(midtop=(theme.CENTER_X, y)))
         return
+
+    if with_scrim:
+        _draw_breadcrumb_scrim(surface, y=y, width=total_w, height=h)
 
     x = theme.CENTER_X - total_w // 2
     for i, img in enumerate(rendered):
@@ -217,6 +223,28 @@ def draw_breadcrumb(
         if i < len(rendered) - 1:
             surface.blit(sep, (x, y))
             x += sep.get_width()
+
+
+def _draw_breadcrumb_scrim(
+    surface: pygame.Surface, *, y: int, width: int, height: int
+) -> None:
+    """Soft dark plate behind the breadcrumb (Follow / busy map)."""
+    if width <= 0 or height <= 0:
+        return
+    pad_x = theme.s(10)
+    pad_y = theme.s(4)
+    w = min(width + pad_x * 2, _max_text_width(y, height) + pad_x * 2)
+    if w < theme.s(24):
+        return
+    h = height + pad_y * 2
+    plate = pygame.Surface((w, h), pygame.SRCALPHA)
+    pygame.draw.rect(
+        plate,
+        (0, 0, 0, 110),
+        plate.get_rect(),
+        border_radius=max(6, theme.s(8)),
+    )
+    surface.blit(plate, plate.get_rect(midtop=(theme.CENTER_X, y - pad_y)))
 
 
 def draw_page_dots(

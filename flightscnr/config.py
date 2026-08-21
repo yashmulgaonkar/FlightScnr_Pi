@@ -180,7 +180,7 @@ POSITION_SOURCE_ORDER = _parse_position_source_order(
     os.environ.get("POSITION_SOURCE_ORDER", "")
 )
 
-# Extended live-tracking map (Radar > Track > swipe to live map): radius is
+# Extended live-tracking map (Radar > Track > Live): radius is
 # derived from current ground speed (distance covered in
 # LIVE_TRACKING_PREVIEW_MINUTES), clamped to [MIN, MAX]. MAX mirrors the
 # existing 48km/30mi/26.1nm main-display radar radius.
