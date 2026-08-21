@@ -259,7 +259,7 @@ def _fallback_mark(surface: pygame.Surface, x: int, y: int) -> None:
 
 
 def _runway_color():
-    if _map_style() in ("light", "voyager"):
+    if _map_style() in ("light", "voyager", "toner", "satellite", "streets"):
         return getattr(theme, "RUNWAY_LIGHT", (35, 55, 95))
     return getattr(theme, "RUNWAY_DARKMAP", getattr(theme, "AIRPORT", (120, 150, 175)))
 
@@ -285,7 +285,11 @@ def _draw_runway(
     x1, y1 = int(p1[0]) + ox, int(p1[1]) + oy
     if math.hypot(x0 - cx, y0 - cy) > max_r and math.hypot(x1 - cx, y1 - cy) > max_r:
         return
-    width = max(2, theme.s(3)) if _map_style() in ("light", "voyager") else max(1, theme.s(2))
+    width = (
+        max(2, theme.s(3))
+        if _map_style() in ("light", "voyager", "toner", "satellite", "streets")
+        else max(1, theme.s(2))
+    )
     pygame.draw.line(surface, _runway_color(), (x0, y0), (x1, y1), width)
 
 

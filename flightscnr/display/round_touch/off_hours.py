@@ -193,6 +193,26 @@ def in_off_hours(now: datetime | None = None) -> bool:
     return cur >= start or cur < end
 
 
+def in_night_window(now: datetime | None = None) -> bool:
+    """True during the off-hours clock window, even if night dimming is off.
+
+    OTA Later tonight uses this so a device without Off Hours still updates
+    between 22:00 and 06:00 (or the saved start/end times).
+    """
+    cfg = prefs()
+    start = _parse_hhmm(str(cfg.get("start") or "22:00"))
+    end = _parse_hhmm(str(cfg.get("end") or "06:00"))
+    if start is None:
+        start = 22 * 60
+    if end is None:
+        end = 6 * 60
+    now = now or datetime.now()
+    cur = now.hour * 60 + now.minute
+    if start <= end:
+        return start <= cur < end
+    return cur >= start or cur < end
+
+
 def effective_brightness_percent(day_percent: int) -> int:
     if in_off_hours():
         cfg = prefs()

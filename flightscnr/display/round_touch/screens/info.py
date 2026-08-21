@@ -156,14 +156,53 @@ def invalidate_atc_labels() -> None:
     global _atc_rows_cache
     _atc_rows_cache = None
     _atc_picker_cache.clear()
-# ATC airport / channel / output picker overlay hit targets: ("close"|"item", value).
+# Full-screen list picker overlay hit targets: ("close"|"item", value).
+# Used for ATC airport/channel/output and other multi-option settings rows.
 _atc_picker_hits: list[tuple[str, str, pygame.Rect]] = []
 _atc_picker_list_rect: pygame.Rect | None = None
-_ATC_PICKER_TITLES = {
+LIST_PICKER_KINDS = frozenset(
+    {
+        "airport",
+        "channel",
+        "output",
+        "favourite",
+        "range",
+        "units",
+        "rotate",
+        "aircraft_tag",
+        "min_height",
+        "max_height",
+        "aircraft_min_speed",
+        "vessel_min_speed",
+        "map_style",
+        "traffic",
+        "quiet_start",
+        "quiet_end",
+        "hud_position",
+        "hud_dark",
+    }
+)
+_LIST_PICKER_TITLES = {
     "airport": "Select airport",
     "channel": "Select channel",
     "output": "Select output",
+    "favourite": "Select location",
+    "range": "Radar range",
+    "units": "Units",
+    "rotate": "Rotate screen",
+    "aircraft_tag": "Traffic labels",
+    "min_height": "Min altitude",
+    "max_height": "Max altitude",
+    "aircraft_min_speed": "Min aircraft speed",
+    "vessel_min_speed": "Min vessel speed",
+    "map_style": "Basemap",
+    "traffic": "Select traffic",
+    "quiet_start": "Quiet start",
+    "quiet_end": "Quiet end",
+    "hud_position": "Clock position",
+    "hud_dark": "HUD style",
 }
+_ATC_PICKER_TITLES = _LIST_PICKER_TITLES
 
 _SYSTEM_BTN_FILL = (8, 36, 16)
 _SYSTEM_BTN_BORDER = (48, 160, 72)
@@ -309,7 +348,7 @@ def system_needs_confirm(action: str) -> bool:
 
 
 def atc_picker_items(kind: str) -> list[dict]:
-    """Build picker rows for ``airport``, ``channel``, or ``output``.
+    """Build picker rows for ATC and other multi-option settings.
 
     Each item: ``{"id": str, "label": str, "selected": bool}``.
     Output ids: ``usb`` or ``bt:<MAC>``.
@@ -318,7 +357,7 @@ def atc_picker_items(kind: str) -> list[dict]:
     cannot rebuild a shorter list and clamp the scroll offset back to zero.
     """
     kind = str(kind or "").strip().lower()
-    if kind not in ("airport", "channel", "output"):
+    if kind not in LIST_PICKER_KINDS:
         return []
     cached = _atc_picker_cache.get(kind)
     if cached is not None:
@@ -326,7 +365,7 @@ def atc_picker_items(kind: str) -> list[dict]:
         return [
             {"id": i, "label": lab, "selected": sel} for i, lab, sel in rows
         ]
-    items = _build_atc_picker_items(kind)
+    items = _build_list_picker_items(kind)
     _atc_picker_cache[kind] = (
         time.monotonic(),
         tuple(
@@ -339,6 +378,145 @@ def atc_picker_items(kind: str) -> list[dict]:
         ),
     )
     return items
+
+
+def _build_list_picker_items(kind: str) -> list[dict]:
+    if kind in ("airport", "channel", "output"):
+        return _build_atc_picker_items(kind)
+    return _build_settings_picker_items(kind)
+
+
+def _enum_picker_items(ids, current, label_fn) -> list[dict]:
+    cur = str(current)
+    out: list[dict] = []
+    for item_id in ids:
+        sid = str(item_id)
+        out.append(
+            {
+                "id": sid,
+                "label": str(label_fn(item_id)),
+                "selected": sid == cur,
+            }
+        )
+    return out
+
+
+def _build_settings_picker_items(kind: str) -> list[dict]:
+    """Discrete choices for settings rows that used to tap-cycle."""
+    if kind == "favourite":
+        from utilities import favourite_locations
+
+        idx = favourite_locations.active_index()
+        out: list[dict] = []
+        if idx == favourite_locations.CUSTOM_INDEX:
+            out.append({"id": "custom", "label": "Custom", "selected": True})
+        out.append(
+            {
+                "id": "home",
+                "label": "Home",
+                "selected": idx == favourite_locations.HOME_INDEX,
+            }
+        )
+        for i, loc in enumerate(favourite_locations.locations()):
+            loc_id = str(loc.get("id") or "").strip()
+            if not loc_id:
+                continue
+            name = str(loc.get("name") or "Saved").strip() or "Saved"
+            out.append({"id": loc_id, "label": name, "selected": i == idx})
+        return out
+    if kind == "range":
+        from display.round_touch import scale
+
+        current = settings.scale_index()
+        units = settings.distance_units()
+        return _enum_picker_items(
+            range(len(scale.SCALE_BANDS)),
+            current,
+            lambda i: scale.format_band_tag(int(i), units),
+        )
+    if kind == "units":
+        return _enum_picker_items(
+            settings.UNIT_PRESETS,
+            settings.unit_preset(),
+            lambda key: settings.UNIT_PRESET_LABELS.get(key, str(key)),
+        )
+    if kind == "rotate":
+        current = settings.display_rotation()
+        return _enum_picker_items(
+            (0, 90, 180, 270),
+            current,
+            lambda deg: f"{int(deg)}°",
+        )
+    if kind == "aircraft_tag":
+        return _enum_picker_items(
+            settings.TRAFFIC_LABEL_MODES,
+            settings.traffic_labels(),
+            lambda mode: settings.TRAFFIC_LABEL_LABELS.get(mode, str(mode)),
+        )
+    if kind == "min_height":
+        return _enum_picker_items(
+            settings.MIN_HEIGHT_OPTIONS,
+            settings.min_height_ft(),
+            lambda ft: f"{int(ft)} ft",
+        )
+    if kind == "max_height":
+        current = settings.max_height_ft()
+        opts = list(settings.MAX_HEIGHT_CYCLE_OPTIONS)
+        if current not in opts:
+            opts = sorted(set(opts + [current]))
+        return _enum_picker_items(
+            opts,
+            current,
+            lambda ft: f"{int(ft)} ft",
+        )
+    if kind == "aircraft_min_speed":
+        return _enum_picker_items(
+            settings.AIRCRAFT_MIN_SPEED_OPTIONS,
+            settings.aircraft_min_speed_kt(),
+            settings.format_speed_floor_label,
+        )
+    if kind == "vessel_min_speed":
+        return _enum_picker_items(
+            settings.VESSEL_MIN_SPEED_OPTIONS,
+            settings.vessel_min_speed_kt(),
+            settings.format_speed_floor_label,
+        )
+    if kind == "map_style":
+        return _enum_picker_items(
+            settings.MAP_STYLES,
+            settings.map_style(),
+            lambda style: settings.MAP_STYLE_LABELS.get(style, str(style)),
+        )
+    if kind == "traffic":
+        return _enum_picker_items(
+            settings.TRAFFIC_MODES,
+            settings.traffic_mode(),
+            lambda mode: settings.TRAFFIC_MODE_LABELS.get(mode, str(mode)),
+        )
+    if kind in ("quiet_start", "quiet_end"):
+        from utilities.atc_audio import format_hhmm, format_hhmm_12h
+
+        current = (
+            settings.atc_quiet_start()
+            if kind == "quiet_start"
+            else settings.atc_quiet_end()
+        )
+        slots = [format_hhmm(mins) for mins in range(0, 24 * 60, 30)]
+        return _enum_picker_items(slots, current, format_hhmm_12h)
+    if kind == "hud_position":
+        return _enum_picker_items(
+            settings.RADAR_HUD_POSITIONS,
+            settings.radar_hud_position(),
+            lambda pos: str(pos).title(),
+        )
+    if kind == "hud_dark":
+        current = "dark" if settings.radar_hud_dark() else "light"
+        return _enum_picker_items(
+            ("dark", "light"),
+            current,
+            lambda style: str(style).title(),
+        )
+    return []
 
 
 def _build_atc_picker_items(kind: str) -> list[dict]:
@@ -455,13 +633,13 @@ def draw_atc_picker(
     scroll_offset: int = 0,
     pressed_id: str | None = None,
 ) -> int:
-    """Modal scrollable list for ATC airport / channel / output. Returns max_scroll."""
+    """Modal scrollable list for ATC and other multi-option settings. Returns max_scroll."""
     global _atc_picker_hits, _atc_picker_list_rect
     _atc_picker_hits = []
     _atc_picker_list_rect = None
 
     kind = str(kind or "").strip().lower()
-    title_text = _ATC_PICKER_TITLES.get(kind, "Select")
+    title_text = _LIST_PICKER_TITLES.get(kind, "Select")
     items = atc_picker_items(kind)
     pressed = str(pressed_id or "").strip()
 
@@ -533,8 +711,14 @@ def draw_atc_picker(
 
     row_h = body_font.get_height() + theme.s(10)
     if not items:
+        if kind == "airport":
+            empty_text = "None in radar range"
+        elif kind == "channel":
+            empty_text = "No channels"
+        else:
+            empty_text = "No options"
         empty = hint_font.render(
-            "None in radar range" if kind == "airport" else "No channels",
+            empty_text,
             True,
             theme.HINT,
         )
@@ -1553,8 +1737,8 @@ def _atc_row_labels() -> list[str]:
 def _atc_quiet_row_labels() -> list[str]:
     return [
         "Quiet hours",
-        f"Quiet start: {settings.atc_quiet_start_label()}",
-        f"Quiet end: {settings.atc_quiet_end_label()}",
+        f"Quiet start › {settings.atc_quiet_start_label()}",
+        f"Quiet end › {settings.atc_quiet_end_label()}",
     ]
 
 
@@ -1631,9 +1815,9 @@ def _display_row_labels() -> list[str]:
             else "Tag Leaders (labels off)"
         ),
         "Color by Altitude",
-        f"Units: {settings.unit_preset_label()}",
-        f"Radar Range: {settings.scale_label()}",
-        f"Rotate Screen: {settings.display_rotation()}°",
+        f"Units › {settings.unit_preset_label()}",
+        f"Radar Range › {settings.scale_label()}",
+        f"Rotate Screen › {settings.display_rotation()}°",
         "",  # brightness slider
     ]
 
@@ -1644,8 +1828,8 @@ def _hud_row_labels() -> list[str]:
     # Opacity / volume rows are drawn as sliders; placeholders align actions.
     return [
         "HUD",
-        f"Clock Position: {hud_pos}",
-        f"HUD Style: {hud_style}",
+        f"Clock Position › {hud_pos.title()}",
+        f"HUD Style › {hud_style.title()}",
         "",  # HUD opacity slider
         "",  # chime switch + volume slider
         "",  # traffic switch + volume slider
@@ -1659,13 +1843,13 @@ def _options_row_labels() -> list[str]:
 
     fav = favourite_locations.active_label()
     return [
-        f"Traffic Labels: {settings.traffic_labels_label()}",
-        f"Favorite Locations: {fav}",
-        f"Min Aircraft Altitude: {settings.min_height_ft()} ft",
-        f"Max Aircraft Altitude: {settings.max_height_ft()} ft",
-        f"Min Aircraft Speed: {settings.aircraft_min_speed_label()}",
-        f"Min Vessel Speed: {settings.vessel_min_speed_label()}",
-        f"Basemap: {settings.map_style_label()}",
+        f"Traffic Labels › {settings.traffic_labels_label()}",
+        f"Favorite Locations › {fav}",
+        f"Min Aircraft Altitude › {settings.min_height_ft()} ft",
+        f"Max Aircraft Altitude › {settings.max_height_ft()} ft",
+        f"Min Aircraft Speed › {settings.aircraft_min_speed_label()}",
+        f"Min Vessel Speed › {settings.vessel_min_speed_label()}",
+        f"Basemap › {settings.map_style_label()}",
         "",  # VFR opacity slider
     ]
 
@@ -1673,7 +1857,7 @@ def _options_row_labels() -> list[str]:
 def _layers_row_labels() -> list[str]:
     # Every overlay row but the traffic selector is a switch (label only here).
     return [
-        f"Select Traffic: {settings.traffic_mode_label()}",
+        f"Select Traffic › {settings.traffic_mode_label()}",
         "Show Precipitation",
         "Show Wildfires",
         "Show Earthquakes",
@@ -2056,6 +2240,13 @@ def draw_info(
     atc_picker_scroll: int = 0,
     atc_picker_pressed_id: str | None = None,
 ) -> int:
+    if atc_picker:
+        return draw_atc_picker(
+            surface,
+            atc_picker,
+            scroll_offset=atc_picker_scroll,
+            pressed_id=atc_picker_pressed_id,
+        )
     draw.fill_background(surface)
     nav.draw_breadcrumb(surface, _breadcrumb(page))
     nav.draw_page_dots(surface, page, len(nav.SETTINGS_PAGES))
@@ -2273,14 +2464,6 @@ def draw_info(
     elif page == PAGE_SYSTEM:
         max_scroll = _draw_system_page(surface, top, bottom)
 
-    if page == PAGE_ATC and atc_picker:
-        # Full-screen picker; skip footer chrome underneath.
-        return draw_atc_picker(
-            surface,
-            atc_picker,
-            scroll_offset=atc_picker_scroll,
-            pressed_id=atc_picker_pressed_id,
-        )
     if max_scroll > 0 and page != PAGE_MAIN:
         _draw_scroll_overflow_cues(surface, top, bottom, scroll_offset, max_scroll)
     nav.draw_footer_buttons(surface, list(footer_kinds_for_page(page)))

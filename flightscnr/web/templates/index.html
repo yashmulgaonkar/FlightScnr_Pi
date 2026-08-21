@@ -196,12 +196,18 @@
             <p class="hint">Sets RUNWAY_DARKMAP — runway centerline color on the dark basemap (skipped on VFR).</p>
             <label for="map_style">Map style</label>
             <select id="map_style">
-                <option value="dark">Dark (CARTO)</option>
-                <option value="light">Light (CARTO)</option>
-                <option value="voyager">Voyager (CARTO)</option>
-                <option value="vfr">VFR sectional (FAA)</option>
+                <option value="dark">Dark: Carto</option>
+                <option value="osm">Dark: OSM</option>
+                <option value="stadia_dark">Dark: Stadia (needs STADIA_MAPS_API_KEY)</option>
+                <option value="black">Dark: Flat</option>
+                <option value="light">Light: Carto</option>
+                <option value="toner">Light: Toner (needs STADIA_MAPS_API_KEY)</option>
+                <option value="vfr">Light: VFR (FAA)</option>
+                <option value="streets">Street: Esri</option>
+                <option value="voyager">Street: Voyager (CARTO)</option>
+                <option value="satellite">Satellite: Esri</option>
             </select>
-            <p class="hint">VFR sectionals are free public-domain FAA charts (US coverage). Outside the US, use dark, light, or Voyager.</p>
+            <p class="hint">Dark/Light/Street/Satellite Carto, OSM, Esri, Voyager, Flat, and VFR need no key. Dark: Stadia and Light: Toner need a free STADIA_MAPS_API_KEY. VFR sectionals are public-domain FAA charts (US coverage).</p>
             <label for="vfr_opacity">VFR map opacity <span id="vfr_opacity_label">45%</span></label>
             <input id="vfr_opacity" type="range" min="15" max="100" step="1" value="45">
             <p class="hint">How strong the VFR chart appears under traffic (lower = paler). Applies when map style is VFR.</p>
@@ -316,7 +322,7 @@
                     <input id="fav_name" type="text" autocomplete="off" placeholder="e.g. Heathrow" maxlength="40">
                     <label for="fav_position">Location Position (lat, lon)</label>
                     <input id="fav_position" type="text" autocomplete="off" placeholder="e.g. 51.470748, -0.459909">
-                    <p class="hint">Radar center above is Home. After Set Radar Center on the Pi you can Update the active favorite, Save as Home, or keep as Custom. The last center is what reboot restores. Cycle favorites under Settings → Options → Favorite Locations. Max 10 favorites.</p>
+                    <p class="hint">Radar center above is Home. After Set Radar Center on the Pi you can Update the active favorite, Save as Home, or keep as Custom. The last center is what reboot restores. Swipe left on the radar to cycle Home and saved favorites, or pick one under Settings → Options → Favorite Locations. Max 10 favorites.</p>
                     <button class="btn btn-primary" id="btn-fav-add" style="margin-top:.5rem" type="button">Add location</button>
                     <div id="fav-add-status" class="status"></div>
                 </div>
@@ -695,10 +701,16 @@
             <p class="update-ver" id="update-remote">Latest on GitHub: checking…</p>
             <p class="hint" id="update-message"></p>
             <p class="hint">After Update Now, the device may briefly re-sync install steps automatically (X11 / display). If LightDM is switched to X11 for pinch-zoom, the Pi reboots on its own.</p>
+            <div class="chk" style="margin-top:.55rem">
+                <label for="auto_off_hours">Auto-install during off-hours</label>
+                <span class="switch"><input id="auto_off_hours" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">When on, an available update installs in the night window (Off Hours start/end, or 22:00–06:00) after the panel has been idle for 5 minutes. Dismissing the radar bubble skips that version. ATC playing also delays the install.</p>
             <p class="hint" id="update-repair-hint">If you are stuck on an old version and <strong>Repair &amp; Update</strong> is missing, on the Pi open <strong>Menu → Accessories → Terminal</strong> and paste:<br><code>curl -fsSL https://raw.githubusercontent.com/yashmulgaonkar/FlightScnr_Pi/main/scripts/repair-ota.sh | bash</code></p>
             <div class="track-row" style="margin-top:.55rem">
                 <button class="btn" id="btn-check-updates" type="button">Check Updates</button>
                 <button class="btn btn-primary hidden" id="btn-update-now" type="button">Update Now</button>
+                <button class="btn hidden" id="btn-update-tonight" type="button">Later tonight</button>
                 <button class="btn btn-primary hidden" id="btn-repair-update" type="button">Repair &amp; Update</button>
                 <button class="btn btn-primary hidden" id="btn-resync-install" type="button">Finish install</button>
             </div>
@@ -960,6 +972,15 @@ function applyUpdateInfo(data) {
         $("update-available-badge").textContent = "Update available";
     }
     $("btn-update-now").classList.toggle("hidden", !available);
+    const tonightBtn = $("btn-update-tonight");
+    if (tonightBtn) {
+        tonightBtn.classList.toggle("hidden", !available);
+        tonightBtn.disabled = running || !!data.scheduled_tonight;
+        tonightBtn.textContent = data.scheduled_tonight
+            ? "Tonight (armed)"
+            : "Later tonight";
+    }
+    if ($("auto_off_hours")) $("auto_off_hours").checked = !!data.auto_off_hours;
     $("btn-repair-update").classList.toggle("hidden", !repair);
     $("btn-resync-install").classList.toggle("hidden", !resync);
     $("btn-check-updates").disabled = running;
@@ -970,6 +991,7 @@ function applyUpdateInfo(data) {
     if (running) {
         $("update-available-badge").classList.add("hidden");
         $("btn-update-now").classList.add("hidden");
+        if ($("btn-update-tonight")) $("btn-update-tonight").classList.add("hidden");
         $("btn-repair-update").classList.add("hidden");
         $("btn-resync-install").classList.add("hidden");
     }
@@ -1021,11 +1043,28 @@ function startUpdatePoll() {
 function showUpdateConfirm(show) {
     $("update-confirm-row").classList.toggle("hidden", !show);
     $("btn-update-now").classList.toggle("hidden", show);
+    if ($("btn-update-tonight")) $("btn-update-tonight").classList.toggle("hidden", show);
 }
 
 function applyUpdate() {
     clearStatus("updates-status");
     showUpdateConfirm(true);
+}
+
+async function applyUpdateTonight() {
+    clearStatus("updates-status");
+    $("btn-update-tonight").disabled = true;
+    try {
+        const data = await jsonFetch("/updates/tonight", { method: "POST" });
+        applyUpdateInfo(data);
+        showStatus(
+            "updates-status",
+            "Armed for tonight. Installs during off-hours after 5 minutes idle."
+        );
+    } catch (e) {
+        showStatus("updates-status", e.message, true);
+        $("btn-update-tonight").disabled = false;
+    }
 }
 
 async function applyUpdateConfirmed() {
@@ -2315,6 +2354,30 @@ async function confirmIrreversible() {
 
 $("btn-check-updates").addEventListener("click", checkUpdates);
 $("btn-update-now").addEventListener("click", applyUpdate);
+if ($("btn-update-tonight")) {
+    $("btn-update-tonight").addEventListener("click", applyUpdateTonight);
+}
+if ($("auto_off_hours")) {
+    $("auto_off_hours").addEventListener("change", async () => {
+        try {
+            const data = await jsonFetch("/updates/auto", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ auto_off_hours: $("auto_off_hours").checked }),
+            });
+            applyUpdateInfo(data);
+            showStatus(
+                "updates-status",
+                data.auto_off_hours
+                    ? "Will auto-install during off-hours when idle."
+                    : "Auto-install during off-hours is off."
+            );
+        } catch (e) {
+            showStatus("updates-status", e.message, true);
+            $("auto_off_hours").checked = !$("auto_off_hours").checked;
+        }
+    });
+}
 $("btn-repair-update").addEventListener("click", applyRepairConfirmed);
 $("btn-resync-install").addEventListener("click", applyResyncConfirmed);
 $("btn-update-confirm-yes").addEventListener("click", applyUpdateConfirmed);

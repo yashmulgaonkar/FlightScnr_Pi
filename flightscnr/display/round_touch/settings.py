@@ -62,8 +62,32 @@ UNIT_PRESET_LABELS = {
     "km_kts": "km, kts",
 }
 _LEGACY_DISTANCE_TO_PRESET = {"km": "km_kph", "mi": "mi_kts", "nm": "nm_kts"}
-# Stored ids for basemap (labels live in map_style_label()).
-MAP_STYLES = ("dark", "light", "voyager", "vfr")
+# Stored ids for basemap (labels live in MAP_STYLE_LABELS / map_style_label()).
+# Order matches Dark / Light / Street / Satellite groups in the picker.
+MAP_STYLES = (
+    "dark",
+    "osm",
+    "stadia_dark",
+    "black",
+    "light",
+    "toner",
+    "vfr",
+    "streets",
+    "voyager",
+    "satellite",
+)
+MAP_STYLE_LABELS = {
+    "dark": "Dark: Carto",
+    "osm": "Dark: OSM",
+    "stadia_dark": "Dark: Stadia (needs STADIA_MAPS_API_KEY)",
+    "black": "Dark: Flat",
+    "light": "Light: Carto",
+    "toner": "Light: Toner (needs STADIA_MAPS_API_KEY)",
+    "vfr": "Light: VFR",
+    "streets": "Street: Esri",
+    "voyager": "Street: Voyager",
+    "satellite": "Satellite: Esri",
+}
 
 # Waveshare DSI panels stay lit near ~3% (raw ~8/255); 10% was needlessly bright at night.
 BRIGHTNESS_MIN_PERCENT = 3
@@ -276,7 +300,7 @@ _defaults = {
     "traffic_mode": "both",
     # Kept in sync with traffic_mode for older readers / portal payloads
     "ais_enabled": True,
-    # dark | light | voyager | vfr — radar basemap (see map_bg)
+    # dark | osm | stadia_dark | toner | satellite | streets | black | light | voyager | vfr
     "map_style": "dark",
     "vfr_map_opacity": 45,
     # Clockwise UI + touch mapping: 0, 90, 180, 270 (physical panel mount).
@@ -467,7 +491,7 @@ def _seed_from_env(state: dict) -> None:
         state["max_height_ft"] = _snap_max_height(MAX_HEIGHT)
         _ensure_height_band(state)
         env_style = map_bg.normalize_map_style(os.environ.get("RADAR_MAP_PROVIDER", "dark"))
-        # UI cycles dark/light/voyager/vfr; map legacy osm to dark for first-run seed.
+        # UI cycles dark/black/light/voyager/vfr; map legacy osm to dark for first-run seed.
         state["map_style"] = env_style if env_style in MAP_STYLES else "dark"
         state["display_rotation"] = _env_display_rotation()
         state["show_wildfires"] = _default_show_wildfires()
@@ -665,8 +689,14 @@ def _load():
             state["map_style"] = "dark"
         migrated = True
     else:
-        raw = str(state.get("map_style") or "dark").strip().lower()
-        state["map_style"] = raw if raw in MAP_STYLES else "dark"
+        try:
+            from display.round_touch import map_bg
+
+            style = map_bg.normalize_map_style(state.get("map_style"))
+            state["map_style"] = style if style in MAP_STYLES else "dark"
+        except ImportError:
+            raw = str(state.get("map_style") or "dark").strip().lower()
+            state["map_style"] = raw if raw in MAP_STYLES else "dark"
     try:
         if "vfr_map_opacity" not in data:
             state["vfr_map_opacity"] = 45
@@ -1468,13 +1498,7 @@ def map_style() -> str:
 
 
 def map_style_label() -> str:
-    labels = {
-        "dark": "Dark",
-        "light": "Light",
-        "voyager": "Voyager",
-        "vfr": "VFR Sectional",
-    }
-    return labels.get(map_style(), "Dark")
+    return MAP_STYLE_LABELS.get(map_style(), "Dark: Carto")
 
 
 def set_map_style(value: str) -> str:

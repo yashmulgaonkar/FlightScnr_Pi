@@ -178,6 +178,31 @@ class TestEmergencyColorCollision(unittest.TestCase):
         self.assertNotEqual(emergency, watch)
         self.assertNotEqual(watch, climb)
 
+    def test_satellite_keeps_aircraft_yellow(self):
+        from display.round_touch.screens import radar
+
+        with mock.patch.object(radar, "_light_basemap", return_value=True), mock.patch.object(
+            radar, "_amber_icon_basemap", return_value=False
+        ):
+            icon = radar._overlay_color_for_basemap(theme.AIRCRAFT)
+            unknown = radar._overlay_color_for_basemap(theme.AIRCRAFT_UNKNOWN)
+            tag = radar._overlay_color_for_basemap(theme.GRID)
+        self.assertEqual(icon, tuple(theme.AIRCRAFT[:3]))
+        self.assertEqual(unknown, tuple(theme.AIRCRAFT_UNKNOWN[:3]))
+        self.assertEqual(tag, radar._LIGHT_MAP_CALLSIGN)
+        self.assertNotEqual(icon, radar._LIGHT_MAP_ICON)
+
+    def test_light_carto_and_vfr_use_dark_amber_icons(self):
+        from display.round_touch.screens import radar
+
+        with mock.patch.object(radar, "_amber_icon_basemap", return_value=True), mock.patch.object(
+            radar, "_light_basemap", return_value=True
+        ):
+            icon = radar._overlay_color_for_basemap(theme.AIRCRAFT)
+            unknown = radar._overlay_color_for_basemap(theme.AIRCRAFT_UNKNOWN)
+        self.assertEqual(icon, radar._LIGHT_MAP_ICON)
+        self.assertEqual(unknown, radar._LIGHT_MAP_ICON_UNKNOWN)
+
 
 if __name__ == "__main__":
     unittest.main()

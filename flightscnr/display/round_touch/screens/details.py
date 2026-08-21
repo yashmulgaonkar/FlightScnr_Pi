@@ -120,6 +120,7 @@ def _update_notice_text() -> str | None:
         from utilities.updater import (
             remote_release_label,
             should_show_update_banner,
+            update_is_scheduled,
             update_running,
         )
 
@@ -127,6 +128,8 @@ def _update_notice_text() -> str | None:
             return "Update in progress — do not turn off"
         if not should_show_update_banner():
             return None
+        if update_is_scheduled():
+            return "Firmware will update tonight during off-hours"
         remote = remote_release_label()
     except Exception:
         return None

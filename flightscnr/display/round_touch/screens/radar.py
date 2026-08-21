@@ -83,12 +83,79 @@ def _init_sweep():
 
 _rebuild_counts = {"backdrop": 0, "layer": 0}
 
+# Short-lived name pill after a favorite-location swipe.
+_LOCATION_TOAST_TTL_S = 2.0
+_location_toast_label = ""
+_location_toast_until = 0.0
+_location_toast_rect = pygame.Rect(0, 0, 0, 0)
+
 
 def _rebuild_stage(name: str, t0: float) -> float:
     now = time.perf_counter()
     if frame_debug.ENABLED:
         frame_debug.stage(name, now - t0)
     return now
+
+
+def show_location_toast(label: str) -> None:
+    """Show a brief Home / favorite name after a radar swipe cycle."""
+    global _location_toast_label, _location_toast_until
+    text = str(label or "").strip() or "Location"
+    _location_toast_label = text
+    _location_toast_until = time.time() + _LOCATION_TOAST_TTL_S
+
+
+def clear_location_toast() -> None:
+    global _location_toast_label, _location_toast_until, _location_toast_rect
+    _location_toast_label = ""
+    _location_toast_until = 0.0
+    _location_toast_rect = pygame.Rect(0, 0, 0, 0)
+
+
+def location_toast_visible() -> bool:
+    if not _location_toast_label:
+        return False
+    if time.time() >= _location_toast_until:
+        clear_location_toast()
+        return False
+    return True
+
+
+def draw_location_toast(surface: pygame.Surface) -> pygame.Rect | None:
+    """Draw the favorite-location pill; return dirty rect or None."""
+    global _location_toast_rect
+    if not location_toast_visible():
+        _location_toast_rect = pygame.Rect(0, 0, 0, 0)
+        return None
+    font = draw.load_font(max(12, theme.s(14)), bold=True)
+    caption = font.render(_location_toast_label, True, theme.LABEL)
+    pad_x = theme.s(14)
+    pad_y = theme.s(8)
+    width = caption.get_width() + pad_x * 2
+    height = caption.get_height() + pad_y * 2
+    bubble = pygame.Rect(0, 0, width, height)
+    bubble.centerx = theme.CENTER_X
+    bubble.top = theme.CENTER_Y + theme.s(18)
+    try:
+        from display.round_touch import radar_hud
+
+        _glyph, fill_rgba = radar_hud._hud_chrome()
+    except Exception:
+        fill_rgba = (255, 255, 255, 180)
+    panel = pygame.Surface((bubble.width, bubble.height), pygame.SRCALPHA)
+    pygame.draw.rect(
+        panel,
+        fill_rgba,
+        panel.get_rect(),
+        border_radius=max(8, theme.s(10)),
+    )
+    panel.blit(
+        caption,
+        ((bubble.width - caption.get_width()) // 2, pad_y),
+    )
+    surface.blit(panel, bubble.topleft)
+    _location_toast_rect = bubble.copy()
+    return _location_toast_rect
 
 
 def take_rebuild_counts() -> dict:
@@ -458,6 +525,7 @@ def draw_radar(
 
             update_bubble.draw_bubble(surface)
             airport_overlay.draw_callout(surface, pan_offset=offset)
+            draw_location_toast(surface)
             bezel_applied = True
         elif layer is not None:
             # Fast present composites from this layer directly; skip the unused
@@ -484,6 +552,7 @@ def draw_radar(
 
             update_bubble.draw_bubble(surface)
             airport_overlay.draw_callout(surface, pan_offset=offset)
+            draw_location_toast(surface)
             if aircraft_alert.rim_flash_active():
                 _draw_alert_rim_flash(surface)
         # Sweep is composited in present() on the fast path so we can skip a
@@ -1006,17 +1075,32 @@ def _is_tracked(flight) -> bool:
 
 
 def _light_basemap() -> bool:
-    """Pale street / VFR charts need a dedicated high-contrast overlay palette."""
+    """Pale street / VFR / imagery charts need high-contrast tags (not icon color)."""
     try:
-        return settings.map_style() in ("light", "voyager", "vfr")
+        return settings.map_style() in (
+            "light",
+            "voyager",
+            "vfr",
+            "toner",
+            "satellite",
+            "streets",
+        )
+    except Exception:
+        return False
+
+
+def _amber_icon_basemap() -> bool:
+    """Basemaps that use dark-amber aircraft icons instead of radar yellow."""
+    try:
+        return settings.map_style() in ("light", "vfr")
     except Exception:
         return False
 
 
 # High-contrast overlay for busy pale charts (VFR / light / Voyager CARTO).
-# Near-black silhouettes drown in sectional ink (airspace, labels); amber
-# matches dark-radar traffic and stays off the chart's blue/green palette.
-_LIGHT_MAP_ICON = (234, 88, 12)         # vivid amber-orange
+# Near-black tags stay readable on sectional ink and pale street maps.
+# Aircraft icons: yellow on most basemaps; dark amber only on Light: Carto / VFR.
+_LIGHT_MAP_ICON = (234, 88, 12)         # dark amber (Light: Carto / VFR)
 _LIGHT_MAP_ICON_UNKNOWN = (146, 64, 14)  # darker amber for unmapped types
 _LIGHT_MAP_TRACKED = (22, 163, 74)      # vivid green (tracked)
 _LIGHT_MAP_CALLSIGN = (15, 23, 42)      # near-black tags
@@ -1033,13 +1117,22 @@ _LIGHT_MAP_ALERT_EMERGENCY = _LIGHT_MAP_ALERT_MIL  # solid red, same as military
 def _overlay_color_for_basemap(color: tuple) -> tuple:
     """Map dark-radar accents to legible colors on light/VFR basemaps."""
     r, g, b = int(color[0]), int(color[1]), int(color[2])
+    key = (r, g, b)
+    icon_keys = (
+        tuple(theme.AIRCRAFT[:3]),
+        tuple(theme.AIRCRAFT_UNKNOWN[:3]),
+        tuple(theme.VESSEL_MOVING[:3]),
+    )
+    # Icon color is per basemap: amber only on Light: Carto / VFR; else yellow.
+    if key in icon_keys:
+        if _amber_icon_basemap():
+            if key == tuple(theme.AIRCRAFT_UNKNOWN[:3]):
+                return _LIGHT_MAP_ICON_UNKNOWN
+            return _LIGHT_MAP_ICON
+        return (r, g, b)
     if not _light_basemap():
         return (r, g, b)
-    key = (r, g, b)
     mapping = {
-        tuple(theme.AIRCRAFT[:3]): _LIGHT_MAP_ICON,
-        tuple(theme.AIRCRAFT_UNKNOWN[:3]): _LIGHT_MAP_ICON_UNKNOWN,
-        tuple(theme.VESSEL_MOVING[:3]): _LIGHT_MAP_ICON,
         tuple(theme.SWEEP[:3]): _LIGHT_MAP_TRACKED,
         tuple(theme.GRID[:3]): _LIGHT_MAP_CALLSIGN,
         tuple(theme.TAG_TYPE[:3]): _LIGHT_MAP_TYPE,

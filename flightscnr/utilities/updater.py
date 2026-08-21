@@ -612,6 +612,8 @@ def _default_notify() -> dict:
         "remote_release": "",
         "last_check_ts": 0.0,
         "dismissed_for": "",
+        "scheduled_for": "",
+        "auto_off_hours": False,
     }
 
 
@@ -633,6 +635,8 @@ def _read_notify() -> dict:
         except (TypeError, ValueError):
             state["last_check_ts"] = 0.0
         state["dismissed_for"] = str(data.get("dismissed_for") or "")
+        state["scheduled_for"] = str(data.get("scheduled_for") or "")
+        state["auto_off_hours"] = bool(data.get("auto_off_hours"))
         return state
     except (OSError, json.JSONDecodeError, TypeError):
         return state
@@ -654,15 +658,27 @@ def refresh_notify_from_check(result: dict) -> dict:
     prev = _read_notify()
     remote = result.get("remote") if isinstance(result.get("remote"), dict) else {}
     remote_id = _remote_id(remote)
-    available = bool(result.get("update_available")) and not bool(
-        result.get("update_running")
-    )
+    reachable = bool(remote.get("release_tag") or remote.get("commit"))
+    running = bool(result.get("update_running"))
+    # An unreachable GitHub check must not look like "up to date". That would
+    # wipe Later tonight and the banner; a later idle auto-install would never
+    # fire, and Update Now would hide until the next successful check.
+    if not reachable and not running:
+        prev["last_check_ts"] = time.time()
+        _write_notify(prev)
+        return prev
+    available = bool(result.get("update_available")) and not running
     dismissed_for = str(prev.get("dismissed_for") or "")
+    scheduled_for = str(prev.get("scheduled_for") or "")
+    auto_off_hours = bool(prev.get("auto_off_hours"))
     if not available:
         dismissed_for = ""
+        scheduled_for = ""
     elif dismissed_for and dismissed_for != remote_id:
         # Newer remote tip — show banner again.
         dismissed_for = ""
+    if scheduled_for and scheduled_for != remote_id:
+        scheduled_for = ""
     state = {
         "update_available": available,
         "remote_id": remote_id if available else "",
@@ -671,6 +687,8 @@ def refresh_notify_from_check(result: dict) -> dict:
         ),
         "last_check_ts": time.time(),
         "dismissed_for": dismissed_for if available else "",
+        "scheduled_for": scheduled_for if available else "",
+        "auto_off_hours": auto_off_hours,
     }
     if available and not state["remote_release"] and remote_id:
         state["remote_release"] = remote_id.split("@", 1)[0]
@@ -711,8 +729,145 @@ def dismiss_update_banner() -> dict:
     remote_id = str(state.get("remote_id") or "")
     if remote_id and state.get("update_available"):
         state["dismissed_for"] = remote_id
+        state["scheduled_for"] = ""
         _write_notify(state)
     return state
+
+
+def update_is_scheduled() -> bool:
+    """True when Later tonight is armed for the current available remote."""
+    state = _read_notify()
+    remote_id = str(state.get("remote_id") or "")
+    scheduled = str(state.get("scheduled_for") or "")
+    if not state.get("update_available") or not remote_id:
+        return False
+    if str(state.get("dismissed_for") or "") == remote_id:
+        return False
+    return scheduled == remote_id
+
+
+def schedule_update_tonight() -> dict:
+    """Arm Later tonight for the current remote. Returns notify state."""
+    state = _read_notify()
+    remote_id = str(state.get("remote_id") or "")
+    if not remote_id or not state.get("update_available"):
+        return state
+    if str(state.get("dismissed_for") or "") == remote_id:
+        return state
+    state["scheduled_for"] = remote_id
+    _write_notify(state)
+    return state
+
+
+def auto_off_hours_enabled() -> bool:
+    return bool(_read_notify().get("auto_off_hours"))
+
+
+def set_auto_off_hours(enabled: bool) -> dict:
+    """Portal toggle: install available updates during the night window."""
+    state = _read_notify()
+    state["auto_off_hours"] = bool(enabled)
+    _write_notify(state)
+    return state
+
+
+AUTO_IDLE_S = 5 * 60
+_last_auto_attempt_ts = 0.0
+
+
+def _in_ota_night_window() -> bool:
+    try:
+        from display.round_touch import off_hours
+
+        return bool(off_hours.in_night_window())
+    except Exception:
+        now = datetime.now()
+        cur = now.hour * 60 + now.minute
+        return cur >= 22 * 60 or cur < 6 * 60
+
+
+def _origin_reachable() -> bool:
+    """True when a recent GitHub check already proved the remote exists.
+
+    Auto-install runs on the display loop. Do not ``git ls-remote`` here:
+    on a Pi 3 that call often exceeds the 10s git timeout, hitching radar
+    and false-skipping Later tonight every minute even when GitHub is up.
+    """
+    state = _read_notify()
+    last = float(state.get("last_check_ts") or 0.0)
+    if (
+        last > 0
+        and (time.time() - last) < _REMOTE_CACHE_STALE_S
+        and state.get("update_available")
+        and str(state.get("remote_id") or "")
+    ):
+        return True
+    cached, cached_ts = _read_remote_cache()
+    age = time.time() - float(cached_ts or 0.0)
+    if cached_ts > 0 and age < _REMOTE_CACHE_STALE_S:
+        return bool(cached.get("release_tag") or cached.get("commit"))
+    return False
+
+
+def should_auto_install() -> bool:
+    """True when this remote should install in the night window (if idle)."""
+    if update_running():
+        return False
+    state = _read_notify()
+    if not state.get("update_available"):
+        return False
+    remote_id = str(state.get("remote_id") or "")
+    if not remote_id:
+        return False
+    if str(state.get("dismissed_for") or "") == remote_id:
+        return False
+    if str(_read_status().get("state") or "") == "failed":
+        return False
+    if str(state.get("scheduled_for") or "") == remote_id:
+        return True
+    return bool(state.get("auto_off_hours"))
+
+
+def maybe_start_scheduled_update(
+    *,
+    idle_s: float,
+    atc_playing: bool = False,
+) -> dict | None:
+    """Start OTA when Later tonight / auto-off-hours and the panel is idle.
+
+    Returns the ``start_update()`` result when an install is kicked off,
+    otherwise None.
+    """
+    global _last_auto_attempt_ts
+    if not should_auto_install():
+        return None
+    if atc_playing:
+        return None
+    if float(idle_s) < AUTO_IDLE_S:
+        return None
+    if not _in_ota_night_window():
+        return None
+    now = time.time()
+    if now - _last_auto_attempt_ts < 60.0:
+        return None
+    _last_auto_attempt_ts = now
+    # Do not spawn portal-update when GitHub/origin is down. A failed fetch
+    # writes status=failed and would block auto (and look like a broken OTA)
+    # until someone taps Repair. Retry next minute instead.
+    if not _origin_reachable():
+        logger.info("Scheduled OTA skipped: origin unreachable")
+        return None
+    # Same path as portal Update Now — clears scripts/release.sh mode dirt,
+    # then portal-update.sh → install-pi.sh update. Never add a second pull.
+    result = start_update()
+    if result.get("ok"):
+        state = _read_notify()
+        state["scheduled_for"] = ""
+        _write_notify(state)
+        logger.info("Started scheduled / off-hours OTA")
+    else:
+        logger.warning("Scheduled OTA did not start: %s", result.get("message"))
+    return result
 
 
 def seconds_until_next_check() -> float:
@@ -793,6 +948,8 @@ def check_for_update(*, force: bool = False) -> dict:
         "update_failed": failed,
         "ota_repair_needed": (blocked or failed) and update_available and not running,
         "update_running": running,
+        "scheduled_tonight": update_is_scheduled(),
+        "auto_off_hours": auto_off_hours_enabled(),
         "message": message,
         "local": local,
         "remote": remote,
@@ -866,6 +1023,9 @@ def start_update() -> dict:
     )
     if not result.get("ok"):
         return result
+    state = _read_notify()
+    state["scheduled_for"] = ""
+    _write_notify(state)
     return {
         "ok": True,
         "message": "Update started. The display will restart shortly.",

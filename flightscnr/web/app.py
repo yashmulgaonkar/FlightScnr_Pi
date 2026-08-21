@@ -1359,6 +1359,23 @@ def updates_apply():
     return jsonify(updater.start_update())
 
 
+@app.post("/updates/tonight")
+def updates_tonight():
+    from utilities import updater
+
+    updater.schedule_update_tonight()
+    return jsonify(updater.check_for_update())
+
+
+@app.post("/updates/auto")
+def updates_auto():
+    from utilities import updater
+
+    data = request.get_json(silent=True) or {}
+    updater.set_auto_off_hours(bool(data.get("auto_off_hours")))
+    return jsonify(updater.check_for_update())
+
+
 @app.post("/updates/resync")
 def updates_resync():
     from utilities import updater

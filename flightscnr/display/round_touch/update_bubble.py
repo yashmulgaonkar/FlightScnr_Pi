@@ -18,7 +18,11 @@ import pygame
 
 from display.round_touch import draw, radar_hud, theme
 
-_LABEL_AVAILABLE = "Firmware Update Available"
+_LABEL_AVAILABLE = "Update available — tap for tonight"
+_LABEL_SCHEDULED = (
+    "Firmware will update tonight during off-hours",
+    "Close to skip auto-update",
+)
 _LABEL_PROGRESS = "Update in progress — do not turn off"
 _MODE_NONE = "none"
 _MODE_AVAILABLE = "available"
@@ -69,6 +73,45 @@ def bubble_bounds() -> pygame.Rect:
     return _bubble_rect.copy()
 
 
+def _label_lines(mode: str) -> tuple[str, ...]:
+    if mode == _MODE_PROGRESS:
+        return (_LABEL_PROGRESS,)
+    try:
+        from utilities.updater import update_is_scheduled
+
+        if update_is_scheduled():
+            return _LABEL_SCHEDULED
+    except Exception:
+        pass
+    return (_LABEL_AVAILABLE,)
+
+
+def _compose_label(
+    lines: tuple[str, ...],
+    font: pygame.font.Font,
+    color: tuple[int, int, int],
+    max_text_w: int,
+) -> pygame.Surface:
+    """Render one or more lines; ellipsize any line that exceeds max_text_w."""
+    rendered: list[pygame.Surface] = []
+    for line in lines:
+        text = line
+        surf = font.render(text, True, color)
+        while len(text) > 8 and surf.get_width() > max_text_w:
+            text = text[:-2]
+            surf = font.render(text.rstrip() + "…", True, color)
+        rendered.append(surf)
+    line_gap = max(1, theme.s(2)) if len(rendered) > 1 else 0
+    width = max(s.get_width() for s in rendered)
+    height = sum(s.get_height() for s in rendered) + line_gap * (len(rendered) - 1)
+    block = pygame.Surface((width, height), pygame.SRCALPHA)
+    y = 0
+    for i, surf in enumerate(rendered):
+        block.blit(surf, (0, y))
+        y += surf.get_height() + (line_gap if i < len(rendered) - 1 else 0)
+    return block
+
+
 def _geometry(
     mode: str,
 ) -> tuple[pygame.Rect, pygame.Rect, pygame.Surface, tuple[int, int, int], tuple[int, int, int, int]]:
@@ -89,27 +132,27 @@ def _geometry(
     except Exception:
         glyph, fill_rgba = (28, 30, 34), (255, 255, 255, 180)
 
-    label = _LABEL_PROGRESS if progress else _LABEL_AVAILABLE
-    font_px = max(10, theme.s(12)) if progress else max(11, theme.s(13))
+    lines = _label_lines(mode)
+    two_line = len(lines) > 1
+    if progress:
+        font_px = max(10, theme.s(12))
+    elif two_line:
+        font_px = max(10, theme.s(11))
+    else:
+        font_px = max(11, theme.s(13))
     font = draw.load_font(font_px, bold=True)
-    # Progress notice is critical — use amber TAG_TYPE; available stays TAG_TYPE too.
-    label_surf = font.render(label, True, theme.TAG_TYPE)
-
     close_size = 0 if progress else theme.s(26)
     pad_x = theme.s(12)
     pad_y = theme.s(8)
     gap = 0 if progress else theme.s(6)
-    width = pad_x + label_surf.get_width() + gap + close_size + pad_x
-    height = max(label_surf.get_height(), close_size or label_surf.get_height()) + pad_y * 2
-    # Cap width so a long progress string still fits the round bezel.
     max_w = max(theme.s(120), int(theme.VISIBLE_RADIUS * 1.55))
-    if width > max_w and progress:
-        # Truncate with ellipsis until it fits.
-        text = label
-        while len(text) > 8 and width > max_w:
-            text = text[:-2]
-            label_surf = font.render(text.rstrip() + "…", True, theme.TAG_TYPE)
-            width = pad_x + label_surf.get_width() + pad_x
+    max_text_w = max(theme.s(80), max_w - pad_x - gap - close_size - pad_x)
+    # Progress notice is critical — use amber TAG_TYPE; available stays TAG_TYPE too.
+    label_surf = _compose_label(lines, font, theme.TAG_TYPE, max_text_w)
+    width = min(max_w, pad_x + label_surf.get_width() + gap + close_size + pad_x)
+    height = (
+        max(label_surf.get_height(), close_size or label_surf.get_height()) + pad_y * 2
+    )
     bubble = pygame.Rect(0, 0, width, height)
     bubble.center = (cx, cy)
 
@@ -192,7 +235,7 @@ def draw_bubble(surface: pygame.Surface) -> pygame.Rect | None:
 
 
 def handle_tap(x: int, y: int) -> str | None:
-    """Return ``\"dismiss\"`` for available-banner taps; ignore progress taps."""
+    """Return dismiss / tonight / progress; ignore misses."""
     mode = _current_mode()
     if mode == _MODE_NONE:
         return None
@@ -217,7 +260,7 @@ def handle_tap(x: int, y: int) -> str | None:
     else:
         hit_bubble, hit_close = _bubble_rect, _close_rect
 
-    if hit_close.collidepoint(x, y) or hit_bubble.collidepoint(x, y):
+    if hit_close.collidepoint(x, y):
         try:
             from utilities.updater import dismiss_update_banner
 
@@ -226,4 +269,14 @@ def handle_tap(x: int, y: int) -> str | None:
             pass
         invalidate_cache()
         return "dismiss"
+    if hit_bubble.collidepoint(x, y):
+        try:
+            from utilities.updater import schedule_update_tonight, update_is_scheduled
+
+            if not update_is_scheduled():
+                schedule_update_tonight()
+        except Exception:
+            pass
+        invalidate_cache()
+        return "tonight"
     return None

@@ -11,10 +11,15 @@
 
 Styles (settings map_style, fallback RADAR_MAP_PROVIDER):
   dark — CARTO Dark Matter, no labels (default)
+  osm — OpenStreetMap tiles remapped to a dark radar palette
+  stadia_dark — Stadia Alidade Smooth Dark, lifted for radar (needs STADIA_MAPS_API_KEY)
+  toner — Stamen Toner B&W (full style; needs Stadia key)
+  satellite — Esri World Imagery (no API key)
+  streets — Esri World Street Map, Google-like roadmap (no API key)
+  black — solid black circle (no tiles)
   light — CARTO Positron light, no labels
   voyager — CARTO Voyager (color street map), no labels
   vfr  — FAA VFR sectional charts (US coverage, public domain)
-  osm  — OpenStreetMap tiles remapped to dark radar palette (legacy env)
 """
 
 from __future__ import annotations
@@ -57,8 +62,32 @@ MANIFEST_PATH = os.path.join(CACHE_DIR, "manifest.json")
 TILE_SIZE = 256
 EARTH_RADIUS_M = 6378137.0
 
-# UI-facing styles (Options / portal cycle). Legacy "osm" remains via env.
-MAP_STYLES = ("dark", "light", "voyager", "vfr")
+# UI-facing styles (Options / portal) — grouped by Dark / Light / Street / Satellite.
+MAP_STYLES = (
+    "dark",
+    "osm",
+    "stadia_dark",
+    "black",
+    "light",
+    "toner",
+    "vfr",
+    "streets",
+    "voyager",
+    "satellite",
+)
+MAP_STYLE_LABELS = {
+    "dark": "Dark: Carto",
+    "osm": "Dark: OSM",
+    "stadia_dark": "Dark: Stadia (needs STADIA_MAPS_API_KEY)",
+    "black": "Dark: Flat",
+    "light": "Light: Carto",
+    "toner": "Light: Toner (needs STADIA_MAPS_API_KEY)",
+    "vfr": "Light: VFR",
+    "streets": "Street: Esri",
+    "voyager": "Street: Voyager",
+    "satellite": "Satellite: Esri",
+}
+FLAT_BLACK = (0, 0, 0)
 
 OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 CARTO_SUBDOMAINS = "abcd"
@@ -68,8 +97,20 @@ VFR_TILE_URL = (
     "https://tiles.arcgis.com/tiles/ssFJjBXIUyZDrSYZ/arcgis/rest/services/"
     "VFR_Sectional/MapServer/tile/{z}/{y}/{x}"
 )
+ESRI_WORLD_IMAGERY_URL = (
+    "https://server.arcgisonline.com/ArcGIS/rest/services/"
+    "World_Imagery/MapServer/tile/{z}/{y}/{x}"
+)
+ESRI_WORLD_STREET_URL = (
+    "https://server.arcgisonline.com/ArcGIS/rest/services/"
+    "World_Street_Map/MapServer/tile/{z}/{y}/{x}"
+)
+STADIA_TILE_URL = (
+    "https://tiles.stadiamaps.com/tiles/{style}/{z}/{x}/{y}.png"
+)
 VFR_ZOOM_MIN = 8
 VFR_ZOOM_MAX = 12
+SAT_ZOOM_MAX = 18
 
 USER_AGENT = "FlightScnrPi/1.0"
 OSM_TILE_DELAY_S = 0.55  # OSM tile usage policy: max ~2 requests/second
@@ -77,7 +118,7 @@ CARTO_TILE_WORKERS = 4
 OSM_TILE_WORKERS = 2
 VFR_TILE_WORKERS = 4
 CACHE_TTL_S = 7 * 24 * 3600
-CACHE_STYLE_VERSION = 19  # bump when map tint/placement/styles change
+CACHE_STYLE_VERSION = 22  # bump when map tint/placement/styles change
 
 
 _lock = threading.Lock()
@@ -87,6 +128,7 @@ _surfaces: dict[tuple, pygame.Surface] = {}
 # invalidated the radar backdrop cache (~every frame).
 _display_converted: set[tuple] = set()
 _fetch_threads: dict[tuple, threading.Thread] = {}
+_stadia_key_warned = False
 
 
 def normalize_map_style(raw: str | None) -> str:
@@ -94,6 +136,39 @@ def normalize_map_style(raw: str | None) -> str:
     provider = (raw or "dark").strip().lower() or "dark"
     if provider in ("dark", "carto", "cartodb", "carto_dark", "dark_matter"):
         return "dark"
+    # Removed styles — fall back so old settings/env keep working.
+    if provider in ("dark_hi", "dark_high", "carto_hi", "dark_contrast"):
+        return "dark"
+    if provider in ("esri_dark", "dark_gray", "dark_grey", "canvas_dark"):
+        return "dark"
+    if provider in (
+        "satellite",
+        "sat",
+        "esri",
+        "esri_sat",
+        "esri_imagery",
+        "world_imagery",
+        "imagery",
+    ):
+        return "satellite"
+    # Removed USGS imagery — fall back to Esri satellite.
+    if provider in ("usgs", "usgs_imagery", "usgs_sat", "naip"):
+        return "satellite"
+    if provider in (
+        "streets",
+        "street",
+        "esri_streets",
+        "world_street",
+        "roadmap",
+        "google",
+    ):
+        return "streets"
+    if provider in ("stadia_dark", "stadia", "alidade", "alidade_dark"):
+        return "stadia_dark"
+    if provider in ("toner", "stamen_toner", "toner_dark"):
+        return "toner"
+    if provider in ("black", "flat", "flat_black", "solid_black"):
+        return "black"
     if provider in ("light", "carto_light", "positron"):
         return "light"
     if provider in ("voyager", "carto_voyager", "rastertiles/voyager"):
@@ -104,6 +179,30 @@ def normalize_map_style(raw: str | None) -> str:
         return "osm"
     logger.warning("Unknown map style %r — using dark", raw)
     return "dark"
+
+
+def _stadia_api_key() -> str:
+    raw = (
+        os.environ.get("STADIA_MAPS_API_KEY")
+        or os.environ.get("STADIA_API_KEY")
+        or ""
+    )
+    # Systemd EnvironmentFile keeps inline "# comments" in the value.
+    return raw.split("#", 1)[0].strip()
+
+
+def _stadia_tile_url(style_id: str, z: int, x: int, y: int) -> str:
+    url = STADIA_TILE_URL.format(style=style_id, z=z, x=x, y=y)
+    key = _stadia_api_key()
+    if key:
+        return f"{url}?api_key={key}"
+    return url
+
+
+def _tile_url_for_log(url: str) -> str:
+    if "api_key=" not in url:
+        return url
+    return url.split("?", 1)[0] + "?api_key=…"
 
 
 def _enabled() -> bool:
@@ -132,9 +231,20 @@ def _resolved_provider() -> str:
 
 def _tile_url(z: int, x: int, y: int, style: str | None = None) -> str:
     style = normalize_map_style(style) if style else _resolved_style()
+    if style == "black":
+        return ""
     if style == "dark":
         sub = CARTO_SUBDOMAINS[(x + y) % len(CARTO_SUBDOMAINS)]
         return CARTO_TILE_URL.format(sub=sub, style="dark_nolabels", z=z, x=x, y=y)
+    if style == "stadia_dark":
+        return _stadia_tile_url("alidade_smooth_dark", z, x, y)
+    if style == "toner":
+        # Full Stamen Toner (website default) — not toner_lines / toner_dark.
+        return _stadia_tile_url("stamen_toner", z, x, y)
+    if style == "satellite":
+        return ESRI_WORLD_IMAGERY_URL.format(z=z, y=y, x=x)
+    if style == "streets":
+        return ESRI_WORLD_STREET_URL.format(z=z, y=y, x=x)
     if style == "light":
         sub = CARTO_SUBDOMAINS[(x + y) % len(CARTO_SUBDOMAINS)]
         return CARTO_TILE_URL.format(sub=sub, style="light_nolabels", z=z, x=x, y=y)
@@ -198,6 +308,8 @@ def _zoom_for_scale(home_lat: float, px_per_km: float, style: str | None = None)
     style = normalize_map_style(style) if style else _resolved_style()
     if style == "vfr":
         z_min, z_max = VFR_ZOOM_MIN, VFR_ZOOM_MAX
+    elif style in ("satellite", "streets"):
+        z_min, z_max = 9, SAT_ZOOM_MAX
     else:
         z_min, z_max = 9, 17
     best_z = min(max(11, z_min), z_max)
@@ -278,6 +390,15 @@ def _fetch_tile(
     style: str,
 ) -> pygame.Surface | None:
     url = _tile_url(z, x, y, style)
+    if style in ("stadia_dark", "toner") and not _stadia_api_key():
+        global _stadia_key_warned
+        if not _stadia_key_warned:
+            _stadia_key_warned = True
+            logger.warning(
+                "Basemap %s needs STADIA_MAPS_API_KEY in /etc/flightscnr.env "
+                "(free key at stadiamaps.com); tiles will 401 without it",
+                style,
+            )
     for attempt in range(3):
         try:
             resp = session.get(url, timeout=20)
@@ -287,7 +408,7 @@ def _fetch_tile(
             if attempt < 2:
                 time.sleep(0.5 * (attempt + 1))
                 continue
-            logger.warning("Map tile fetch failed %s: %s", url, exc)
+            logger.warning("Map tile fetch failed %s: %s", _tile_url_for_log(url), exc)
     return None
 
 
@@ -301,6 +422,8 @@ def _fetch_tile_coords(
         return {}
 
     style = normalize_map_style(style)
+    if style == "black":
+        return {}
     workers = min(_tile_workers(style), len(coords))
     results: dict[tuple[int, int], pygame.Surface] = {}
 
@@ -342,7 +465,11 @@ def _style_carto(surface: pygame.Surface) -> pygame.Surface:
         tobytes = getattr(pygame.image, "tobytes", pygame.image.tostring)
         img = Image.frombytes("RGB", surface.get_size(), tobytes(surface, "RGB"))
         # Lift shadows — CARTO dark tiles are very low-luminance out of the box.
-        lum = img.convert("L").point(lambda v: min(255, int(v * 1.35 + 28)))
+        lum_mul = 1.35
+        lum_add = 28
+        lum = img.convert("L").point(
+            lambda v, m=lum_mul, a=lum_add: min(255, int(v * m + a))
+        )
         img = Image.merge(
             "RGB",
             (
@@ -353,6 +480,100 @@ def _style_carto(surface: pygame.Surface) -> pygame.Surface:
         )
         img = ImageEnhance.Brightness(img).enhance(1.12)
         img = ImageEnhance.Contrast(img).enhance(1.22)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        return _as_display_surface(pygame.image.load(buf))
+
+    return _as_display_surface(surface)
+
+
+def _style_stadia_dark(surface: pygame.Surface) -> pygame.Surface:
+    """Lift Alidade Smooth Dark so roads/coast read under the radar grid.
+
+    Stock tiles are near-black; without a lift the circular radar looks blank.
+    Keep some of Stadia's hue (water/land) while raising midtones.
+    """
+    try:
+        from PIL import Image, ImageEnhance
+    except ImportError:
+        Image = None
+
+    if Image is not None:
+        tobytes = getattr(pygame.image, "tobytes", pygame.image.tostring)
+        img = Image.frombytes("RGB", surface.get_size(), tobytes(surface, "RGB"))
+        lum = img.convert("L").point(lambda v: min(255, int(v * 1.45 + 22)))
+        lifted = Image.merge(
+            "RGB",
+            (
+                lum.point(lambda v: min(255, int(v * 0.92))),
+                lum.point(lambda v: min(255, int(v * 0.96))),
+                lum,
+            ),
+        )
+        img = Image.blend(img, lifted, alpha=0.72)
+        img = ImageEnhance.Brightness(img).enhance(1.22)
+        img = ImageEnhance.Contrast(img).enhance(1.30)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        return _as_display_surface(pygame.image.load(buf))
+
+    return _as_display_surface(surface)
+
+
+def _style_toner(surface: pygame.Surface) -> pygame.Surface:
+    """Keep full Stamen Toner close to stock (black ink on paper)."""
+    try:
+        from PIL import Image, ImageEnhance
+    except ImportError:
+        Image = None
+
+    if Image is not None:
+        tobytes = getattr(pygame.image, "tobytes", pygame.image.tostring)
+        img = Image.frombytes("RGB", surface.get_size(), tobytes(surface, "RGB"))
+        img = ImageEnhance.Contrast(img).enhance(1.06)
+        img = ImageEnhance.Brightness(img).enhance(0.98)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        return _as_display_surface(pygame.image.load(buf))
+
+    return _as_display_surface(surface)
+
+
+def _style_satellite(surface: pygame.Surface) -> pygame.Surface:
+    """Mild lift on aerial/satellite imagery so traffic chrome stays readable."""
+    try:
+        from PIL import Image, ImageEnhance
+    except ImportError:
+        Image = None
+
+    if Image is not None:
+        tobytes = getattr(pygame.image, "tobytes", pygame.image.tostring)
+        img = Image.frombytes("RGB", surface.get_size(), tobytes(surface, "RGB"))
+        img = ImageEnhance.Contrast(img).enhance(1.08)
+        img = ImageEnhance.Brightness(img).enhance(1.04)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        return _as_display_surface(pygame.image.load(buf))
+
+    return _as_display_surface(surface)
+
+
+def _style_streets(surface: pygame.Surface) -> pygame.Surface:
+    """Keep Esri World Street Map close to stock (Google-like roadmap)."""
+    try:
+        from PIL import Image, ImageEnhance
+    except ImportError:
+        Image = None
+
+    if Image is not None:
+        tobytes = getattr(pygame.image, "tobytes", pygame.image.tostring)
+        img = Image.frombytes("RGB", surface.get_size(), tobytes(surface, "RGB"))
+        img = ImageEnhance.Contrast(img).enhance(1.05)
+        img = ImageEnhance.Brightness(img).enhance(0.97)
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
@@ -506,8 +727,18 @@ def _style_osm(surface: pygame.Surface) -> pygame.Surface:
 
 def _style_for_radar(surface: pygame.Surface, style: str | None = None) -> pygame.Surface:
     style = normalize_map_style(style) if style else _resolved_style()
+    if style == "black":
+        return _as_display_surface(surface)
     if style == "dark":
         return _style_carto(surface)
+    if style == "stadia_dark":
+        return _style_stadia_dark(surface)
+    if style == "toner":
+        return _style_toner(surface)
+    if style == "satellite":
+        return _style_satellite(surface)
+    if style == "streets":
+        return _style_streets(surface)
     if style == "light":
         return _style_light(surface)
     if style == "voyager":
@@ -529,6 +760,14 @@ def _apply_circle_mask(surface: pygame.Surface) -> pygame.Surface:
     return masked
 
 
+def _build_flat_black_background() -> pygame.Surface:
+    """Solid black circle — same diameter as tile composites so pan coverage matches."""
+    diameter = theme.VISIBLE_RADIUS * 2 + TILE_SIZE
+    canvas = pygame.Surface((diameter, diameter))
+    canvas.fill(FLAT_BLACK)
+    return _apply_circle_mask(canvas)
+
+
 def _build_background(scale_index: int, style: str | None = None) -> pygame.Surface | None:
     try:
         from config import LOCATION_HOME, location_configured
@@ -542,6 +781,8 @@ def _build_background(scale_index: int, style: str | None = None) -> pygame.Surf
     # Pin style for the whole build — never re-read settings mid-fetch.
     # Otherwise switching Map while prewarm runs can save light tiles under a dark key.
     provider = normalize_map_style(style) if style else _resolved_style()
+    if provider == "black":
+        return _build_flat_black_background()
     home_lat, home_lon = LOCATION_HOME[0], LOCATION_HOME[1]
     outer_km = scale.SCALE_BANDS[scale_index]["label_km"]
     px_per_km = theme.GRID_OUTER_RADIUS / outer_km
@@ -705,7 +946,8 @@ def _fetch_worker(key: tuple):
         surface = _build_background(key[2], style=key[3])
         if surface is None:
             return
-        _save_cache(surface, key)
+        if key[3] != "black":
+            _save_cache(surface, key)
         _remember_surface(key, surface)
     except Exception:
         logger.exception("Radar map background fetch failed for scale %s", key[2])
@@ -735,6 +977,11 @@ def request_background_for_key(key: tuple, force: bool = False):
         if not force and key in _surfaces:
             return
     if _fetch_running(key):
+        return
+
+    style = key[3] if len(key) > 3 else _resolved_style()
+    if normalize_map_style(style) == "black":
+        _remember_surface(key, _build_flat_black_background())
         return
 
     if not force:
@@ -807,6 +1054,11 @@ def get_background() -> pygame.Surface | None:
     key = _cache_key()
     if key is None:
         return None
+    if len(key) > 3 and key[3] == "black":
+        with _lock:
+            surface = _surfaces.get(key)
+        if surface is None:
+            _remember_surface(key, _build_flat_black_background())
     with _lock:
         surface = _surfaces.get(key)
         if surface is None:
@@ -1039,8 +1291,18 @@ def attribution_text() -> str | None:
     if not _enabled() or get_background() is None:
         return None
     style = _resolved_style()
+    if style == "black":
+        return None
     if style == "vfr":
         return "© FAA"
+    if style == "satellite":
+        return "© Esri © Earthstar"
+    if style == "streets":
+        return "© Esri"
+    if style == "stadia_dark":
+        return "© Stadia Maps © OSM"
+    if style == "toner":
+        return "© Stadia © Stamen © OSM"
     if style == "osm":
         return "© OpenStreetMap"
     if style == "voyager":
