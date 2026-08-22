@@ -672,9 +672,10 @@ def invalidate() -> None:
         _meta_ts = 0.0
     _provider_fail_until.clear()
     with _follow_lock:
-        global _follow_viewport, _follow_loading
+        global _follow_viewport, _follow_loading, _follow_loading_started
         _follow_viewport = None
         _follow_loading = False
+        _follow_loading_started = 0.0
 
 
 def cache_token() -> object:
@@ -751,12 +752,18 @@ def attribution_text() -> str | None:
 _follow_lock = threading.Lock()
 _follow_viewport: dict[str, Any] | None = None
 _follow_loading = False
+_follow_loading_started = 0.0
+_follow_clamp_log_at = 0.0
 
-# Match live_map overscan so rain has headroom to pan until sticky refetch.
-_FOLLOW_OVERSCAN = 1.8
-_FOLLOW_STICKY_MARGIN = 0.55  # of overscanned half-span
+# Match live_map overscan / sticky margin so rain refetches *before* the crop
+# clamps. Margin above ``1 - 1/OVERSCAN`` freezes precip under a centered
+# plane while the basemap keeps panning — classic Follow weather lag.
+_FOLLOW_OVERSCAN = 2.2
+_FOLLOW_STICKY_MARGIN = (1.0 - 1.0 / _FOLLOW_OVERSCAN) * 0.65
 _FOLLOW_RADIUS_HYST_KM = 2.0
 _FOLLOW_RADIUS_HYST_FRAC = 0.15
+# Abandon a hung Follow rain fetch so the next frame can retry.
+_FOLLOW_INFLIGHT_STALE_S = 18.0
 
 
 def _follow_bounds_for_center(
@@ -780,6 +787,8 @@ def _follow_needs_refetch(
 ) -> bool:
     """True when the sticky rain raster should be rebuilt."""
     if vp is None or vp.get("raster") is None:
+        return True
+    if vp.get("force_refresh"):
         return True
     if frame_time is not None and int(vp.get("frame_time") or 0) != int(frame_time):
         return True
@@ -866,10 +875,13 @@ def _crop_follow_window(
     lon: float,
     panel_w: int,
     panel_h: int,
-) -> tuple[pygame.Surface, int, int] | None:
+) -> tuple[pygame.Surface, int, int, int, int] | None:
     """Crop a panel-sized (pre-scale) window from the sticky rain raster.
 
-    Returns ``(window_surface, crop_x, crop_y)`` in raster pixel space, or None.
+    Returns ``(window_surface, crop_x, crop_y, ideal_x, ideal_y)`` in raster
+    pixel space, or None. Ideal coords are the unclamped crop origin — when
+    they diverge from the clamped origin the rain freezes relative to the
+    plane and the caller must force a sticky refetch.
     Window size is ``raster / OVERSCAN`` so scaling to the panel shows
     ``radius_km`` geographically (matching the sticky fetch).
     """
@@ -908,10 +920,10 @@ def _crop_follow_window(
             win_w = max(8, int(round(win_h * aspect)))
         else:
             win_h = max(8, int(round(win_w / aspect)))
-    crop_x = int(round(px - win_w / 2))
-    crop_y = int(round(py - win_h / 2))
-    crop_x = max(0, min(crop_x, raster_w - win_w))
-    crop_y = max(0, min(crop_y, raster_h - win_h))
+    ideal_x = int(round(px - win_w / 2))
+    ideal_y = int(round(py - win_h / 2))
+    crop_x = max(0, min(ideal_x, raster_w - win_w))
+    crop_y = max(0, min(ideal_y, raster_h - win_h))
     rect = pygame.Rect(crop_x, crop_y, win_w, win_h).clip(raster.get_rect())
     if rect.w <= 0 or rect.h <= 0:
         return None
@@ -920,11 +932,36 @@ def _crop_follow_window(
         padded = pygame.Surface((win_w, win_h), pygame.SRCALPHA)
         padded.blit(window, (0, 0))
         window = padded
-    return window, crop_x, crop_y
+    return window, crop_x, crop_y, ideal_x, ideal_y
+
+
+def _start_follow_worker(lat: float, lon: float, radius_km: float) -> None:
+    """Kick a Follow rain rebuild if one is not already running (or stalled)."""
+    global _follow_loading, _follow_loading_started
+    now = time.time()
+    with _follow_lock:
+        if _follow_loading:
+            started = float(_follow_loading_started or 0.0)
+            if started > 0 and (now - started) < _FOLLOW_INFLIGHT_STALE_S:
+                return
+            logger.warning(
+                "[follow] precip fetch stalled after %.0fs; retrying",
+                (now - started) if started else -1,
+            )
+            _follow_loading = False
+            _follow_loading_started = 0.0
+        _follow_loading = True
+        _follow_loading_started = now
+    threading.Thread(
+        target=_follow_worker,
+        args=(lat, lon, radius_km),
+        daemon=True,
+        name="follow-rain",
+    ).start()
 
 
 def _follow_worker(lat: float, lon: float, radius_km: float) -> None:
-    global _follow_viewport, _follow_loading
+    global _follow_viewport, _follow_loading, _follow_loading_started
     try:
         meta, provider_id = _cached_metadata()
         if meta is None or not provider_id or _metadata_stale():
@@ -966,6 +1003,7 @@ def _follow_worker(lat: float, lon: float, radius_km: float) -> None:
     finally:
         with _follow_lock:
             _follow_loading = False
+            _follow_loading_started = 0.0
 
 
 def blit_follow_overlay(
@@ -982,7 +1020,7 @@ def blit_follow_overlay(
     Pans a sticky overscanned rain raster under the aircraft each frame so
     precip stays locked to the basemap while the plane is centered.
     """
-    global _follow_loading
+    global _follow_clamp_log_at
     if not _enabled():
         return
     try:
@@ -1000,21 +1038,9 @@ def blit_follow_overlay(
 
     with _follow_lock:
         vp = _follow_viewport
-        loading = _follow_loading
 
-    if (
-        _follow_needs_refetch(vp, lat, lon, radius_km, frame_time, provider_id)
-        and not loading
-    ):
-        with _follow_lock:
-            if not _follow_loading:
-                _follow_loading = True
-                threading.Thread(
-                    target=_follow_worker,
-                    args=(lat, lon, radius_km),
-                    daemon=True,
-                    name="follow-rain",
-                ).start()
+    if _follow_needs_refetch(vp, lat, lon, radius_km, frame_time, provider_id):
+        _start_follow_worker(lat, lon, radius_km)
 
     with _follow_lock:
         vp = _follow_viewport
@@ -1024,7 +1050,23 @@ def blit_follow_overlay(
     cropped = _crop_follow_window(vp, lat, lon, width, height)
     if cropped is None:
         return
-    window, _crop_x, _crop_y = cropped
+    window, crop_x, crop_y, ideal_x, ideal_y = cropped
+    # Clamped crop = precip freezes under a centered icon while basemap pans.
+    if abs(crop_x - ideal_x) > 2 or abs(crop_y - ideal_y) > 2:
+        now_clamp = time.time()
+        if now_clamp - _follow_clamp_log_at >= 5.0:
+            _follow_clamp_log_at = now_clamp
+            logger.warning(
+                "[follow] precip crop clamped (ideal=%d,%d got=%d,%d) — refetching",
+                ideal_x,
+                ideal_y,
+                crop_x,
+                crop_y,
+            )
+        with _follow_lock:
+            if _follow_viewport is not None:
+                _follow_viewport["force_refresh"] = True
+        _start_follow_worker(lat, lon, radius_km)
     try:
         scaled = pygame.transform.smoothscale(window, (side, side))
     except pygame.error:

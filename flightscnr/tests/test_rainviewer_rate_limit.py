@@ -280,8 +280,8 @@ class TestFollowRainPan(unittest.TestCase):
         drifted = rv._crop_follow_window(vp, lat + 0.05, lon, 100, 100)
         self.assertIsNotNone(at_center)
         self.assertIsNotNone(drifted)
-        _, cx0, cy0 = at_center
-        _, cx1, cy1 = drifted
+        _, cx0, cy0, _, _ = at_center
+        _, cx1, cy1, _, _ = drifted
         # Northward drift → crop moves up in mercator (smaller y).
         self.assertNotEqual((cx0, cy0), (cx1, cy1))
         self.assertLess(cy1, cy0)
@@ -310,6 +310,50 @@ class TestFollowRainPan(unittest.TestCase):
         self.assertTrue(
             rv._follow_needs_refetch(vp, lat, lon, 40.0, 1000, "rainviewer")
         )
+
+    def test_sticky_margin_refetches_before_crop_clamp(self):
+        """Regression: margin above clamp fraction froze rain under the plane."""
+        from display.round_touch import rainviewer_overlay as rv
+
+        clamp_frac = 1.0 - 1.0 / rv._FOLLOW_OVERSCAN
+        self.assertLess(rv._FOLLOW_STICKY_MARGIN, clamp_frac)
+
+    def test_force_refresh_needs_refetch(self):
+        from display.round_touch import rainviewer_overlay as rv
+
+        lat, lon = 47.45, -122.31
+        vp = self._seed_viewport(lat, lon, 20.0)
+        vp["force_refresh"] = True
+        self.assertTrue(
+            rv._follow_needs_refetch(vp, lat, lon, 20.0, 1000, "rainviewer")
+        )
+
+    def test_crop_clamp_sets_force_refresh(self):
+        """When the crop hits the raster edge, force a sticky rain refetch."""
+        import pygame
+        from display.round_touch import rainviewer_overlay as rv
+        from unittest import mock
+
+        lat, lon = 47.45, -122.31
+        vp = self._seed_viewport(lat, lon, 20.0)
+        # Far outside overscan → crop clamps.
+        far_lat = lat + 2.0
+        cropped = rv._crop_follow_window(vp, far_lat, lon, 100, 100)
+        self.assertIsNotNone(cropped)
+        _window, crop_x, crop_y, ideal_x, ideal_y = cropped
+        self.assertTrue(abs(crop_x - ideal_x) > 2 or abs(crop_y - ideal_y) > 2)
+
+        surf = pygame.Surface((100, 100), pygame.SRCALPHA)
+        with mock.patch.object(rv, "_enabled", return_value=True), mock.patch(
+            "display.round_touch.settings.show_precipitation", return_value=True
+        ), mock.patch.object(rv, "_cached_metadata", return_value=(None, None)), mock.patch.object(
+            rv, "_start_follow_worker"
+        ) as start:
+            rv.blit_follow_overlay(
+                surf, lat=far_lat, lon=lon, radius_km=20.0, width=100, height=100
+            )
+        self.assertTrue(vp.get("force_refresh"))
+        start.assert_called()
 
 
 if __name__ == "__main__":
