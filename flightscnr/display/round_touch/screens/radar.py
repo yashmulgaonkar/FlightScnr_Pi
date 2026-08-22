@@ -1075,19 +1075,25 @@ def _is_tracked(flight) -> bool:
     return bool(tracked_keys & flight_identity_keys(flight))
 
 
-def _light_basemap() -> bool:
-    """Pale street / VFR / imagery charts need high-contrast tags (not icon color)."""
+def _pale_basemap() -> bool:
+    """Pale street / VFR charts — near-black tags stay readable on light ink."""
     try:
-        return settings.map_style() in (
-            "light",
-            "voyager",
-            "vfr",
-            "toner",
-            "satellite",
-            "streets",
-        )
+        return settings.map_style() in ("light", "voyager", "vfr", "streets")
     except Exception:
         return False
+
+
+def _imagery_basemap() -> bool:
+    """Dark / busy imagery — neon-dark remaps disappear on water and terrain."""
+    try:
+        return settings.map_style() in ("satellite", "toner")
+    except Exception:
+        return False
+
+
+def _light_basemap() -> bool:
+    """Basemaps that remapping radar neon accents (pale charts or imagery)."""
+    return _pale_basemap() or _imagery_basemap()
 
 
 def _amber_icon_basemap() -> bool:
@@ -1114,9 +1120,17 @@ _LIGHT_MAP_ALERT_WATCH = (8, 145, 178)  # deep aqua — not LIVE / climb teal
 _LIGHT_MAP_ALERT_OTHER = _LIGHT_MAP_ALERT_WATCH
 _LIGHT_MAP_ALERT_EMERGENCY = _LIGHT_MAP_ALERT_MIL  # solid red, same as military
 
+# Satellite / toner: bright glyphs that survive water, forests, and city texture.
+_IMAGERY_CALLSIGN = (248, 250, 252)     # near-white
+_IMAGERY_TYPE = (250, 204, 21)          # bright amber
+_IMAGERY_ALT_UP = (34, 211, 238)        # bright cyan
+_IMAGERY_ALT_DOWN = (244, 114, 182)     # bright pink
+_IMAGERY_TRACKED = (74, 222, 128)       # bright green
+_IMAGERY_VESSEL_PARKED = (148, 163, 184)
+
 
 def _overlay_color_for_basemap(color: tuple) -> tuple:
-    """Map dark-radar accents to legible colors on light/VFR basemaps."""
+    """Map dark-radar accents to legible colors on light/VFR/imagery basemaps."""
     r, g, b = int(color[0]), int(color[1]), int(color[2])
     key = (r, g, b)
     icon_keys = (
@@ -1131,7 +1145,24 @@ def _overlay_color_for_basemap(color: tuple) -> tuple:
                 return _LIGHT_MAP_ICON_UNKNOWN
             return _LIGHT_MAP_ICON
         return (r, g, b)
-    if not _light_basemap():
+    if _imagery_basemap():
+        mapping = {
+            tuple(theme.SWEEP[:3]): _IMAGERY_TRACKED,
+            tuple(theme.GRID[:3]): _IMAGERY_CALLSIGN,
+            tuple(theme.TAG_TYPE[:3]): _IMAGERY_TYPE,
+            tuple(theme.TAG_ALT_ASCEND[:3]): _IMAGERY_ALT_UP,
+            tuple(theme.TAG_ALT_DESCEND[:3]): _IMAGERY_ALT_DOWN,
+            tuple(theme.VESSEL_PARKED[:3]): _IMAGERY_VESSEL_PARKED,
+            tuple(theme.ALERT_MILITARY[:3]): _LIGHT_MAP_ALERT_MIL,
+            tuple(theme.ALERT_WATCH[:3]): _LIGHT_MAP_ALERT_WATCH,
+            tuple(theme.ALERT_OTHER[:3]): _LIGHT_MAP_ALERT_WATCH,
+            tuple(theme.ALERT_EMERGENCY[:3]): _LIGHT_MAP_ALERT_EMERGENCY,
+            tuple(theme.ALERT_FLASH[:3]): _LIGHT_MAP_ALERT_MIL,
+            tuple(theme.ALERT_FLASH_OTHER[:3]): _LIGHT_MAP_ALERT_WATCH,
+            tuple(theme.HINT[:3]): _IMAGERY_VESSEL_PARKED,
+        }
+        return mapping.get(key, (min(255, r + 40), min(255, g + 40), min(255, b + 40)))
+    if not _pale_basemap():
         return (r, g, b)
     mapping = {
         tuple(theme.SWEEP[:3]): _LIGHT_MAP_TRACKED,

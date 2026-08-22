@@ -165,7 +165,9 @@ class TestEmergencyColorCollision(unittest.TestCase):
     def test_light_basemap_does_not_map_emergency_to_descend(self):
         from display.round_touch.screens import radar
 
-        with mock.patch.object(radar, "_light_basemap", return_value=True):
+        with mock.patch.object(radar, "_pale_basemap", return_value=True), mock.patch.object(
+            radar, "_imagery_basemap", return_value=False
+        ):
             emergency = radar._overlay_color_for_basemap(theme.ALERT_EMERGENCY)
             descend = radar._overlay_color_for_basemap(theme.TAG_ALT_DESCEND)
             watch = radar._overlay_color_for_basemap(theme.ALERT_WATCH)
@@ -181,16 +183,21 @@ class TestEmergencyColorCollision(unittest.TestCase):
     def test_satellite_keeps_aircraft_yellow(self):
         from display.round_touch.screens import radar
 
-        with mock.patch.object(radar, "_light_basemap", return_value=True), mock.patch.object(
-            radar, "_amber_icon_basemap", return_value=False
-        ):
+        with mock.patch.object(radar, "_imagery_basemap", return_value=True), mock.patch.object(
+            radar, "_pale_basemap", return_value=False
+        ), mock.patch.object(radar, "_amber_icon_basemap", return_value=False):
             icon = radar._overlay_color_for_basemap(theme.AIRCRAFT)
             unknown = radar._overlay_color_for_basemap(theme.AIRCRAFT_UNKNOWN)
             tag = radar._overlay_color_for_basemap(theme.GRID)
+            typ = radar._overlay_color_for_basemap(theme.TAG_TYPE)
+            alt = radar._overlay_color_for_basemap(theme.TAG_ALT_ASCEND)
         self.assertEqual(icon, tuple(theme.AIRCRAFT[:3]))
         self.assertEqual(unknown, tuple(theme.AIRCRAFT_UNKNOWN[:3]))
-        self.assertEqual(tag, radar._LIGHT_MAP_CALLSIGN)
+        self.assertEqual(tag, radar._IMAGERY_CALLSIGN)
+        self.assertEqual(typ, radar._IMAGERY_TYPE)
+        self.assertEqual(alt, radar._IMAGERY_ALT_UP)
         self.assertNotEqual(icon, radar._LIGHT_MAP_ICON)
+        self.assertNotEqual(typ, radar._LIGHT_MAP_TYPE)
 
     def test_light_carto_and_vfr_use_dark_amber_icons(self):
         from display.round_touch.screens import radar

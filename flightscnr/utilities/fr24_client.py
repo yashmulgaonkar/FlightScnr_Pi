@@ -171,8 +171,6 @@ class LiveFlight:
             return
 
         schedule = details.get("schedule_info", {})
-        flight_progress = details.get("flight_progress", {})
-        flight_info = details.get("flight_info", {})
 
         self.number = schedule.get("flight_number", "") or self.callsign
         # Airline name from aircraft_info.registered_owners
@@ -182,20 +180,9 @@ class LiveFlight:
         if typecode and typecode not in ("", "N/A"):
             self.aircraft_code = typecode
 
-        # Update position from flight_info if available (more current)
-        if flight_info:
-            if flight_info.get("latitude"):
-                self.latitude = flight_info["latitude"]
-            if flight_info.get("longitude"):
-                self.longitude = flight_info["longitude"]
-            if flight_info.get("altitude") is not None:
-                self.altitude = flight_info["altitude"]
-            if flight_info.get("ground_speed") is not None:
-                self.ground_speed = flight_info["ground_speed"]
-            if flight_info.get("heading") is not None:
-                self.heading = flight_info["heading"]
-            if flight_info.get("vertical_speed") is not None:
-                self.vertical_speed = flight_info["vertical_speed"]
+        # Intentionally ignore details["flight_info"] kinematics. Details are
+        # cached ~30 minutes; copying that snapshot after a fresh LiveFeed hit
+        # froze Tracked/Follow lat/lon/alt/speed/heading until cache expiry.
 
 
 class FR24Client:
@@ -300,7 +287,9 @@ class FR24Client:
 
         return result
 
-    def find_by_callsign(self, callsign: str) -> Optional[LiveFlight]:
+    def find_by_callsign(
+        self, callsign: str, *, bypass_cache: bool = False
+    ) -> Optional[LiveFlight]:
         """
         Find a specific flight by callsign using FR24's server-side gRPC filter.
 
@@ -309,11 +298,24 @@ class FR24Client:
         Works worldwide including oceanic (FR24 has Aireon satellite data).
 
         :param callsign: ICAO callsign (e.g., "UAL353")
+        :param bypass_cache: Skip the short callsign-lookup TTL (Follow pin polls)
         :returns: LiveFlight if found, None otherwise
         """
         callsign = callsign.strip().upper()
         if not callsign:
             return None
+
+        if not bypass_cache:
+            cached = self._cache.get_cached_callsign_lookup(callsign)
+            # TTLCache returns None both for miss and for stored None; use a
+            # sentinel key presence check via get with default object... The
+            # cache stores the LiveFlight or False for confirmed empty.
+            if cached is not None:
+                if cached is False:
+                    logger.debug("FR24: callsign cache miss hit for %s", callsign)
+                    return None
+                logger.debug("FR24: callsign cache hit for %s", callsign)
+                return cached
 
         logger.info(f"FR24: Searching for callsign {callsign} (server-side filter)")
         try:
@@ -323,8 +325,10 @@ class FR24Client:
             self._fr24_ok = True
             if results:
                 logger.info(f"FR24: Found {callsign} at lat={results[0].latitude:.2f} lon={results[0].longitude:.2f}")
+                self._cache.set_cached_callsign_lookup(callsign, results[0])
                 return results[0]
             logger.info(f"FR24: {callsign} not found in live feed")
+            self._cache.set_cached_callsign_lookup(callsign, False)
             return None
         except (ConnectionError, OSError) as e:
             logger.warning(f"FR24: Connection error during callsign search: {e}")
@@ -346,6 +350,11 @@ class FR24Client:
         :returns: LiveFlight if found, None otherwise
         """
         import time as _time
+
+        from utilities.aircraft_alert import looks_like_registration
+
+        if not looks_like_registration(registration):
+            return None
 
         variants = registration_lookup_variants(registration)
         if not variants:

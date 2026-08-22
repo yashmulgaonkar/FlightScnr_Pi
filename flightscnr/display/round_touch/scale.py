@@ -17,8 +17,8 @@ def _band(miles: float) -> dict:
     return {"label_km": label_km, "coverage_km": label_km * LABEL_TO_COVERAGE}
 
 
-SCALE_BANDS = [_band(m) for m in (2, 3, 5, 8, 10, 20, 30)]
-PRESET_STATUTE_MILES = tuple(m for m in (2, 3, 5, 8, 10, 20, 30))
+SCALE_BANDS = [_band(m) for m in (2, 3, 5, 8, 10, 20, 30, 50)]
+PRESET_STATUTE_MILES = tuple(m for m in (2, 3, 5, 8, 10, 20, 30, 50))
 
 _active_index = 1
 

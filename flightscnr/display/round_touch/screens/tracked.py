@@ -434,19 +434,32 @@ def resolve_display_data(tracked_data, flights) -> dict | None:
     if not live:
         return data
 
+    tracked_hex = (data.get("icao_hex") or "").strip().upper()
+    live_hex = (live.get("icao_hex") or live.get("hex") or "").strip().upper()
+    # Callsign collision with a different local target must not move the pin.
+    if tracked_hex and live_hex and tracked_hex != live_hex:
+        return data
+
     for field in ("altitude", "ground_speed", "heading", "vertical_speed"):
         val = live.get(field)
         if val is not None:
             data[field] = val
-    live_hex = (live.get("icao_hex") or live.get("hex") or "").strip()
-    if live_hex and not (data.get("icao_hex") or "").strip():
+    if live_hex and not tracked_hex:
         data["icao_hex"] = live_hex
+
+    # Live FR24 pin owns lat/lon. Zone ADS-B is home-radar scoped and must not
+    # overwrite a worldwide Follow/Tracked fix (looks like a frozen/wrong map).
+    if data.get("is_live"):
+        return data
+
     lat = live.get("plane_latitude")
     lon = live.get("plane_longitude")
     if lat is not None:
         data["latitude"] = lat
+        data["plane_latitude"] = lat
     if lon is not None:
         data["longitude"] = lon
+        data["plane_longitude"] = lon
     dest_lat = data.get("dest_lat") or 0
     dest_lon = data.get("dest_lon") or 0
     if lat is not None and lon is not None and dest_lat and dest_lon:

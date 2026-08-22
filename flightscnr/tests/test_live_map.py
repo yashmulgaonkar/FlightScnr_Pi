@@ -107,6 +107,20 @@ class TestStickyViewport(unittest.TestCase):
         vp = {"bounds": bounds, "radius_km": 20.0}
         self.assertTrue(live_map._needs_new_viewport(vp, 53.63, 9.99, 35.0))
 
+    def test_sticky_margin_refetches_before_crop_clamp(self):
+        """Regression: margin above clamp fraction made path/plane diverge."""
+        from display.round_touch import live_map
+
+        clamp_frac = 1.0 - 1.0 / live_map._OVERSCAN
+        self.assertLess(live_map._STICKY_MARGIN, clamp_frac)
+
+    def test_force_refresh_flag(self):
+        from display.round_touch import live_map
+
+        bounds = live_map._bounds_for_center(53.63, 9.99, 20.0 * live_map._OVERSCAN)
+        vp = {"bounds": bounds, "radius_km": 20.0, "force_refresh": True}
+        self.assertTrue(live_map._needs_new_viewport(vp, 53.63, 9.99, 20.0))
+
 
 class TestStabilizeRadius(unittest.TestCase):
     def test_holds_previous_when_speed_missing(self):

@@ -132,10 +132,16 @@ class FR24Cache:
     FEED_TTL = 90.0  # 90 seconds for live feed polling
     FLIGHT_DETAIL_TTL = 1800.0  # 30 minutes for individual flight details
     FEED_POLL_INTERVAL = 90.0  # Minimum 90 seconds between feed polls
+    # Shared by Tracked + Follow so concurrent find_by_callsign hits don't
+    # each open a LiveFeed round-trip for the same flight.
+    CALLSIGN_LOOKUP_TTL = 3.0
 
     def __init__(self):
         self._feed_cache = TTLCache(default_ttl=self.FEED_TTL, max_entries=16)
         self._detail_cache = TTLCache(default_ttl=self.FLIGHT_DETAIL_TTL, max_entries=64)
+        self._callsign_cache = TTLCache(
+            default_ttl=self.CALLSIGN_LOOKUP_TTL, max_entries=32
+        )
         # Per-key rate limiting: tracks last poll time per cache key
         self._per_key_last_poll: dict[str, float] = {}
         self._per_key_lock = threading.Lock()
@@ -169,6 +175,14 @@ class FR24Cache:
     def set_cached_flight_details(self, flight_id: str, details: dict) -> None:
         """Cache flight details for a specific flight."""
         self._detail_cache.set(flight_id, details)
+
+    def get_cached_callsign_lookup(self, callsign: str):
+        """Recent find_by_callsign hit (or explicit miss sentinel)."""
+        return self._callsign_cache.get(callsign)
+
+    def set_cached_callsign_lookup(self, callsign: str, flight) -> None:
+        """Cache a find_by_callsign result (``None`` = confirmed miss)."""
+        self._callsign_cache.set(callsign, flight)
 
     def should_poll_feed(self, cache_key: str) -> bool:
         """Returns True if enough time has elapsed to poll this specific feed key."""

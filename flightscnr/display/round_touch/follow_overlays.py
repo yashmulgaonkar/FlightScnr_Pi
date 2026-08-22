@@ -45,6 +45,14 @@ _quake_key: tuple | None = None
 _quake_ts = 0.0
 _quake_loading = False
 
+# Flown path while on Follow (seeded from tracked FR24 trail when present).
+_path_lock = threading.Lock()
+_path_points: list[tuple[float, float]] = []
+_path_flight_key: str | None = None
+_path_oriented = False
+_PATH_MIN_STEP_KM = 0.25
+_PATH_MAX_POINTS = 600
+
 _FIRE_TTL_S = 5 * 60
 _QUAKE_TTL_S = 10 * 60
 _MOVE_REFRESH_KM = 12.0
@@ -368,6 +376,142 @@ def _draw_quakes(
         eo._draw_epicenter(surface, pos[0], pos[1], eo._icon_height(quake))
 
 
+# --- Flown path ---------------------------------------------------------------
+
+
+def clear_follow_path() -> None:
+    global _path_points, _path_flight_key, _path_oriented
+    with _path_lock:
+        _path_points = []
+        _path_flight_key = None
+        _path_oriented = False
+
+
+def _flight_path_key(flight: dict[str, Any] | None) -> str:
+    if not flight:
+        return ""
+    for key in ("icao_hex", "callsign", "registration", "flight_id"):
+        val = str(flight.get(key) or "").strip().upper()
+        if val:
+            return f"{key}:{val}"
+    return ""
+
+
+def _normalize_trail(raw: Any) -> list[tuple[float, float]]:
+    """Return lat/lon pairs from tracked trail (order fixed later vs live pos)."""
+    if not isinstance(raw, list) or not raw:
+        return []
+    pts: list[tuple[float, float]] = []
+    for pt in raw:
+        try:
+            if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                lat, lon = float(pt[0]), float(pt[1])
+            elif isinstance(pt, dict):
+                lat = float(pt.get("lat"))
+                lon = float(pt.get("lng", pt.get("lon")))
+            else:
+                continue
+        except (TypeError, ValueError):
+            continue
+        if abs(lat) > 90 or abs(lon) > 180:
+            continue
+        pts.append((lat, lon))
+    return pts
+
+
+def update_follow_path(
+    flight: dict[str, Any] | None,
+    lat: float,
+    lon: float,
+) -> None:
+    """Seed from tracked ``trail`` and append the current reported position."""
+    global _path_points, _path_flight_key, _path_oriented
+    key = _flight_path_key(flight)
+    with _path_lock:
+        if key and key != _path_flight_key:
+            _path_flight_key = key
+            _path_points = _normalize_trail((flight or {}).get("trail"))
+            _path_oriented = False
+        elif not _path_points and flight:
+            seeded = _normalize_trail(flight.get("trail"))
+            if seeded:
+                _path_points = seeded
+                _path_flight_key = key or _path_flight_key
+                _path_oriented = False
+
+        if not _path_points:
+            _path_points.append((float(lat), float(lon)))
+            _path_oriented = True
+            return
+
+        # Orient once so index -1 is the end nearer the live aircraft.
+        if not _path_oriented and len(_path_points) >= 2:
+            d_first = _haversine_km(_path_points[0][0], _path_points[0][1], lat, lon)
+            d_last = _haversine_km(_path_points[-1][0], _path_points[-1][1], lat, lon)
+            if d_first + 1.0 < d_last:
+                _path_points.reverse()
+            _path_oriented = True
+            # FR24 trails are often newest-first and can include a tip ahead
+            # of the live fix — trim to the nearest seeded point, then extend.
+            nearest_i = min(
+                range(len(_path_points)),
+                key=lambda i: _haversine_km(
+                    _path_points[i][0], _path_points[i][1], lat, lon
+                ),
+            )
+            _path_points = _path_points[: nearest_i + 1]
+        elif not _path_oriented:
+            _path_oriented = True
+
+        last_lat, last_lon = _path_points[-1]
+        if _haversine_km(last_lat, last_lon, lat, lon) < _PATH_MIN_STEP_KM:
+            _path_points[-1] = (float(lat), float(lon))
+            return
+        _path_points.append((float(lat), float(lon)))
+        if len(_path_points) > _PATH_MAX_POINTS:
+            _path_points = _path_points[-_PATH_MAX_POINTS:]
+
+
+def _draw_follow_path(
+    surface: pygame.Surface,
+    *,
+    width: int,
+    height: int,
+    project: Callable[[float, float], tuple[float, float] | None],
+) -> None:
+    with _path_lock:
+        points = list(_path_points)
+    if len(points) < 2:
+        return
+    xy: list[tuple[int, int]] = []
+    for plat, plon in points:
+        pos = project(plat, plon)
+        if pos is None:
+            continue
+        px, py = int(round(pos[0])), int(round(pos[1]))
+        if px < -width or px > width * 2 or py < -height or py > height * 2:
+            # Skip wildly off-panel points; keep polyline breaks simple.
+            if len(xy) >= 2:
+                _stroke_path(surface, xy)
+            xy = []
+            continue
+        xy.append((px, py))
+    if len(xy) >= 2:
+        # live_map always draws the aircraft at panel center; pin the path
+        # tip there too so a clamped sticky crop cannot leave a visible gap.
+        xy[-1] = (int(width // 2), int(height // 2))
+        _stroke_path(surface, xy)
+
+
+def _stroke_path(surface: pygame.Surface, xy: list[tuple[int, int]]) -> None:
+    color = getattr(theme, "SWEEP", (0, 220, 90))
+    width = max(2, theme.s(2))
+    try:
+        pygame.draw.lines(surface, color, False, xy, width)
+    except pygame.error:
+        pass
+
+
 # --- Public API ---------------------------------------------------------------
 
 
@@ -380,8 +524,10 @@ def draw_on_follow_panel(
     width: int,
     height: int,
     project: Callable[[float, float], tuple[float, float] | None],
+    flight: dict[str, Any] | None = None,
 ) -> None:
     """Draw Follow overlays onto a north-up panel (before heading-up rotate)."""
+    update_follow_path(flight, lat, lon)
     _ensure_airports(lat, lon, radius_km)
     _ensure_fires(lat, lon, radius_km)
     _ensure_quakes(lat, lon, radius_km)
@@ -395,6 +541,7 @@ def draw_on_follow_panel(
     except Exception:
         logger.debug("[follow] rain blit failed", exc_info=True)
 
+    _draw_follow_path(surface, width=width, height=height, project=project)
     _draw_airports(surface, width=width, height=height, project=project)
     _draw_fires(surface, width=width, height=height, project=project)
     _draw_quakes(surface, width=width, height=height, project=project)
@@ -414,24 +561,10 @@ def pick_airport_at(
     side = theme.VISIBLE_RADIUS * 2
     origin_x = theme.CENTER_X - side // 2
     origin_y = theme.CENTER_Y - side // 2
-    # Convert screen → north-up panel (undo heading-up rotation if needed).
+    # Convert screen → panel. Follow basemap is always north-up now (full-map
+    # heading-up rotate was removed — it hung the Pi GPU).
     px = float(tap_x - origin_x)
     py = float(tap_y - origin_y)
-    try:
-        if settings.live_map_heading_up():
-            heading = (
-                float(live_map._last_panel_view.get("heading", 0) or 0)
-                if live_map._last_panel_view
-                else 0.0
-            )
-            # Map was rotated by -heading for display; invert that for hit-test.
-            ang = math.radians(heading)
-            cx = cy = side / 2.0
-            dx, dy = px - cx, py - cy
-            px = cx + dx * math.cos(ang) - dy * math.sin(ang)
-            py = cy + dx * math.sin(ang) + dy * math.cos(ang)
-    except Exception:
-        pass
 
     hit_r = max(theme.TAP_PICK_RADIUS, theme.s(32))
     hit_r2 = hit_r * hit_r

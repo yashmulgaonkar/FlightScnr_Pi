@@ -836,8 +836,11 @@ class Overhead:
         self._tracked_miss_count = 0         # consecutive polls with no result
         self._TRACKED_MISS_THRESHOLD = 3     # fallback miss threshold (no ETA)
         # Full FR24 find+details every DATA_REFRESH (~2s) starved radar prewarm;
-        # reuse last-good live data between polls.
+        # reuse last-good live data between polls. Tracked / Radar keep the
+        # slower cadence; Follow asks for a tighter LiveFeed pin poll.
         self._TRACKED_POLL_MIN_S = 9.0
+        self._FOLLOW_POLL_MIN_S = 2.0
+        self._follow_pin_poll = False
         self._tracked_last_callsign = ""     # last callsign we polled for
         self._tracked_last_eta = None        # last known estimated arrival (unix ts)
         self._tracked_last_data = None       # last known good tracked data
@@ -1039,12 +1042,11 @@ class Overhead:
                             retries -= 1
                             continue
 
-                        # Log first flight details as pretty JSON for debugging
                         if not self._first_flight_logged:
                             self._first_flight_logged = True
-                            logger.info(
-                                "First flight API response:\n%s",
-                                json.dumps(d, indent=2, default=str),
+                            logger.debug(
+                                "First flight details keys: %s",
+                                sorted(d.keys()) if isinstance(d, dict) else type(d),
                             )
 
                         # Aircraft type from details, fallback to live feed
@@ -1521,7 +1523,9 @@ class Overhead:
                         continue
                     _enrich_entry_ga_type(entry, stats)
 
-            # --- STEP 2: Tracked flight (always check; display shows it when clock is up) ---
+            # --- STEP 2: Tracked flight (sole FR24 owner for the pin) ---
+            # Tracked / Follow / Radar all consume ``tracked_data`` from here.
+            # Follow must not open a parallel LiveFeed for the same callsign.
             tracked_callsign = load_tracked_callsign()
             if tracked_callsign:
                 stats["tracked_callsign"] = tracked_callsign
@@ -1728,25 +1732,49 @@ class Overhead:
             # Reuse recent live tracked data so every DATA_REFRESH does not pay
             # for another find_by_callsign + FlightDetails round-trip (~1–2s).
             # Callsign changes clear _tracked_last_data before we get here.
+            # Follow uses a shorter min so the map/details keep up with the pin.
+            poll_min = (
+                self._FOLLOW_POLL_MIN_S
+                if self._follow_pin_poll
+                else self._TRACKED_POLL_MIN_S
+            )
             last = self._tracked_last_data
             if last and last.get("is_live"):
                 try:
                     age = time() - float(last.get("last_seen_ts") or 0)
                 except (TypeError, ValueError):
-                    age = self._TRACKED_POLL_MIN_S
-                if 0 <= age < self._TRACKED_POLL_MIN_S:
+                    age = poll_min
+                if 0 <= age < poll_min:
                     return dict(last)
 
             # Prefer registration filter for tail numbers; callsign otherwise.
             # Zone feed cache can be ~90s stale — still poll FR24, just less often.
+            # Follow bypasses the short callsign-lookup cache so a 2s pin poll
+            # does not reuse a stale LiveFlight from the prior hit.
+            fresh = bool(self._follow_pin_poll)
             if looks_like_registration(original):
                 match = self._api.find_by_registration(original)
                 if not match:
-                    match = self._api.find_by_callsign(flight_input)
+                    match = self._api.find_by_callsign(
+                        flight_input, bypass_cache=fresh
+                    )
             else:
-                match = self._api.find_by_callsign(flight_input)
+                match = self._api.find_by_callsign(
+                    flight_input, bypass_cache=fresh
+                )
                 if not match:
-                    match = self._api.find_by_registration(original)
+                    # Never treat an airline callsign as a tail number — that
+                    # spammed LiveFeed with SWA3755/S-WA3755/… variants and
+                    # stalled Follow updates for many seconds.
+                    last_reg = ""
+                    try:
+                        last_reg = str(
+                            (self._tracked_last_data or {}).get("registration") or ""
+                        ).strip()
+                    except Exception:
+                        last_reg = ""
+                    if looks_like_registration(last_reg):
+                        match = self._api.find_by_registration(last_reg)
 
             if not match:
                 return None
@@ -1952,6 +1980,20 @@ class Overhead:
     def tracked_data(self):
         with self._lock:
             return self._tracked_data
+
+    def set_follow_pin_polling(self, enabled: bool) -> None:
+        """Tighten pin LiveFeed polls while Follow is on screen (~2s vs ~9s)."""
+        enabled = bool(enabled)
+        with self._lock:
+            was = self._follow_pin_poll
+            self._follow_pin_poll = enabled
+            if enabled and not was and self._tracked_last_data:
+                # Force the next grab to refresh instead of serving the 9s cache.
+                try:
+                    self._tracked_last_data = dict(self._tracked_last_data)
+                    self._tracked_last_data["last_seen_ts"] = 0.0
+                except Exception:
+                    self._tracked_last_data = None
 
     @property
     def data_is_empty(self):

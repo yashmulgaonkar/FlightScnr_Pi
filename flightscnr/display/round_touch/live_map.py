@@ -42,6 +42,7 @@ from __future__ import annotations
 import logging
 import math
 import threading
+import time
 
 import pygame
 
@@ -54,18 +55,22 @@ _PANEL_BG = (6, 12, 10)
 
 # How much larger (linearly) the fetched/cached raster is than the visible
 # panel. Gives headroom to pan the crop window as the aircraft moves
-# before a new raster fetch is needed. 1.8x means the aircraft can travel
-# up to ~40% of the visible radius past center before the sticky viewport
-# is considered stale (see _STICKY_MARGIN below) -- tuned so that boundary
-# lands close to the *visible* radius itself, not the raw raster edge.
-_OVERSCAN = 1.8
+# before a new raster fetch is needed. 2.2× ≈ ±55% of visible radius of
+# pan room before the crop clamps (see _STICKY_MARGIN).
+_OVERSCAN = 2.2
 
 # Fraction of the *overscanned* raster's half-span the aircraft can drift
-# from the raster's center before we fetch a new one. At _OVERSCAN=1.8,
-# 0.55 puts the refetch trigger right around the original visible radius
-# -- i.e. roughly "refetch once the plane would reach the edge of what
-# you can actually see", not before, not long after.
-_STICKY_MARGIN = 0.55
+# from the raster's center before we fetch a new one.
+#
+# Crop can keep the plane at panel center only while drift stays below
+# ``1 - 1/OVERSCAN`` (~0.55 at 2.2×). Beyond that the crop clamps and
+# the basemap freezes under a centered icon — looks like a "stuck"
+# Follow screen. Trigger well before that edge.
+_STICKY_MARGIN = (1.0 - 1.0 / _OVERSCAN) * 0.65
+
+# Abandon a stuck background basemap fetch (tile CDN hang / lock) so the
+# next frame can start a fresh one instead of clamping forever.
+_INFLIGHT_STALE_S = 18.0
 
 # Radius (zoom) hysteresis: ADS-B ground speed jitters a few knots every
 # second; without this, sticky basemap refetches (triggered by position
@@ -90,7 +95,10 @@ _MAX_LIVE_TILES = 81  # 9x9 tiles - generous for an 8-48km box, still Pi-friendl
 # so a real speed-derived zoom change can invalidate the sticky raster.
 _viewport: dict[tuple, dict] = {}
 _inflight: set[tuple] = set()
+_inflight_started: dict[tuple, float] = {}
+_fetch_gen: dict[tuple, int] = {}
 _lock = threading.Lock()
+_clamp_log_at = 0.0
 
 # Last crop used by render_live_tracking_map — for overlay projection.
 _last_panel_view: dict | None = None
@@ -170,6 +178,8 @@ def _needs_new_viewport(
 ) -> bool:
     if vp is None:
         return True
+    if vp.get("force_refresh"):
+        return True
     # Significant speed-derived radius change → new tile zoom / extent.
     if radius_km is not None:
         try:
@@ -199,6 +209,8 @@ def invalidate() -> None:
     with _lock:
         _viewport.clear()
         _inflight.clear()
+        _inflight_started.clear()
+        _fetch_gen.clear()
     _last_panel_view = None
 
 
@@ -307,14 +319,29 @@ def _request_live_viewport(
     """Cached (possibly stale-but-usable) viewport for this panel size, or
     kick off a background fetch of a fresh (larger, overscanned) one."""
     key = _viewport_key(width, height, style)
+    now = time.time()
     with _lock:
         vp = _viewport.get(key)
         stale = _needs_new_viewport(vp, lat, lon, radius_km)
         if not stale:
             return vp
         if key in _inflight:
-            return vp  # keep serving the old one while the new one loads
+            started = float(_inflight_started.get(key) or 0.0)
+            if started > 0 and (now - started) < _INFLIGHT_STALE_S:
+                return vp  # keep serving the old one while the new one loads
+            # Tile fetch hung or took too long — drop the slot so we can retry.
+            logger.warning(
+                "[live_map] basemap fetch stalled after %.0fs; retrying",
+                (now - started) if started else -1,
+            )
+            _inflight.discard(key)
+            _inflight_started.pop(key, None)
         _inflight.add(key)
+        _inflight_started[key] = now
+        gen = int(_fetch_gen.get(key, 0)) + 1
+        _fetch_gen[key] = gen
+        if vp is not None:
+            vp.pop("force_refresh", None)
 
     raster_w = max(1, int(width * _OVERSCAN))
     raster_h = max(1, int(height * _OVERSCAN))
@@ -322,12 +349,16 @@ def _request_live_viewport(
     bounds = _bounds_for_center(lat, lon, overscan_radius_km)
     fetch_radius_km = float(radius_km)
 
-    def _work():
+    def _work(fetch_gen: int = gen):
         try:
             min_lat, max_lat, min_lon, max_lon = bounds
-            raster = _compose_live_basemap(min_lat, max_lat, min_lon, max_lon, raster_w, raster_h, style)
+            raster = _compose_live_basemap(
+                min_lat, max_lat, min_lon, max_lon, raster_w, raster_h, style
+            )
             if raster is not None:
                 with _lock:
+                    if _fetch_gen.get(key) != fetch_gen:
+                        return  # superseded by a newer request
                     if len(_viewport) > 6:
                         _viewport.pop(next(iter(_viewport)), None)
                     _viewport[key] = {
@@ -345,7 +376,9 @@ def _request_live_viewport(
             logger.exception("[live_map] basemap fetch failed")
         finally:
             with _lock:
-                _inflight.discard(key)
+                if _fetch_gen.get(key) == fetch_gen:
+                    _inflight.discard(key)
+                    _inflight_started.pop(key, None)
 
     threading.Thread(target=_work, name="live-map-basemap", daemon=True).start()
     with _lock:
@@ -375,7 +408,7 @@ def render_live_tracking_map(
     _draw_live_tracking) on the returned surface, not baked in here —
     kept explicit for testability.
     """
-    global _last_panel_view
+    global _last_panel_view, _clamp_log_at
     if width < 40 or height < 40:
         return None
 
@@ -406,8 +439,28 @@ def render_live_tracking_map(
         # sticky raster.
         crop_x = int(round(px_in_raster - width / 2))
         crop_y = int(round(py_in_raster - height / 2))
+        ideal_x, ideal_y = crop_x, crop_y
         crop_x = max(0, min(crop_x, raster_w - width))
         crop_y = max(0, min(crop_y, raster_h - height))
+        # Clamped crop = basemap freezes under a centered icon (classic
+        # "Follow stuck" look). Force a sticky refetch ASAP.
+        if abs(crop_x - ideal_x) > 2 or abs(crop_y - ideal_y) > 2:
+            now_clamp = time.time()
+            if now_clamp - _clamp_log_at >= 5.0:
+                _clamp_log_at = now_clamp
+                logger.warning(
+                    "[live_map] crop clamped (ideal=%d,%d got=%d,%d) — refetching basemap",
+                    ideal_x, ideal_y, crop_x, crop_y,
+                )
+            key = _viewport_key(width, height, style)
+            with _lock:
+                cached = _viewport.get(key)
+                if cached is not None:
+                    cached["force_refresh"] = True
+            try:
+                _request_live_viewport(lat, lon, radius_km, width, height, style)
+            except Exception:
+                pass
         crop_rect = pygame.Rect(crop_x, crop_y, width, height).clip(raster.get_rect())
 
         if crop_rect.w > 0 and crop_rect.h > 0:
@@ -456,6 +509,7 @@ def render_live_tracking_map(
                 width=width,
                 height=height,
                 project=lat_lon_to_follow_panel,
+                flight=flight,
             )
         except Exception:
             logger.debug("[live_map] follow overlays failed", exc_info=True)
@@ -479,11 +533,8 @@ def render_live_tracking_map(
             surf, px, py, heading, plane_color, compact=False, flight=flight_dict,
         )
 
-    try:
-        if pygame.display.get_init():
-            surf = surf.convert()
-    except pygame.error:
-        pass
+    # Avoid per-frame Surface.convert() — on Pi it touches the GPU path and
+    # is unnecessary for a blit into another software surface.
     return surf
 
 

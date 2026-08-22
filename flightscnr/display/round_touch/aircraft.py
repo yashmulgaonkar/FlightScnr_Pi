@@ -145,6 +145,7 @@ def draw_progress_plane(surface, cx, cy, color, flight=None, *, size: int | None
 
 
 def format_altitude(alt_ft) -> str:
+    """Format altitude in feet for radar / detail tags (always ft, never FL)."""
     if alt_ft is None:
         return "—"
     try:
@@ -153,8 +154,6 @@ def format_altitude(alt_ft) -> str:
         return "—"
     if alt <= 0:
         return "—"
-    if alt >= 18000:
-        return f"FL{round(alt / 100)}"
     return f"{alt:,}ft"
 
 

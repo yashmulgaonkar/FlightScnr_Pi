@@ -96,8 +96,17 @@ def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 class PositionSmoother:
     """Track last reported kinematics and return coasted positions for draw."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        snap_km: float = _SNAP_KM,
+        max_extrapolate_s: float = _MAX_EXTRAPOLATE_S,
+        stale_s: float = _STALE_S,
+    ) -> None:
         self._tracks: dict[str, dict[str, Any]] = {}
+        self._snap_km = float(snap_km)
+        self._max_extrapolate_s = float(max_extrapolate_s)
+        self._stale_s = float(stale_s)
 
     def reset(self) -> None:
         self._tracks.clear()
@@ -107,6 +116,9 @@ class PositionSmoother:
         now = time.time() if now is None else float(now)
         seen: set[str] = set()
         out: list[dict] = []
+        max_extrap = self._max_extrapolate_s
+        snap_km = self._snap_km
+        stale_s = self._stale_s
 
         for flight in flights:
             identity = _identity(flight)
@@ -145,10 +157,12 @@ class PositionSmoother:
                             track["lon"],
                             track["heading"],
                             track["speed"],
-                            min(max(0.0, now - track["t0"]), _MAX_EXTRAPOLATE_S),
+                            min(max(0.0, now - track["t0"]), max_extrap),
                         )
                     err_km = _distance_km(coast_lat, coast_lon, lat, lon)
-                    if err_km <= _SNAP_KM:
+                    # Prefer continuing the coast when the new fix is close —
+                    # avoids back-and-forth when FR24 lags the coasted tip.
+                    if err_km <= snap_km:
                         seed_lat, seed_lon = coast_lat, coast_lon
                     else:
                         seed_lat, seed_lon = lat, lon
@@ -176,12 +190,12 @@ class PositionSmoother:
                 or use_speed is None
                 or use_speed < _MIN_SPEED_KT
                 or age < 0
-                or age > _STALE_S
+                or age > stale_s
             ):
                 # Past the coast window: hold the last extrapolated point rather
                 # than snapping back to the stale report (which looks like a jump).
                 if (
-                    age > _STALE_S
+                    age > stale_s
                     and use_heading is not None
                     and use_speed is not None
                     and use_speed >= _MIN_SPEED_KT
@@ -191,7 +205,7 @@ class PositionSmoother:
                         track["lon"],
                         use_heading,
                         use_speed,
-                        _MAX_EXTRAPOLATE_S,
+                        max_extrap,
                     )
                     held = dict(flight)
                     held["plane_latitude"] = slat
@@ -201,7 +215,7 @@ class PositionSmoother:
                 out.append(flight)
                 continue
 
-            dt = min(age, _MAX_EXTRAPOLATE_S)
+            dt = min(age, max_extrap)
             slat, slon = offset_lat_lon(
                 track["lat"], track["lon"], use_heading, use_speed, dt
             )

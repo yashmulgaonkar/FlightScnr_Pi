@@ -39,8 +39,8 @@ class TestRadiusAndBBox(unittest.TestCase):
         self.assertLess(r, 48.0)
         self.assertAlmostEqual(r, 100 * 1.852 * (5.0 / 60.0), places=4)
 
-        # Very fast → clamp to max
-        self.assertEqual(position_source.compute_tracking_radius_km(2000), 48.0)
+        # Very fast → clamp to max (50mi radar band ≈ 80.5km)
+        self.assertEqual(position_source.compute_tracking_radius_km(2000), 80.5)
 
     def test_bbox_symmetric_around_center(self):
         from utilities import position_source
