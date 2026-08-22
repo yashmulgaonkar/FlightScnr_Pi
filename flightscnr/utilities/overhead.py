@@ -22,6 +22,7 @@ from utilities.airline_branding import (
     IATA_TO_ICAO,
     MARKETING_BRANDS,
     marketing_brand_name,
+    prefer_marketing_flight_id,
     resolve_logo_icao,
 )
 from utilities.fr24_client import FR24Client, LiveFlight
@@ -410,9 +411,25 @@ def _enrich_entry_from_zone_feed(entry: dict, lf: LiveFlight, stats: dict | None
         entry["plane"] = plane
         enriched = True
 
+    # IATA marketing number from live-feed extra_info.flight (AS3490 vs SKW3490).
+    marketing = (getattr(lf, "number", "") or "").strip().upper()
+    if marketing and not (entry.get("flight_number") or entry.get("number") or "").strip():
+        entry["flight_number"] = marketing
+        entry["number"] = marketing
+        enriched = True
+    elif marketing:
+        if not (entry.get("flight_number") or "").strip():
+            entry["flight_number"] = marketing
+            enriched = True
+        if not (entry.get("number") or "").strip():
+            entry["number"] = marketing
+            enriched = True
+
     callsign = (entry.get("callsign") or lf.callsign or "").strip()
+    flight_number = (entry.get("flight_number") or entry.get("number") or marketing or "").strip()
     airline_icao = resolve_logo_icao(
         operator_icao=lf.airline_icao or "",
+        flight_number=flight_number,
         callsign=callsign,
     )
     owner_icao = airline_icao or entry.get("owner_icao") or ""
@@ -426,7 +443,7 @@ def _enrich_entry_from_zone_feed(entry: dict, lf: LiveFlight, stats: dict | None
         enriched = True
 
     if not (entry.get("airline") or "").strip():
-        brand = marketing_brand_name(callsign)
+        brand = marketing_brand_name(flight_number) or marketing_brand_name(callsign)
         if brand:
             entry["airline"] = brand
             enriched = True
@@ -1053,10 +1070,15 @@ class Overhead:
                         plane = self.safe_get(d, "aircraft", "model", "code", default="") or f.aircraft_code or ""
 
                         # Airline name: try local database first, then FR24's registered_owners
-                        flight_number = self.safe_get(d, "schedule_info", "flight_number", default="")
+                        # Prefer IATA marketing number (live-feed extra_info.flight / schedule).
+                        callsign = f.callsign or ""
+                        flight_number = prefer_marketing_flight_id(
+                            schedule_number=self.safe_get(d, "schedule_info", "flight_number", default=""),
+                            live_number=(getattr(f, "number", "") or "").strip(),
+                            callsign=callsign,
+                        )
                         airline_name = self.safe_get(d, "aircraft_info", "registered_owners", default="")
 
-                        callsign = f.callsign or ""
                         airline_icao = resolve_logo_icao(
                             operator_icao=f.airline_icao or "",
                             flight_number=flight_number,
@@ -1179,6 +1201,7 @@ class Overhead:
                             "airline": airline_name,
                             "plane": plane,
                             "flight_number": flight_number,
+                            "number": flight_number,
                             "origin": origin,
                             "origin_latitude": origin_lat,
                             "origin_longitude": origin_lon,
@@ -1877,10 +1900,10 @@ class Overhead:
                     airline_name=airline_name,
                 )
 
-            flight_number = (
-                match.number
-                or self.safe_get(flight_details, "schedule_info", "flight_number", default="")
-                or ""
+            flight_number = prefer_marketing_flight_id(
+                schedule_number=self.safe_get(flight_details, "schedule_info", "flight_number", default=""),
+                live_number=match.number or "",
+                callsign=display_callsign,
             )
             airline_icao = resolve_logo_icao(
                 operator_icao=match.airline_icao or "",

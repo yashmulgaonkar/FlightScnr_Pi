@@ -89,6 +89,9 @@ IATA_TO_ICAO = {
     "VS": "VIR",
 }
 
+# ICAO airline prefix → passenger-facing IATA (UAL5510 → UA5510)
+ICAO_TO_IATA = {icao: iata for iata, icao in IATA_TO_ICAO.items()}
+
 
 def _normalize(code: str) -> str:
     return (code or "").strip().upper()
@@ -127,6 +130,43 @@ def marketing_brand_name(flight_id: str) -> str:
     return ""
 
 
+def _to_iata_flight_id(flight_id: str) -> str:
+    """Rewrite known ICAO airline prefixes to IATA (UAL5510 → UA5510).
+
+    Ambiguous regionals (SKW, RPA, …) and unknown prefixes are left unchanged.
+    """
+    fid = _normalize(flight_id)
+    if not fid or fid == "—":
+        return fid
+    if _iata_prefix(fid):
+        return fid
+    icao = _icao_prefix(fid)
+    if icao and icao in ICAO_TO_IATA:
+        return ICAO_TO_IATA[icao] + fid[3:]
+    return fid
+
+
+def prefer_marketing_flight_id(
+    *,
+    schedule_number: str = "",
+    live_number: str = "",
+    callsign: str = "",
+) -> str:
+    """Pick passenger-facing IATA number over ATC/operator callsign.
+
+    FR24 live feed ``extra_info.flight`` is often AS3490 while callsign/schedule
+    may still be SKW3490.
+    """
+    sched = _normalize(schedule_number)
+    live = _normalize(live_number)
+    cs = _normalize(callsign)
+    if live and _iata_prefix(live):
+        sched_op = _icao_prefix(sched) if sched else None
+        if not sched or sched == cs or sched_op in AMBIGUOUS_REGIONALS:
+            return live
+    return sched or live or ""
+
+
 def display_flight_id(
     *,
     flight_number: str = "",
@@ -135,13 +175,21 @@ def display_flight_id(
     """Return the passenger-facing flight ID (e.g. UA5796), not the operator callsign (SKW5796)."""
     fn = _normalize(flight_number)
     cs = _normalize(callsign)
+    chosen = ""
     if fn:
         operator = _icao_prefix(cs) if cs else None
         if operator in AMBIGUOUS_REGIONALS:
-            return fn
-        if fn != cs and (_iata_prefix(fn) or _marketing_icao_from_flight_id(fn)):
-            return fn
-    return cs or fn or "—"
+            chosen = fn
+        elif fn != cs and (_iata_prefix(fn) or _marketing_icao_from_flight_id(fn)):
+            chosen = fn
+        else:
+            # Prefer schedule/flight number when present (UAL1684 → UA1684 below).
+            chosen = fn
+    if not chosen:
+        chosen = cs or fn or "—"
+    if chosen == "—":
+        return "—"
+    return _to_iata_flight_id(chosen)
 
 
 def display_flight_id_for_flight(flight: dict) -> str:

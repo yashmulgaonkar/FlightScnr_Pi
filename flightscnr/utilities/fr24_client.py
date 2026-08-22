@@ -172,7 +172,12 @@ class LiveFlight:
 
         schedule = details.get("schedule_info", {})
 
-        self.number = schedule.get("flight_number", "") or self.callsign
+        # Prefer schedule IATA number; keep live-feed extra_info.flight if schedule blank.
+        sched_number = (schedule.get("flight_number", "") or "").strip()
+        if sched_number:
+            self.number = sched_number
+        elif not self.number:
+            self.number = self.callsign
         # Airline name from aircraft_info.registered_owners
         aircraft = details.get("aircraft_info", {})
         self.airline_name = aircraft.get("registered_owners", "") or ""
@@ -570,6 +575,8 @@ class FR24Client:
             callsign = getattr(f, 'callsign', '') or ''
             registration = (getattr(extra, 'reg', '') or '') if extra else ''
             aircraft_type = (getattr(extra, 'type', '') or '') if extra else ''
+            # IATA marketing flight number (e.g. AS3490) — distinct from ATC callsign (SKW3490).
+            iata_flight = (getattr(extra, 'flight', '') or '').strip().upper() if extra else ''
             vspeed = (getattr(extra, 'vspeed', 0) or 0) if extra else 0
             icao_hex = ""
             if extra is not None:
@@ -593,6 +600,10 @@ class FR24Client:
                 except Exception:
                     eta = 0
 
+            airline_iata = ""
+            if len(iata_flight) >= 3 and iata_flight[:2].isalpha() and iata_flight[2:3].isdigit():
+                airline_iata = iata_flight[:2]
+
             lf = LiveFlight(
                 flight_id=f"{f.flightid:x}" if f.flightid else "",
                 latitude=f.lat,
@@ -606,11 +617,12 @@ class FR24Client:
                 origin_airport_iata=origin_iata,
                 destination_airport_iata=destination_iata,
                 airline_icao=callsign[:3] if callsign and len(callsign) >= 3 and callsign[:3].isalpha() else "",
-                airline_iata="",
+                airline_iata=airline_iata,
                 aircraft_code=aircraft_type,
                 on_ground=f.on_ground,
                 eta=eta,
                 icao_hex=icao_hex,
+                number=iata_flight,
             )
             flights.append(lf)
         return flights
