@@ -22,11 +22,14 @@ by their client modules. Default order prefers local/free sources
 the portal order is authoritative when the user reorders or omits entries.
 
 radius/bbox: the live-map radius is derived from the aircraft's last known
-ground speed (distance covered in LIVE_TRACKING_PREVIEW_MINUTES), clamped
-to [LIVE_TRACKING_MIN_RADIUS_KM, LIVE_TRACKING_MAX_RADIUS_KM]. This radius
+ground speed (distance covered in LIVE_TRACKING_PREVIEW_MINUTES), with
+low-speed compression for approach/taxi, then clamped to
+[LIVE_TRACKING_MIN_RADIUS_KM, LIVE_TRACKING_MAX_RADIUS_KM]. This radius
 is used both for the OpenSky/ADS-B Exchange bounding box (smaller box =
 fewer credits) and should be reused by the live-map renderer so the map's
-visible extent always matches what was actually queried.
+visible extent always matches what was actually queried. The Follow
+display further snaps that continuous radius to discrete km steps with
+hysteresis (see live_map.display_radius_km / stabilize_radius_km).
 """
 
 from __future__ import annotations
@@ -61,20 +64,43 @@ def _settings():
         min_km = LIVE_TRACKING_MIN_RADIUS_KM
         max_km = LIVE_TRACKING_MAX_RADIUS_KM
     except Exception:
-        preview_min, min_km, max_km = 5.0, 8.0, 48.0
+        preview_min, min_km, max_km = 5.0, 3.2, 120.0
 
     return order, preview_min, min_km, max_km
+
+
+def _low_speed_scale(speed_kt: float) -> float:
+    """Compress Follow map radius at approach/taxi speeds.
+
+    Keeps cruise (>=300 kt) on the linear preview-distance curve while
+    pulling the view in during approach and taxi (issue #114):
+
+        speed >= 300 kt → 1.0
+        speed <= 100 kt → 0.45
+        between          → linear from 0.45 to 1.0
+    """
+    if speed_kt >= 300.0:
+        return 1.0
+    if speed_kt <= 100.0:
+        return 0.45
+    return 0.45 + (speed_kt - 100.0) / 200.0 * 0.55
 
 
 def compute_tracking_radius_km(speed_kt: float | None) -> float:
     """Radius = distance the aircraft covers in the preview window,
     clamped to [min, max]. speed_kt is ground speed in knots (the unit
-    already used throughout this codebase, e.g. aircraft_min_speed_kt)."""
+    already used throughout this codebase, e.g. aircraft_min_speed_kt).
+
+    Applies low-speed compression so approach/landing/taxi get a closer
+    map than the raw projected distance alone would suggest.
+    """
     _, preview_min, min_km, max_km = _settings()
     if not speed_kt or speed_kt <= 0:
         return min_km
-    speed_kph = float(speed_kt) * KM_PER_NM
+    speed_kt_f = float(speed_kt)
+    speed_kph = speed_kt_f * KM_PER_NM
     projected_km = speed_kph * (preview_min / 60.0)
+    projected_km *= _low_speed_scale(speed_kt_f)
     return max(min_km, min(max_km, projected_km))
 
 

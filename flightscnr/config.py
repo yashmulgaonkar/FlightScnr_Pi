@@ -180,13 +180,14 @@ POSITION_SOURCE_ORDER = _parse_position_source_order(
     os.environ.get("POSITION_SOURCE_ORDER", "")
 )
 
-# Extended live-tracking map (Radar > Track > Live): radius is
+# Extended live-tracking map (Radar > Track > Live / Follow): radius is
 # derived from current ground speed (distance covered in
-# LIVE_TRACKING_PREVIEW_MINUTES), clamped to [MIN, MAX]. MAX mirrors the
-# main-display radar outer band (50mi ≈ 80.5km).
+# LIVE_TRACKING_PREVIEW_MINUTES), with low-speed compression, then clamped
+# to [MIN, MAX]. Defaults span the Follow display-radius steps (3.2–120 km)
+# so taxi can zoom in and high-speed cruise can zoom out (issue #114).
 LIVE_TRACKING_PREVIEW_MINUTES = float(os.environ.get("LIVE_TRACKING_PREVIEW_MINUTES", "5"))
-LIVE_TRACKING_MIN_RADIUS_KM = float(os.environ.get("LIVE_TRACKING_MIN_RADIUS_KM", "8"))
-LIVE_TRACKING_MAX_RADIUS_KM = float(os.environ.get("LIVE_TRACKING_MAX_RADIUS_KM", "80.5"))
+LIVE_TRACKING_MIN_RADIUS_KM = float(os.environ.get("LIVE_TRACKING_MIN_RADIUS_KM", "3.2"))
+LIVE_TRACKING_MAX_RADIUS_KM = float(os.environ.get("LIVE_TRACKING_MAX_RADIUS_KM", "120"))
 
 # NASA FIRMS free MAP_KEY for wildfire detections on the radar.
 # https://firms.modaps.eosdis.nasa.gov/api/map_key/

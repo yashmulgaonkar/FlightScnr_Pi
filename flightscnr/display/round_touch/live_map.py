@@ -17,7 +17,7 @@ panning underneath it, following the aircraft in real time.
 Two things are deliberately NOT reused from route_map.py, because that
 module is tuned for a very different scale (a whole flown route, often
 hundreds of km) and both of its shortcuts break down at our scale
-(8-48km radius):
+(a few km through ~120 km radius, discrete Follow display steps):
 
 1. Zoom selection. route_map._pick_zoom() caps out at zoom 7 (fine for a
    continent-spanning route overview; far too coarse for a 8-48km circle
@@ -76,9 +76,29 @@ _INFLIGHT_STALE_S = 18.0
 # second; without this, sticky basemap refetches (triggered by position
 # drift) suddenly adopt a different speed-derived radius and the map
 # appears to "randomly" change zoom. Also ignore a missing/zero speed
-# reading so we don't snap to the 8km floor.
+# reading so we don't snap to the min-radius floor.
+#
+# Display scale uses discrete km steps (issue #114) with asymmetric
+# hysteresis between adjacent steps; continuous fractional hysteresis
+# below still gates sticky-viewport radius invalidation.
 _RADIUS_HYST_FRAC = 0.15
 _RADIUS_HYST_KM = 2.0
+
+# Discrete Follow display-radius steps (km). Search/preview radius from
+# position_source may be continuous; the visible map snaps to these.
+_LIVE_MAP_RADIUS_STEPS_KM = (
+    3.2,
+    4.8,
+    8.0,
+    13.0,
+    16.0,
+    24.0,
+    32.0,
+    48.0,
+    64.0,
+    96.0,
+    120.0,
+)
 
 # Zoom ceiling appropriate for this screen's scale (street/neighborhood
 # level), unlike route_map.py's z_hi=7 (continent-scale route overviews).
@@ -132,13 +152,67 @@ def lat_lon_to_follow_panel(lat: float, lon: float) -> tuple[float, float] | Non
         return None
 
 
+def _nearest_radius_step(raw_km: float) -> float:
+    """Smallest discrete step that covers ``raw_km`` (or the largest step)."""
+    raw = max(0.0, float(raw_km))
+    for step in _LIVE_MAP_RADIUS_STEPS_KM:
+        if raw <= step:
+            return step
+    return _LIVE_MAP_RADIUS_STEPS_KM[-1]
+
+
+def display_radius_km(
+    radius_km: float,
+    current_radius_km: float | None,
+) -> float:
+    """Snap Follow map scale to discrete steps with asymmetric hysteresis.
+
+    Zoom in early while slowing down (25% of the gap to the lower step);
+    zoom out conservatively while speeding up (90% of the gap to the
+    higher step). Transitions move at most one step per call so small
+    speed noise does not thrash the sticky basemap.
+    """
+    raw = max(0.0, float(radius_km))
+    steps = _LIVE_MAP_RADIUS_STEPS_KM
+
+    if current_radius_km is None:
+        return _nearest_radius_step(raw)
+
+    try:
+        current = float(current_radius_km)
+    except (TypeError, ValueError):
+        return _nearest_radius_step(raw)
+
+    try:
+        idx = steps.index(current)
+    except ValueError:
+        return _nearest_radius_step(raw)
+
+    # Zoom in early while slowing down.
+    if idx > 0:
+        lower = steps[idx - 1]
+        down_threshold = current - (current - lower) * 0.25
+        if raw <= down_threshold:
+            return lower
+
+    # Zoom out conservatively while speeding up.
+    if idx < len(steps) - 1:
+        higher = steps[idx + 1]
+        up_threshold = current + (higher - current) * 0.90
+        if raw >= up_threshold:
+            return higher
+
+    return current
+
+
 def stabilize_radius_km(
     previous: float, candidate: float, *, have_speed: bool
 ) -> float:
     """Hold Follow map zoom steady through noisy or missing ground speed.
 
     Returns ``previous`` when speed is missing/zero (avoid snapping to the
-    min-radius floor) or when ``candidate`` only moved within hysteresis.
+    min-radius floor). With a valid speed, maps ``candidate`` onto the
+    discrete display-radius steps with hysteresis (issue #114).
     """
     try:
         prev = float(previous)
@@ -147,14 +221,12 @@ def stabilize_radius_km(
     try:
         cand = float(candidate)
     except (TypeError, ValueError):
-        return prev if prev > 0 else 8.0
+        return prev if prev > 0 else _LIVE_MAP_RADIUS_STEPS_KM[2]  # 8.0 default
     if not have_speed:
-        return prev if prev > 0 else cand
+        return prev if prev > 0 else display_radius_km(cand, None)
     if prev <= 0:
-        return cand
-    if abs(cand - prev) < max(_RADIUS_HYST_KM, prev * _RADIUS_HYST_FRAC):
-        return prev
-    return cand
+        return display_radius_km(cand, None)
+    return display_radius_km(cand, prev)
 
 
 def _bounds_for_center(lat: float, lon: float, radius_km: float) -> tuple[float, float, float, float]:
