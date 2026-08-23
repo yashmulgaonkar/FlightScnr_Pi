@@ -26,21 +26,34 @@ class TestRadiusAndBBox(unittest.TestCase):
     def test_radius_floors_without_speed(self):
         from utilities import position_source
 
-        self.assertEqual(position_source.compute_tracking_radius_km(None), 8.0)
-        self.assertEqual(position_source.compute_tracking_radius_km(0), 8.0)
-        self.assertEqual(position_source.compute_tracking_radius_km(-10), 8.0)
+        self.assertEqual(position_source.compute_tracking_radius_km(None), 3.2)
+        self.assertEqual(position_source.compute_tracking_radius_km(0), 3.2)
+        self.assertEqual(position_source.compute_tracking_radius_km(-10), 3.2)
+
+    def test_low_speed_scale_curve(self):
+        from utilities import position_source
+
+        self.assertAlmostEqual(position_source._low_speed_scale(50), 0.45)
+        self.assertAlmostEqual(position_source._low_speed_scale(100), 0.45)
+        self.assertAlmostEqual(position_source._low_speed_scale(200), 0.725)
+        self.assertAlmostEqual(position_source._low_speed_scale(300), 1.0)
+        self.assertAlmostEqual(position_source._low_speed_scale(450), 1.0)
 
     def test_radius_scales_with_speed_and_clamps(self):
         from utilities import position_source
 
-        # 100 kt * 1.852 km/h * (5/60)h ≈ 15.43 km
+        # 100 kt * 1.852 * (5/60) * 0.45 ≈ 6.945 km (low-speed compression)
         r = position_source.compute_tracking_radius_km(100)
-        self.assertGreater(r, 8.0)
-        self.assertLess(r, 48.0)
-        self.assertAlmostEqual(r, 100 * 1.852 * (5.0 / 60.0), places=4)
+        self.assertGreater(r, 3.2)
+        self.assertLess(r, 120.0)
+        self.assertAlmostEqual(r, 100 * 1.852 * (5.0 / 60.0) * 0.45, places=4)
 
-        # Very fast → clamp to max (50mi radar band ≈ 80.5km)
-        self.assertEqual(position_source.compute_tracking_radius_km(2000), 80.5)
+        # Cruise: no compression (scale=1.0)
+        cruise = position_source.compute_tracking_radius_km(450)
+        self.assertAlmostEqual(cruise, 450 * 1.852 * (5.0 / 60.0), places=4)
+
+        # Very fast → clamp to max (Follow display step ceiling)
+        self.assertEqual(position_source.compute_tracking_radius_km(2000), 120.0)
 
     def test_bbox_symmetric_around_center(self):
         from utilities import position_source
@@ -101,12 +114,14 @@ class TestMatchAndFetch(unittest.TestCase):
                 icao24="ABCDEF",
                 last_known_lat=37.0,
                 last_known_lon=-122.0,
-                last_known_speed_kt=100,
+                last_known_speed_kt=300,
             )
         self.assertEqual(hits, ["dump1090", "adsbfi"])
         self.assertEqual(source, "adsbfi")
         self.assertIsNotNone(entry)
+        # 300 kt * 1.852 * 5/60 * 1.0 ≈ 46.3 km (within mocked 8–48 clamp)
         self.assertGreater(radius, 8.0)
+        self.assertAlmostEqual(radius, 300 * 1.852 * (5.0 / 60.0), places=4)
         record.assert_called_once_with("adsbfi")
 
     def test_fetch_requires_identity(self):
@@ -121,7 +136,7 @@ class TestMatchAndFetch(unittest.TestCase):
         )
         self.assertIsNone(entry)
         self.assertIsNone(source)
-        self.assertEqual(radius, 8.0)
+        self.assertEqual(radius, 3.2)
 
     def test_fr24_flight_to_entry_maps_fields(self):
         from utilities import position_source
