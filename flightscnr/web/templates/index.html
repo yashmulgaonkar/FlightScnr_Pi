@@ -79,6 +79,12 @@
         font-weight:600;background:#3a2808;color:#ffc866;border:1px solid #6a4a12}
         .update-badge.ok{background:#0f2a18;color:#8dffb0;border-color:#1a9c3c}
         .update-ver{font-size:.82rem;color:var(--muted);margin:.15rem 0}
+        .update-notes{display:none;white-space:pre-wrap;word-break:break-word;font-size:.78rem;
+        color:#d2d2d2;background:var(--field);border:1px solid var(--fline);border-radius:9px;
+        padding:.7rem .75rem;margin:.55rem 0 0;max-height:16rem;overflow:auto;line-height:1.4}
+        .update-notes.show{display:block}
+        .update-notes-link{display:none;font-size:.78rem;margin:.4rem 0 0}
+        .update-notes-link.show{display:block}
         .btn-danger{background:#4a1515;border-color:#7a2222}
         .btn-danger:hover{background:#5c1a1a}
         .irreversible-card{background:#161010;border-color:#7a2222}
@@ -730,6 +736,8 @@
             </div>
             <p class="update-ver" id="update-local">Installed version: checking…</p>
             <p class="update-ver" id="update-remote">Latest on GitHub: checking…</p>
+            <pre class="update-notes" id="update-notes"></pre>
+            <p class="hint update-notes-link" id="update-notes-link"></p>
             <p class="hint" id="update-message"></p>
             <p class="hint">After Update Now, the device may briefly re-sync install steps automatically (X11 / display). If LightDM is switched to X11 for pinch-zoom, the Pi reboots on its own.</p>
             <div class="chk" style="margin-top:.55rem">
@@ -999,6 +1007,29 @@ function applyUpdateInfo(data) {
     }
 
     $("update-message").textContent = data.message || "";
+    const notesEl = $("update-notes");
+    const notesLink = $("update-notes-link");
+    const notes = (available && remote.release_notes) ? String(remote.release_notes) : "";
+    if (notesEl) {
+        notesEl.textContent = notes;
+        notesEl.classList.toggle("show", !!notes);
+    }
+    if (notesLink) {
+        const href = (available && remote.release_html_url) ? String(remote.release_html_url) : "";
+        if (href) {
+            notesLink.innerHTML = "";
+            const a = document.createElement("a");
+            a.href = href;
+            a.target = "_blank";
+            a.rel = "noopener";
+            a.textContent = "View on GitHub";
+            notesLink.appendChild(a);
+            notesLink.classList.add("show");
+        } else {
+            notesLink.textContent = "";
+            notesLink.classList.remove("show");
+        }
+    }
     $("update-badge").classList.toggle("hidden", available || running || resync || repair);
     $("update-available-badge").classList.toggle("hidden", !available && !repair);
     if (repair && !available) {

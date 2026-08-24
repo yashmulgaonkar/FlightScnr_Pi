@@ -433,7 +433,14 @@ def _draw_footer_button(
     _draw_round_button(surface, rect, accent=accent)
     icon_color = _BTN_ICON_ACCENT if accent else _BTN_ICON
     label_font = draw.load_font(theme.s(11))
-    labels = {"prev": "PREV", "next": "NEXT", "radar": "RADAR", "pin": "PIN IT"}
+    labels = {
+        "prev": "PREV",
+        "next": "NEXT",
+        "radar": "RADAR",
+        "pin": "PIN IT",
+        "tonight": "TONIGHT",
+        "dismiss": "DISMISS",
+    }
     label = labels.get(kind, kind.upper())
 
     icon_cy = rect.centery - theme.s(6)
@@ -451,6 +458,25 @@ def _draw_footer_button(
             icon_size,
             theme.SWEEP,
             active=active,
+        )
+    elif kind == "tonight":
+        pygame.draw.circle(surface, icon_color, (rect.centerx, icon_cy), max(4, theme.s(6)), max(1, theme.s(2)))
+    elif kind == "dismiss":
+        inset = max(3, theme.s(4))
+        x_w = max(2, theme.s(2))
+        pygame.draw.line(
+            surface,
+            icon_color,
+            (rect.centerx - inset, icon_cy - inset),
+            (rect.centerx + inset, icon_cy + inset),
+            x_w,
+        )
+        pygame.draw.line(
+            surface,
+            icon_color,
+            (rect.centerx + inset, icon_cy - inset),
+            (rect.centerx - inset, icon_cy + inset),
+            x_w,
         )
 
     label_color = theme.SWEEP if accent else theme.HINT

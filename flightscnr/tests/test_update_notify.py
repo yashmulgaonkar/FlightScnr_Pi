@@ -268,6 +268,150 @@ class TestUpdateNotify(unittest.TestCase):
         self.assertTrue(self.updater.update_is_scheduled())
         self.assertFalse(os.path.isfile(self.status_path))
 
+    def test_release_notes_plain_strips_markdown(self):
+        md = (
+            "## What's new\n\n"
+            "- **Fix** [radar](https://example.com) tap\n"
+            "- `OTA` path\n\n"
+            "```\ncode\n```\n"
+        )
+        plain = self.updater.release_notes_plain(md)
+        self.assertIn("What's new", plain)
+        self.assertIn("• Fix radar tap", plain)
+        self.assertIn("OTA path", plain)
+        self.assertNotIn("**", plain)
+        self.assertNotIn("](", plain)
+
+    def test_cap_release_notes_truncates(self):
+        huge = "x" * (self.updater.RELEASE_NOTES_MAX + 50)
+        out = self.updater.cap_release_notes(huge)
+        self.assertLessEqual(len(out), self.updater.RELEASE_NOTES_MAX + 5)
+        self.assertTrue(out.endswith("…"))
+
+    def test_extract_whats_changed_drops_contributors(self):
+        body = (
+            "Release 2026.8.23.2\n\n"
+            "## What's Changed\n"
+            "* Portal: rim style by @yash in https://github.com/org/repo/pull/125\n"
+            "* Docs: LibreWXR by @yash in https://github.com/org/repo/pull/124\n"
+            "\n## New Contributors\n"
+            "* @stewartallen made their first contribution\n"
+            "\n**Full Changelog**: https://github.com/org/repo/compare/a...b\n"
+        )
+        section = self.updater.extract_whats_changed(body)
+        self.assertIn("Portal: rim style", section)
+        self.assertIn("pull/125", section)
+        self.assertNotIn("New Contributors", section)
+        self.assertNotIn("Full Changelog", section)
+        self.assertNotIn("Release 2026.8.23.2", section)
+
+    def test_compose_whats_changed_stacks_newer_releases(self):
+        releases = [
+            {
+                "tag_name": "2026.8.23.2",
+                "body": "## What's Changed\n* Portal PR\n\n**Full Changelog**: x",
+            },
+            {
+                "tag_name": "2026.8.23.1",
+                "body": "## What's Changed\n* Follow zoom\n",
+            },
+            {
+                "tag_name": "2026.8.22.1",
+                "body": "## What's Changed\n* Already installed\n",
+            },
+        ]
+        notes = self.updater.compose_whats_changed_notes(releases, "2026.8.22.1")
+        self.assertIn("## v2026.8.23.2", notes)
+        self.assertIn("Portal PR", notes)
+        self.assertIn("## v2026.8.23.1", notes)
+        self.assertIn("Follow zoom", notes)
+        self.assertNotIn("Already installed", notes)
+        self.assertLess(notes.index("v2026.8.23.2"), notes.index("v2026.8.23.1"))
+
+    def test_extract_whats_changed_falls_back_to_prose(self):
+        body = "LibreWXR attribution and portal settings.\n\n**Full Changelog**: nope"
+        self.assertEqual(
+            self.updater.extract_whats_changed(body),
+            "LibreWXR attribution and portal settings.",
+        )
+
+    def test_notify_stores_release_notes(self):
+        self.updater.refresh_notify_from_check(
+            {
+                "update_available": True,
+                "update_running": False,
+                "remote": {
+                    "release_tag": "2026.8.23.2",
+                    "commit": "abcdef123456",
+                    "release_notes": "## Hello\n- item",
+                    "release_html_url": "https://github.com/example/rel",
+                },
+            }
+        )
+        self.assertEqual(self.updater.remote_release_notes(), "## Hello\n- item")
+        self.assertEqual(
+            self.updater.remote_release_html_url(),
+            "https://github.com/example/rel",
+        )
+
+    def test_merge_remote_keeps_api_notes(self):
+        merged = self.updater._merge_remote(
+            {
+                "release_tag": "2026.8.23.2",
+                "release_notes": "Notes from API",
+                "release_html_url": "https://github.com/yashmulgaonkar/FlightScnr_Pi/releases/tag/2026.8.23.2",
+                "source": "github_api",
+            },
+            {"release_tag": "2026.8.23.2", "source": "git"},
+        )
+        self.assertEqual(merged["release_notes"], "Notes from API")
+        self.assertIn("releases/tag/2026.8.23.2", merged["release_html_url"])
+
+    def test_remote_version_info_stores_github_body(self):
+        latest = {
+            "tag_name": "2026.9.1.1",
+            "name": "FlightScnr Pi 2026.9.1.1",
+            "published_at": "2026-09-01T00:00:00Z",
+            "draft": False,
+            "prerelease": False,
+            "body": (
+                "## What's Changed\n"
+                "* portal notes in https://example.com/pull/1\n"
+                "\n## New Contributors\n* skip me\n"
+            ),
+            "html_url": "https://github.com/yashmulgaonkar/FlightScnr_Pi/releases/tag/2026.9.1.1",
+        }
+
+        def fake_github(path):
+            if "/commits/" in path:
+                return {
+                    "sha": "deadbeefcafebabe",
+                    "commit": {"committer": {"date": "2026-09-01T00:00:00Z"}},
+                }
+            return None
+
+        with mock.patch.object(
+            self.updater, "local_version_info", return_value={"release": "2026.8.1.1"}
+        ), mock.patch.object(
+            self.updater, "_github_get_list", return_value=[latest]
+        ), mock.patch.object(
+            self.updater, "_github_get", side_effect=fake_github
+        ), mock.patch.object(
+            self.updater, "_remote_commit_via_git", return_value={}
+        ), mock.patch.object(
+            self.updater, "_remote_latest_tag_via_git", return_value={}
+        ), mock.patch.object(
+            self.updater, "_remote_via_raw_github", return_value={}
+        ):
+            remote = self.updater.remote_version_info(force=True)
+        self.assertEqual(remote["release_tag"], "2026.9.1.1")
+        self.assertIn("portal notes", remote["release_notes"])
+        self.assertIn("## v2026.9.1.1", remote["release_notes"])
+        self.assertNotIn("New Contributors", remote["release_notes"])
+        self.assertTrue(remote["release_html_url"].endswith("2026.9.1.1"))
+        cached, _ = self.updater._read_remote_cache()
+        self.assertEqual(cached.get("release_notes"), remote["release_notes"])
+
 
 if __name__ == "__main__":
     unittest.main()

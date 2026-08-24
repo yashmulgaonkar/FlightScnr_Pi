@@ -68,6 +68,7 @@ from display.round_touch.screens import (
     info,
     radar,
     tracked,
+    update_notes,
     wifi_setup as wifi_setup_screen,
 )
 from display.round_touch import live_map
@@ -90,6 +91,7 @@ SCREEN_TRACKED = "tracked"
 SCREEN_LIVE = "live_tracking"
 SCREEN_WIFI_SETUP = "wifi_setup"
 SCREEN_DISCLAIMER = "disclaimer"
+SCREEN_UPDATE_NOTES = "update_notes"
 
 SECONDARY_TIMEOUT_S = 45
 # FLIGHTSCNR_FRAME_DEBUG=1 logs draw cost and achieved frame interval every 2s.
@@ -926,6 +928,10 @@ class RoundTouchDisplay:
                 self._scroll.max_offset = drawn_max
         elif self.screen == SCREEN_DETAILS:
             self._scroll.max_offset = details.draw_details(self.surface, scroll_offset=self._scroll.offset)
+        elif self.screen == SCREEN_UPDATE_NOTES:
+            self._scroll.max_offset = update_notes.draw_update_notes(
+                self.surface, self._scroll.offset
+            )
         elif self.screen == SCREEN_CLOCK:
             clock.draw_clock(self.surface)
         elif self.screen == SCREEN_CLOCK_SETTINGS:
@@ -3093,6 +3099,7 @@ class RoundTouchDisplay:
             SCREEN_FLIGHT,
             SCREEN_FIRE,
             SCREEN_QUAKE,
+            SCREEN_UPDATE_NOTES,
         ):
             # Same trap as the ATC picker: scroll_dy stops accumulating once the
             # drag passes the swipe threshold, and the release swipe then scrolled
@@ -3531,7 +3538,7 @@ class RoundTouchDisplay:
             self._return_to_radar()
             self._safe_draw()
         elif (
-            self.screen in (SCREEN_FLIGHT, SCREEN_FIRE, SCREEN_QUAKE)
+            self.screen in (SCREEN_FLIGHT, SCREEN_FIRE, SCREEN_QUAKE, SCREEN_UPDATE_NOTES)
             and swipe in (input_handler.SWIPE_UP, input_handler.SWIPE_DOWN)
         ):
             # The list already scrolled with the finger; a follow-up swipe would
@@ -3606,9 +3613,9 @@ class RoundTouchDisplay:
                         self._note_activity()
                         radar.invalidate_frame_layer()
                         self._safe_draw()
-                    elif bubble_action == "tonight":
+                    elif bubble_action == "notes":
+                        self._open_screen(SCREEN_UPDATE_NOTES)
                         self._note_activity()
-                        radar.invalidate_frame_layer()
                         self._safe_draw()
                     elif bubble_action == "progress":
                         # In-progress bubble is not dismissible; ignore underlying taps.
@@ -3789,6 +3796,37 @@ class RoundTouchDisplay:
                 self._safe_draw()
             elif action == "radar":
                 self._return_to_radar()
+                self._safe_draw()
+        elif tap and self.screen == SCREEN_UPDATE_NOTES:
+            self._note_activity()
+            action = update_notes.tap_footer_action(tap[0], tap[1])
+            if action == "tonight":
+                try:
+                    from utilities.updater import schedule_update_tonight, update_is_scheduled
+
+                    if not update_is_scheduled():
+                        schedule_update_tonight()
+                    update_bubble.invalidate_cache()
+                except Exception:
+                    pass
+                self._return_to_radar()
+                radar.invalidate_frame_layer()
+                self._safe_draw()
+            elif action == "dismiss":
+                try:
+                    from utilities.updater import dismiss_update_banner
+
+                    dismiss_update_banner()
+                    update_bubble.invalidate_cache()
+                except Exception:
+                    pass
+                self._return_to_radar()
+                radar.invalidate_frame_layer()
+                self._safe_draw()
+            elif action == "radar":
+                self._return_to_radar()
+                self._safe_draw()
+            else:
                 self._safe_draw()
         elif tap and self.screen == SCREEN_SETTINGS:
             if self._system_confirm is not None:
@@ -4803,7 +4841,14 @@ class RoundTouchDisplay:
                     if (now - self._last_static_draw) >= interval:
                         self._safe_draw()
                         self._last_static_draw = now
-                elif self.screen in (SCREEN_FLIGHT, SCREEN_FIRE, SCREEN_QUAKE, SCREEN_SETTINGS, SCREEN_DETAILS):
+                elif self.screen in (
+                    SCREEN_FLIGHT,
+                    SCREEN_FIRE,
+                    SCREEN_QUAKE,
+                    SCREEN_SETTINGS,
+                    SCREEN_DETAILS,
+                    SCREEN_UPDATE_NOTES,
+                ):
                     ring_on = self._timeout_remaining_fraction() is not None
                     if ring_on:
                         # Never timer-refresh content while the ring is crawling —

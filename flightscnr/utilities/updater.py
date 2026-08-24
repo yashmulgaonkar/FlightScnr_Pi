@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import pwd
+import re
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -36,6 +37,7 @@ GITHUB_TIMEOUT_S = 12
 _REMOTE_CACHE_PATH = os.path.join(DATA_DIR, "github-remote-cache.json")
 _REMOTE_CACHE_TTL_S = 30 * 60
 _REMOTE_CACHE_STALE_S = 24 * 3600
+RELEASE_NOTES_MAX = 8192
 NOTIFY_PATH = os.path.join(DATA_DIR, "update-notify.json")
 # Three checks per day from the display process.
 CHECK_INTERVAL_S = 8 * 3600
@@ -226,7 +228,7 @@ def local_version_info() -> dict:
     }
 
 
-def _github_get(path: str) -> dict | None:
+def _github_request(path: str):
     url = f"{GITHUB_API}{path}"
     headers = {
         "Accept": "application/vnd.github+json",
@@ -244,6 +246,16 @@ def _github_get(path: str) -> dict | None:
     except requests.RequestException as exc:
         logger.warning("GitHub API request failed (%s): %s", path, exc)
         return None
+
+
+def _github_get(path: str) -> dict | None:
+    data = _github_request(path)
+    return data if isinstance(data, dict) else None
+
+
+def _github_get_list(path: str) -> list:
+    data = _github_request(path)
+    return data if isinstance(data, list) else []
 
 
 def _remote_commit_via_git() -> dict:
@@ -345,6 +357,100 @@ def _read_remote_cache() -> tuple[dict, float]:
         return {}, 0.0
 
 
+def cap_release_notes(text) -> str:
+    """Trim GitHub release body to a cache-friendly size."""
+    s = str(text or "").replace("\r\n", "\n").strip()
+    if len(s) > RELEASE_NOTES_MAX:
+        return s[:RELEASE_NOTES_MAX].rstrip() + "\n…"
+    return s
+
+
+def extract_whats_changed(body: str) -> str:
+    """Keep GitHub's ``## What's Changed`` bullets; else the first prose paragraph."""
+    text = str(body or "").replace("\r\n", "\n")
+    match = re.search(r"^##\s+What['’]?s Changed\s*$", text, re.IGNORECASE | re.MULTILINE)
+    if match:
+        rest = text[match.end() :].lstrip("\n")
+        lines: list[str] = []
+        for line in rest.split("\n"):
+            if re.match(r"^##\s+", line):
+                break
+            if re.match(r"^\*\*Full Changelog\*\*", line, re.IGNORECASE):
+                break
+            lines.append(line.rstrip())
+        return "\n".join(lines).strip()
+    paras: list[str] = []
+    for line in text.split("\n"):
+        s = line.strip()
+        if not s:
+            if paras:
+                break
+            continue
+        if s.startswith("#"):
+            continue
+        if s.lower().startswith("**full changelog**"):
+            continue
+        paras.append(line.rstrip())
+    return "\n".join(paras).strip()
+
+
+def compose_whats_changed_notes(releases: list, since_version: str) -> str:
+    """Stack What's Changed from every release newer than ``since_version`` (newest first)."""
+    from version import ReleaseVersion, compare_versions, normalize_version
+
+    local = normalize_version(since_version)
+    items: list[tuple[ReleaseVersion, str, dict]] = []
+    seen: set[str] = set()
+    for rel in releases or []:
+        if not isinstance(rel, dict) or rel.get("draft") or rel.get("prerelease"):
+            continue
+        tag = normalize_version(rel.get("tag_name") or "")
+        parsed = ReleaseVersion.parse(tag)
+        if not tag or parsed is None or tag in seen:
+            continue
+        seen.add(tag)
+        if local and ReleaseVersion.parse(local) and compare_versions(local, tag) >= 0:
+            continue
+        items.append((parsed, tag, rel))
+    items.sort(key=lambda row: row[0], reverse=True)
+    chunks: list[str] = []
+    for _parsed, tag, rel in items[:15]:
+        section = extract_whats_changed(str(rel.get("body") or ""))
+        if not section:
+            continue
+        chunks.append(f"## v{tag}\n{section}")
+    return cap_release_notes("\n\n".join(chunks))
+
+
+def release_notes_plain(markdown: str) -> str:
+    """Strip common GitHub-flavored markdown for the round display."""
+    text = cap_release_notes(markdown)
+    if not text:
+        return ""
+    text = re.sub(r"```[\s\S]*?```", lambda m: m.group(0).strip("` \n"), text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    # GitHub auto-notes: "by @user in https://…/pull/123" → "(#123)"
+    text = re.sub(
+        r"\s+by @\S+\s+in\s+https://github\.com/[^\s]+/pull/(\d+)",
+        r" (#\1)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    lines: list[str] = []
+    for raw in text.split("\n"):
+        s = raw.rstrip()
+        s = re.sub(r"^#{1,6}\s+", "", s)
+        s = re.sub(r"^>\s?", "", s)
+        s = re.sub(r"^(\s*)[-*+]\s+", r"\1• ", s)
+        s = re.sub(r"^(\s*)\d+\.\s+", r"\1", s)
+        s = s.replace("**", "").replace("__", "")
+        s = re.sub(r"(?<!\w)\*(?!\s)([^*]+)\*", r"\1", s)
+        lines.append(s)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
 def _write_remote_cache(remote: dict) -> None:
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
@@ -367,6 +473,8 @@ def _merge_remote(*parts: dict) -> dict:
         "release_tag": "",
         "release_name": "",
         "release_published": "",
+        "release_notes": "",
+        "release_html_url": "",
         "commit_date": "",
         "repo": GITHUB_REPO,
         "source": "",
@@ -396,6 +504,24 @@ def _merge_remote(*parts: dict) -> dict:
         merged["release_published"] = str(best_part.get("release_published") or "")
         if best_part.get("source"):
             merged["source"] = str(best_part["source"])
+
+    notes = str(best_part.get("release_notes") or "")
+    html_url = str(best_part.get("release_html_url") or "")
+    if not notes or not html_url:
+        for part in parts:
+            if not part:
+                continue
+            part_tag = str(part.get("release_tag") or "").strip()
+            if part_tag and best_tag and part_tag.lstrip("vV") != best_tag.lstrip("vV"):
+                continue
+            if not notes:
+                notes = str(part.get("release_notes") or "")
+            if not html_url:
+                html_url = str(part.get("release_html_url") or "")
+            if notes and html_url:
+                break
+    merged["release_notes"] = cap_release_notes(notes)
+    merged["release_html_url"] = html_url.strip()
 
     commit = ""
     commit_date = ""
@@ -436,7 +562,22 @@ def remote_version_info(*, force: bool = False) -> dict:
         return dict(cached)
 
     owner, _, name = GITHUB_REPO.partition("/")
-    release = _github_get(f"/repos/{owner}/{name}/releases/latest")
+    local_release = str(local_version_info().get("release") or "")
+    releases = _github_get_list(
+        f"/repos/{owner}/{name}/releases?per_page=30"
+    )
+    release = next(
+        (
+            item
+            for item in releases
+            if isinstance(item, dict) and not item.get("draft") and not item.get("prerelease")
+        ),
+        None,
+    )
+    if release is None:
+        release = _github_get(f"/repos/{owner}/{name}/releases/latest")
+        if isinstance(release, dict):
+            releases = [release]
     branch_commit = _github_get(f"/repos/{owner}/{name}/commits/{GITHUB_BRANCH}")
 
     api_remote: dict = {}
@@ -451,11 +592,18 @@ def remote_version_info(*, force: bool = False) -> dict:
         }
     if release:
         release_tag = str(release.get("tag_name") or "")
+        notes = compose_whats_changed_notes(releases, local_release)
+        if not notes and isinstance(release, dict):
+            notes = cap_release_notes(
+                extract_whats_changed(str(release.get("body") or ""))
+            )
         api_remote.update(
             {
                 "release_tag": release_tag,
                 "release_name": str(release.get("name") or release_tag),
                 "release_published": str(release.get("published_at") or ""),
+                "release_notes": notes,
+                "release_html_url": str(release.get("html_url") or "").strip(),
             }
         )
         if not api_remote.get("source"):
@@ -610,6 +758,8 @@ def _default_notify() -> dict:
         "update_available": False,
         "remote_id": "",
         "remote_release": "",
+        "release_notes": "",
+        "release_html_url": "",
         "last_check_ts": 0.0,
         "dismissed_for": "",
         "scheduled_for": "",
@@ -630,6 +780,8 @@ def _read_notify() -> dict:
         if not state["remote_release"] and state["remote_id"]:
             # Older notify files: "tag@commit" → tag
             state["remote_release"] = state["remote_id"].split("@", 1)[0]
+        state["release_notes"] = cap_release_notes(data.get("release_notes") or "")
+        state["release_html_url"] = str(data.get("release_html_url") or "").strip()
         try:
             state["last_check_ts"] = float(data.get("last_check_ts") or 0.0)
         except (TypeError, ValueError):
@@ -685,6 +837,12 @@ def refresh_notify_from_check(result: dict) -> dict:
         "remote_release": (
             str(remote.get("release_tag") or "").strip() if available else ""
         ),
+        "release_notes": (
+            cap_release_notes(remote.get("release_notes") or "") if available else ""
+        ),
+        "release_html_url": (
+            str(remote.get("release_html_url") or "").strip() if available else ""
+        ),
         "last_check_ts": time.time(),
         "dismissed_for": dismissed_for if available else "",
         "scheduled_for": scheduled_for if available else "",
@@ -692,6 +850,23 @@ def refresh_notify_from_check(result: dict) -> dict:
     }
     if available and not state["remote_release"] and remote_id:
         state["remote_release"] = remote_id.split("@", 1)[0]
+    if available and not state["release_notes"]:
+        # Keep notes from the previous notify/cache when git-only fallback wins.
+        prev_notes = str(prev.get("release_notes") or "")
+        if prev_notes and str(prev.get("remote_id") or "") == remote_id:
+            state["release_notes"] = prev_notes
+            if not state["release_html_url"]:
+                state["release_html_url"] = str(prev.get("release_html_url") or "")
+        else:
+            cached, _ = _read_remote_cache()
+            if str(cached.get("release_tag") or "").strip() == state["remote_release"]:
+                state["release_notes"] = cap_release_notes(
+                    cached.get("release_notes") or ""
+                )
+                if not state["release_html_url"]:
+                    state["release_html_url"] = str(
+                        cached.get("release_html_url") or ""
+                    ).strip()
     _write_notify(state)
     return state
 
@@ -707,6 +882,23 @@ def remote_release_label() -> str:
         return ""
     tag = str(_read_notify().get("remote_release") or "").strip().lstrip("vV")
     return tag
+
+
+def remote_release_notes() -> str:
+    """GitHub release body for the pending update (empty if unknown)."""
+    notes = str(_read_notify().get("release_notes") or "")
+    if notes:
+        return notes
+    cached, _ = _read_remote_cache()
+    return str(cached.get("release_notes") or "")
+
+
+def remote_release_html_url() -> str:
+    url = str(_read_notify().get("release_html_url") or "").strip()
+    if url:
+        return url
+    cached, _ = _read_remote_cache()
+    return str(cached.get("release_html_url") or "").strip()
 
 
 def should_show_update_banner() -> bool:

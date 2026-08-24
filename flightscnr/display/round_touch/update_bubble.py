@@ -18,7 +18,7 @@ import pygame
 
 from display.round_touch import draw, radar_hud, theme
 
-_LABEL_AVAILABLE = "Update available — tap for tonight"
+_LABEL_AVAILABLE = "Update available — tap for notes"
 _LABEL_SCHEDULED = (
     "Firmware will update tonight during off-hours",
     "Close to skip auto-update",
@@ -235,7 +235,7 @@ def draw_bubble(surface: pygame.Surface) -> pygame.Rect | None:
 
 
 def handle_tap(x: int, y: int) -> str | None:
-    """Return dismiss / tonight / progress; ignore misses."""
+    """Return dismiss / notes / progress; ignore misses."""
     mode = _current_mode()
     if mode == _MODE_NONE:
         return None
@@ -270,13 +270,5 @@ def handle_tap(x: int, y: int) -> str | None:
         invalidate_cache()
         return "dismiss"
     if hit_bubble.collidepoint(x, y):
-        try:
-            from utilities.updater import schedule_update_tonight, update_is_scheduled
-
-            if not update_is_scheduled():
-                schedule_update_tonight()
-        except Exception:
-            pass
-        invalidate_cache()
-        return "tonight"
+        return "notes"
     return None
