@@ -161,12 +161,31 @@ class TestStabilizeRadius(unittest.TestCase):
             live_map.stabilize_radius_km(16.0, 15.0, have_speed=True), 13.0
         )
 
+    def test_catch_up_zoom_out_in_one_poll(self):
+        from display.round_touch import live_map
+
+        # Cruise raw ~62 km should land on 64 km, not creep 8→13→… over many polls.
+        self.assertEqual(
+            live_map.stabilize_radius_km(8.0, 62.0, have_speed=True), 64.0
+        )
+
+    def test_taxi_snap_from_approach_zoom(self):
+        from display.round_touch import live_map
+
+        # gs=0 on the ground must snap to 2 mi, not hold approach zoom.
+        self.assertEqual(
+            live_map.stabilize_radius_km(
+                16.0, 3.22, have_speed=True, taxi_snap=True
+            ),
+            3.22,
+        )
+
     def test_display_radius_steps_cover_issue_114_ladder(self):
         from display.round_touch import live_map
 
         self.assertEqual(
             live_map._LIVE_MAP_RADIUS_STEPS_KM,
-            (3.2, 4.8, 8.0, 13.0, 16.0, 24.0, 32.0, 48.0, 64.0, 96.0, 120.0),
+            (3.22, 4.8, 8.0, 13.0, 16.0, 24.0, 32.0, 48.0, 64.0, 96.0, 120.0),
         )
 
 

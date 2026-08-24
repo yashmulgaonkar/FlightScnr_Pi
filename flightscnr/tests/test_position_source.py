@@ -26,9 +26,26 @@ class TestRadiusAndBBox(unittest.TestCase):
     def test_radius_floors_without_speed(self):
         from utilities import position_source
 
-        self.assertEqual(position_source.compute_tracking_radius_km(None), 3.2)
-        self.assertEqual(position_source.compute_tracking_radius_km(0), 3.2)
-        self.assertEqual(position_source.compute_tracking_radius_km(-10), 3.2)
+        self.assertEqual(position_source.compute_tracking_radius_km(None), 3.22)
+        self.assertEqual(position_source.compute_tracking_radius_km(0), 3.22)
+        self.assertEqual(position_source.compute_tracking_radius_km(-10), 3.22)
+
+    def test_taxi_speed_uses_two_mile_radius(self):
+        from utilities import position_source
+
+        taxi_km = round(position_source._mi_to_km(2.0), 2)
+        self.assertEqual(taxi_km, 3.22)
+        for kt in (0, 5, 30, 49.9):
+            self.assertAlmostEqual(
+                position_source.compute_tracking_radius_km(kt),
+                taxi_km,
+                places=2,
+            )
+            self.assertTrue(position_source.is_taxi_speed_kt(kt))
+        # At exactly 50 kt the speed-based curve applies (not the taxi floor).
+        self.assertGreater(position_source.compute_tracking_radius_km(50), taxi_km)
+        self.assertFalse(position_source.is_taxi_speed_kt(50))
+        self.assertFalse(position_source.is_taxi_speed_kt(None))
 
     def test_low_speed_scale_curve(self):
         from utilities import position_source
@@ -44,7 +61,7 @@ class TestRadiusAndBBox(unittest.TestCase):
 
         # 100 kt * 1.852 * (5/60) * 0.45 ≈ 6.945 km (low-speed compression)
         r = position_source.compute_tracking_radius_km(100)
-        self.assertGreater(r, 3.2)
+        self.assertGreater(r, 3.22)
         self.assertLess(r, 120.0)
         self.assertAlmostEqual(r, 100 * 1.852 * (5.0 / 60.0) * 0.45, places=4)
 
@@ -136,7 +153,7 @@ class TestMatchAndFetch(unittest.TestCase):
         )
         self.assertIsNone(entry)
         self.assertIsNone(source)
-        self.assertEqual(radius, 3.2)
+        self.assertEqual(radius, 3.22)
 
     def test_fr24_flight_to_entry_maps_fields(self):
         from utilities import position_source

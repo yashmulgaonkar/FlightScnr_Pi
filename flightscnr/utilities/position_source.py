@@ -23,7 +23,8 @@ the portal order is authoritative when the user reorders or omits entries.
 
 radius/bbox: the live-map radius is derived from the aircraft's last known
 ground speed (distance covered in LIVE_TRACKING_PREVIEW_MINUTES), with
-low-speed compression for approach/taxi, then clamped to
+a fixed taxi/approach radius below LIVE_TRACKING_TAXI_MAX_SPEED_KT, then
+low-speed compression above that, then clamped to
 [LIVE_TRACKING_MIN_RADIUS_KM, LIVE_TRACKING_MAX_RADIUS_KM]. This radius
 is used both for the OpenSky/ADS-B Exchange bounding box (smaller box =
 fewer credits) and should be reused by the live-map renderer so the map's
@@ -40,7 +41,32 @@ import math
 logger = logging.getLogger(__name__)
 
 KM_PER_NM = 1.852
+KM_PER_MI = 1.609344
 KM_PER_DEGREE_LAT = 111.0
+
+# Follow taxi / approach floor (issue #114): under LIVE_TRACKING_TAXI_MAX_SPEED_KT
+# the visible map radius is fixed at LIVE_TRACKING_TAXI_RADIUS_MI.
+_DEFAULT_TAXI_MAX_SPEED_KT = 50.0
+_DEFAULT_TAXI_RADIUS_MI = 2.0
+
+
+def _mi_to_km(mi: float) -> float:
+    return float(mi) * KM_PER_MI
+
+
+def _taxi_settings() -> tuple[float, float]:
+    """(max_speed_kt, radius_km) for fixed close-in Follow view."""
+    try:
+        from config import (
+            LIVE_TRACKING_TAXI_MAX_SPEED_KT,
+            LIVE_TRACKING_TAXI_RADIUS_MI,
+        )
+
+        return float(LIVE_TRACKING_TAXI_MAX_SPEED_KT), _mi_to_km(
+            float(LIVE_TRACKING_TAXI_RADIUS_MI)
+        )
+    except Exception:
+        return _DEFAULT_TAXI_MAX_SPEED_KT, _mi_to_km(_DEFAULT_TAXI_RADIUS_MI)
 
 
 def _settings():
@@ -64,7 +90,7 @@ def _settings():
         min_km = LIVE_TRACKING_MIN_RADIUS_KM
         max_km = LIVE_TRACKING_MAX_RADIUS_KM
     except Exception:
-        preview_min, min_km, max_km = 5.0, 3.2, 120.0
+        preview_min, min_km, max_km = 5.0, 3.22, 120.0
 
     return order, preview_min, min_km, max_km
 
@@ -86,18 +112,32 @@ def _low_speed_scale(speed_kt: float) -> float:
     return 0.45 + (speed_kt - 100.0) / 200.0 * 0.55
 
 
+def is_taxi_speed_kt(speed_kt: float | None) -> bool:
+    """True when ground speed is known and below LIVE_TRACKING_TAXI_MAX_SPEED_KT (50 kt)."""
+    if speed_kt is None:
+        return False
+    taxi_max_kt, _ = _taxi_settings()
+    return float(speed_kt) < taxi_max_kt
+
+
 def compute_tracking_radius_km(speed_kt: float | None) -> float:
     """Radius = distance the aircraft covers in the preview window,
     clamped to [min, max]. speed_kt is ground speed in knots (the unit
     already used throughout this codebase, e.g. aircraft_min_speed_kt).
 
-    Applies low-speed compression so approach/landing/taxi get a closer
-    map than the raw projected distance alone would suggest.
+    Applies a fixed close-in radius below LIVE_TRACKING_TAXI_MAX_SPEED_KT
+    (default 50 kt → 2 mi), including 0 kt on the ground, then low-speed
+    compression above that band so approach/landing get a closer map than
+    the raw projected distance alone would suggest.
     """
     _, preview_min, min_km, max_km = _settings()
-    if not speed_kt or speed_kt <= 0:
+    taxi_max_kt, taxi_radius_km = _taxi_settings()
+    taxi_km = max(min_km, min(max_km, taxi_radius_km))
+    if speed_kt is None:
         return min_km
     speed_kt_f = float(speed_kt)
+    if speed_kt_f < taxi_max_kt:
+        return taxi_km
     speed_kph = speed_kt_f * KM_PER_NM
     projected_km = speed_kph * (preview_min / 60.0)
     projected_km *= _low_speed_scale(speed_kt_f)

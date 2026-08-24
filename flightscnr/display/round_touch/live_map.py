@@ -87,7 +87,7 @@ _RADIUS_HYST_KM = 2.0
 # Discrete Follow display-radius steps (km). Search/preview radius from
 # position_source may be continuous; the visible map snaps to these.
 _LIVE_MAP_RADIUS_STEPS_KM = (
-    3.2,
+    3.22,  # ~2 mi taxi / approach floor (issue #114)
     4.8,
     8.0,
     13.0,
@@ -206,13 +206,18 @@ def display_radius_km(
 
 
 def stabilize_radius_km(
-    previous: float, candidate: float, *, have_speed: bool
+    previous: float,
+    candidate: float,
+    *,
+    have_speed: bool,
+    taxi_snap: bool = False,
 ) -> float:
     """Hold Follow map zoom steady through noisy or missing ground speed.
 
-    Returns ``previous`` when speed is missing/zero (avoid snapping to the
-    min-radius floor). With a valid speed, maps ``candidate`` onto the
-    discrete display-radius steps with hysteresis (issue #114).
+    Returns ``previous`` when speed is missing. With a valid speed, maps
+    ``candidate`` onto the discrete display-radius steps with hysteresis
+    (issue #114). ``taxi_snap`` forces an immediate snap to the taxi step
+    (under 50 kt, including 0 kt on the ground).
     """
     try:
         prev = float(previous)
@@ -222,10 +227,24 @@ def stabilize_radius_km(
         cand = float(candidate)
     except (TypeError, ValueError):
         return prev if prev > 0 else _LIVE_MAP_RADIUS_STEPS_KM[2]  # 8.0 default
+    if taxi_snap:
+        return display_radius_km(cand, None)
     if not have_speed:
         return prev if prev > 0 else display_radius_km(cand, None)
     if prev <= 0:
         return display_radius_km(cand, None)
+    target = _nearest_radius_step(cand)
+    if target > prev:
+        steps = _LIVE_MAP_RADIUS_STEPS_KM
+        try:
+            prev_idx = steps.index(prev)
+            target_idx = steps.index(target)
+        except ValueError:
+            return display_radius_km(cand, prev)
+        # Large speed-up: snap to the target step in one poll. Small increases
+        # still use one-step hysteresis so ground-speed noise does not thrash.
+        if target_idx - prev_idx > 1:
+            return target
     return display_radius_km(cand, prev)
 
 

@@ -1011,16 +1011,19 @@ class RoundTouchDisplay:
             speed_f = float(speed) if speed is not None else None
         except (TypeError, ValueError):
             speed_f = None
-        have_speed = speed_f is not None and speed_f > 0
+        speed_known = speed_f is not None
+        taxi_snap = speed_known and position_source.is_taxi_speed_kt(speed_f)
+        prev_radius_km = self._live_map_last_radius_km
         radius_km = (
             position_source.compute_tracking_radius_km(speed_f)
-            if have_speed
+            if speed_known
             else self._live_map_last_radius_km
         )
         self._live_map_last_radius_km = live_map.stabilize_radius_km(
             self._live_map_last_radius_km,
             radius_km,
-            have_speed=have_speed,
+            have_speed=speed_known,
+            taxi_snap=taxi_snap,
         )
 
         source = display_data.get("data_source") or "tracked"
@@ -1057,7 +1060,7 @@ class RoundTouchDisplay:
         self._live_map_last_result = entry
         self._live_map_last_fetch = now
         self._live_map_inflight = False
-        if moved:
+        if moved or abs(self._live_map_last_radius_km - prev_radius_km) > 0.01:
             self._live_map_redraw = True
 
     def _draw_live_tracking(self, display_data: dict) -> None:
@@ -1542,8 +1545,10 @@ class RoundTouchDisplay:
             # Fresh entry into live tracking — force an immediate position fetch.
             self._live_map_last_fetch = 0.0
             self._live_map_last_result = None
+            # Snap Follow zoom from current speed (not the previous session's step).
+            self._live_map_last_radius_km = 0.0
             self._live_map_inflight = False
-            self._live_map_redraw = False
+            self._live_map_redraw = True
             self._follow_photo_open = False
             try:
                 live_map.invalidate()
