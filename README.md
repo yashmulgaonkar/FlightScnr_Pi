@@ -16,7 +16,7 @@ A [round **4″ touch display**](https://www.waveshare.com/4inch-dsi-lcd-c.htm?&
 
 ## Features
 
-Live aircraft (and optional marine traffic) on a circular radar, with rich detail screens when you tap. Powered by **FR24**, **[adsb.fi](https://adsb.fi)**, optional local dump1090/readsb, **Tomorrow.io** weather, optional route enrichment, **USGS earthquakes**, and wildfire layers (CAL FIRE / NIFC / NASA FIRMS). Configure everything from the web portal. Full detail: [Features wiki](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Features).
+Live aircraft (and optional marine traffic) on a circular radar, with rich detail screens when you tap. Powered by **FR24**, **[adsb.fi](https://adsb.fi)**, optional local dump1090/readsb, **Tomorrow.io** weather, optional precipitation from **[LibreWXR](https://librewxr.net/)** (RainViewer fallback), optional route enrichment, **USGS earthquakes**, and wildfire layers (CAL FIRE / NIFC / NASA FIRMS). Configure everything from the web portal. Full detail: [Features wiki](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Features).
 
 Current release: **2026.8.21.2** on `main`.
 
@@ -250,6 +250,7 @@ Questions or setup help? Join the **FlightScnrPi Discord**:
 - AIS WebSocket client design adapted from [capsule-radar-ais](https://github.com/socquique/capsule-radar-ais) (MIT).
 - Aircraft photos courtesy of [planespotters.net](https://www.planespotters.net/) contributors (when credited on screen).
 - Vessel photos from [Wikimedia Commons](https://commons.wikimedia.org/) contributors under their respective licenses.
+- Precipitation radar tiles primarily from **[LibreWXR](https://librewxr.net/)** by Joshua Kimsey (public API [`api.librewxr.net`](https://api.librewxr.net/)), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Fallback: [RainViewer](https://www.rainviewer.com/). See [`flightscnr/display/round_touch/PRECIP_ATTRIBUTION.md`](flightscnr/display/round_touch/PRECIP_ATTRIBUTION.md).
 
 Full asset attributions: [Credits and License](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Credits-and-License).
 
