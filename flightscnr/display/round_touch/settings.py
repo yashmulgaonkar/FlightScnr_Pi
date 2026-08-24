@@ -52,6 +52,17 @@ TRAFFIC_LABEL_LABELS = {
     "both": "Aircraft and Marine",
     "off": "OFF",
 }
+# Out-of-range aircraft on the radar rim (PR118).
+RIM_TARGET_STYLES = ("plane", "dot")
+RIM_TARGET_STYLE_LABELS = {
+    "plane": "Aircraft icon",
+    "dot": "Dot blip",
+}
+# Follow speed-based zoom bounds (issue #114) — portal / settings.json.
+LIVE_TRACKING_PREVIEW_MINUTES_MIN = 1.0
+LIVE_TRACKING_PREVIEW_MINUTES_MAX = 30.0
+LIVE_TRACKING_RADIUS_KM_FLOOR = 1.0
+LIVE_TRACKING_RADIUS_KM_CEILING = 200.0
 # Distance + speed pairs for Display → Units (stored as "{dist}_{speed}").
 UNIT_PRESETS = ("nm_kts", "mi_mph", "km_kph", "mi_kts", "km_kts")
 UNIT_PRESET_LABELS = {
@@ -269,6 +280,12 @@ _defaults = {
     "show_sweep": True,
     # Hockey-stick underline + diagonal from tag to blip.
     "show_tag_leaders": True,
+    # Out-of-range rim targets: plane | dot (PR118). Seeded from config on first load.
+    "rim_target_style": "plane",
+    # Follow speed-based zoom (issue #114) — seeded from config on first load.
+    "live_tracking_preview_minutes": 5.0,
+    "live_tracking_min_radius_km": 3.22,
+    "live_tracking_max_radius_km": 120.0,
     "show_precipitation": True,
     "show_wildfires": False,
     "show_earthquakes": False,
@@ -351,6 +368,25 @@ _defaults = {
 
 # Live preview while calibrating facing (not persisted until save).
 _facing_preview: float | None = None
+
+
+def _clamp_preview_minutes(value) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        v = 5.0
+    return max(
+        LIVE_TRACKING_PREVIEW_MINUTES_MIN,
+        min(LIVE_TRACKING_PREVIEW_MINUTES_MAX, v),
+    )
+
+
+def _clamp_radius_km(value, *, default: float) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        v = float(default)
+    return max(LIVE_TRACKING_RADIUS_KM_FLOOR, min(LIVE_TRACKING_RADIUS_KM_CEILING, v))
 
 
 def _normalize_facing(deg) -> float:
@@ -929,6 +965,57 @@ def _load():
     ):
         migrated = True
     state["safety_disclaimer_version"] = version
+    # Rim target style (PR118) — seed from config when unset.
+    rim = str(state.get("rim_target_style") or "").strip().lower()
+    if "rim_target_style" not in data or rim not in RIM_TARGET_STYLES:
+        try:
+            from config import RADAR_RIM_STYLE
+
+            rim = str(RADAR_RIM_STYLE or "plane").strip().lower()
+        except Exception:
+            rim = "plane"
+        state["rim_target_style"] = rim if rim in RIM_TARGET_STYLES else "plane"
+        migrated = True
+    else:
+        state["rim_target_style"] = rim
+    # Follow zoom (issue #114) — seed from config when unset.
+    try:
+        from config import (
+            LIVE_TRACKING_PREVIEW_MINUTES as _CFG_PREVIEW,
+            LIVE_TRACKING_MIN_RADIUS_KM as _CFG_MIN_R,
+            LIVE_TRACKING_MAX_RADIUS_KM as _CFG_MAX_R,
+        )
+    except Exception:
+        _CFG_PREVIEW, _CFG_MIN_R, _CFG_MAX_R = 5.0, 3.22, 120.0
+    if "live_tracking_preview_minutes" not in data:
+        state["live_tracking_preview_minutes"] = float(_CFG_PREVIEW)
+        migrated = True
+    else:
+        state["live_tracking_preview_minutes"] = _clamp_preview_minutes(
+            state.get("live_tracking_preview_minutes")
+        )
+    if "live_tracking_min_radius_km" not in data:
+        state["live_tracking_min_radius_km"] = float(_CFG_MIN_R)
+        migrated = True
+    else:
+        state["live_tracking_min_radius_km"] = _clamp_radius_km(
+            state.get("live_tracking_min_radius_km"), default=3.22
+        )
+    if "live_tracking_max_radius_km" not in data:
+        state["live_tracking_max_radius_km"] = float(_CFG_MAX_R)
+        migrated = True
+    else:
+        state["live_tracking_max_radius_km"] = _clamp_radius_km(
+            state.get("live_tracking_max_radius_km"), default=120.0
+        )
+    # Keep max >= min.
+    if float(state["live_tracking_max_radius_km"]) < float(
+        state["live_tracking_min_radius_km"]
+    ):
+        state["live_tracking_max_radius_km"] = float(
+            state["live_tracking_min_radius_km"]
+        )
+        migrated = True
     if color_presets.migrate_theme_index(state):
         migrated = True
     if migrated:
@@ -1321,6 +1408,50 @@ def set_live_map_heading_up(enabled: bool):
     _save(_state)
 
 
+def live_tracking_preview_minutes() -> float:
+    """Follow zoom: projected travel window in minutes (issue #114)."""
+    return _clamp_preview_minutes(_state.get("live_tracking_preview_minutes", 5.0))
+
+
+def set_live_tracking_preview_minutes(value) -> None:
+    _state["live_tracking_preview_minutes"] = _clamp_preview_minutes(value)
+    _save(_state)
+
+
+def live_tracking_min_radius_km() -> float:
+    """Follow zoom min clamp (speed curve floor; taxi snap is separate)."""
+    return _clamp_radius_km(
+        _state.get("live_tracking_min_radius_km", 3.22), default=3.22
+    )
+
+
+def set_live_tracking_min_radius_km(value) -> None:
+    mn = _clamp_radius_km(value, default=3.22)
+    mx = live_tracking_max_radius_km()
+    if mn > mx:
+        mx = mn
+        _state["live_tracking_max_radius_km"] = mx
+    _state["live_tracking_min_radius_km"] = mn
+    _save(_state)
+
+
+def live_tracking_max_radius_km() -> float:
+    """Follow zoom max clamp (cruise / high-speed ceiling)."""
+    return _clamp_radius_km(
+        _state.get("live_tracking_max_radius_km", 120.0), default=120.0
+    )
+
+
+def set_live_tracking_max_radius_km(value) -> None:
+    mx = _clamp_radius_km(value, default=120.0)
+    mn = live_tracking_min_radius_km()
+    if mx < mn:
+        mn = mx
+        _state["live_tracking_min_radius_km"] = mn
+    _state["live_tracking_max_radius_km"] = mx
+    _save(_state)
+
+
 def toggle_show_precipitation():
     _state["show_precipitation"] = not show_precipitation()
     _save(_state)
@@ -1662,18 +1793,27 @@ def set_color_by_altitude(enabled: bool):
 
 
 def rim_target_style() -> str:
-    """How out-of-range targets render on the rim: dot | plane.
-
-    config.h / env only for now — there is no web-portal control yet, so this
-    reads straight through instead of being seeded into the saved settings.
-    config._parse_rim_style() has already validated the value.
-    """
+    """How out-of-range targets render on the rim: plane | dot."""
+    raw = str(_state.get("rim_target_style") or "").strip().lower()
+    if raw in RIM_TARGET_STYLES:
+        return raw
     try:
         from config import RADAR_RIM_STYLE
 
-        return RADAR_RIM_STYLE
-    except ImportError:
-        return "plane"
+        raw = str(RADAR_RIM_STYLE or "plane").strip().lower()
+    except Exception:
+        raw = "plane"
+    return raw if raw in RIM_TARGET_STYLES else "plane"
+
+
+def rim_target_style_label() -> str:
+    return RIM_TARGET_STYLE_LABELS.get(rim_target_style(), "Aircraft icon")
+
+
+def set_rim_target_style(value: str):
+    raw = str(value or "").strip().lower()
+    _state["rim_target_style"] = raw if raw in RIM_TARGET_STYLES else "plane"
+    _save(_state)
 
 
 def show_range_rings() -> bool:

@@ -43,6 +43,7 @@ MANAGED_KEYS = (
     "OPENSKY_API_CLIENT_SECRET",
     "ADSBEXCHANGE_API_KEY",
     "FIRMS_MAP_KEY",
+    "STADIA_MAPS_API_KEY",
     "HOME_LAT",
     "HOME_LON",
 )
@@ -70,6 +71,7 @@ TOGGLE_KEYS = (
     "USE_FLIGHTAWARE_API",
     "USE_OPENSKY_API",
     "USE_ADSBEXCHANGE_API",
+    "USE_STADIA_MAPS",
 )
 
 # Non-secret data-source settings stored alongside secrets.json.
@@ -175,6 +177,7 @@ def load_toggles() -> dict[str, bool]:
         # Free route fallback — on by default when credentials exist.
         "USE_OPENSKY_API": True,
         "USE_ADSBEXCHANGE_API": True,
+        "USE_STADIA_MAPS": True,
     }
     try:
         with open(SECRETS_JSON_PATH, encoding="utf-8") as fh:
@@ -200,6 +203,7 @@ def api_enabled(key_name: str) -> bool:
         "OPENSKY_API_CLIENT_ID": "USE_OPENSKY_API",
         "OPENSKY_API_CLIENT_SECRET": "USE_OPENSKY_API",
         "ADSBEXCHANGE_API_KEY": "USE_ADSBEXCHANGE_API",
+        "STADIA_MAPS_API_KEY": "USE_STADIA_MAPS",
     }
     toggle_key = mapping.get(key_name)
     if not toggle_key:
@@ -463,6 +467,7 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         "opensky_api_client_secret": "OPENSKY_API_CLIENT_SECRET",
         "adsbexchange_api_key": "ADSBEXCHANGE_API_KEY",
         "firms_map_key": "FIRMS_MAP_KEY",
+        "stadia_maps_api_key": "STADIA_MAPS_API_KEY",
     }
     for form_key, env_key in field_map.items():
         if form_key not in payload:
@@ -483,6 +488,7 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         "use_flightaware_api": "USE_FLIGHTAWARE_API",
         "use_opensky_api": "USE_OPENSKY_API",
         "use_adsbexchange_api": "USE_ADSBEXCHANGE_API",
+        "use_stadia_maps": "USE_STADIA_MAPS",
     }
     for form_key, key in toggle_map.items():
         if form_key in payload:

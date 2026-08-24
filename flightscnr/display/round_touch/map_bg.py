@@ -182,6 +182,13 @@ def normalize_map_style(raw: str | None) -> str:
 
 
 def _stadia_api_key() -> str:
+    try:
+        from secrets_store import api_enabled
+
+        if not api_enabled("STADIA_MAPS_API_KEY"):
+            return ""
+    except Exception:
+        pass
     raw = (
         os.environ.get("STADIA_MAPS_API_KEY")
         or os.environ.get("STADIA_API_KEY")

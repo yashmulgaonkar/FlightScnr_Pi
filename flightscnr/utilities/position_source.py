@@ -71,7 +71,7 @@ def _taxi_settings() -> tuple[float, float]:
 
 def _settings():
     """(order, preview_minutes, min_km, max_km) — portal order wins,
-    config.py constants are used for the radius shaping."""
+    settings.json Follow zoom prefs override config.py when present."""
     try:
         from secrets_store import position_source_order_settings
 
@@ -79,6 +79,7 @@ def _settings():
     except Exception:
         order = ("dump1090", "adsbfi", "opensky", "adsbexchange", "fr24")
 
+    preview_min, min_km, max_km = 5.0, 3.22, 120.0
     try:
         from config import (
             LIVE_TRACKING_PREVIEW_MINUTES,
@@ -86,11 +87,19 @@ def _settings():
             LIVE_TRACKING_MAX_RADIUS_KM,
         )
 
-        preview_min = LIVE_TRACKING_PREVIEW_MINUTES
-        min_km = LIVE_TRACKING_MIN_RADIUS_KM
-        max_km = LIVE_TRACKING_MAX_RADIUS_KM
+        preview_min = float(LIVE_TRACKING_PREVIEW_MINUTES)
+        min_km = float(LIVE_TRACKING_MIN_RADIUS_KM)
+        max_km = float(LIVE_TRACKING_MAX_RADIUS_KM)
     except Exception:
-        preview_min, min_km, max_km = 5.0, 3.22, 120.0
+        pass
+    try:
+        from display.round_touch import settings as rt_settings
+
+        preview_min = float(rt_settings.live_tracking_preview_minutes())
+        min_km = float(rt_settings.live_tracking_min_radius_km())
+        max_km = float(rt_settings.live_tracking_max_radius_km())
+    except Exception:
+        pass
 
     return order, preview_min, min_km, max_km
 

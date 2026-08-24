@@ -236,6 +236,12 @@
                 <span class="switch"><input id="show_tag_leaders" type="checkbox"><span class="track"></span></span>
             </div>
             <p class="hint">Hockey-stick underline and diagonal from each callsign tag to its aircraft or vessel. Same color as the blip. Only drawn when traffic labels are on.</p>
+            <label for="rim_target_style">Out-of-range rim targets</label>
+            <select id="rim_target_style">
+                <option value="plane">Aircraft icon</option>
+                <option value="dot">Dot blip</option>
+            </select>
+            <p class="hint">Aircraft past the radar range are pinned to the rim. Dot draws a small half-round blip flat against the edge; aircraft icon keeps the compact plane symbol.</p>
             <label for="facing_deg">Facing direction (degrees)</label>
             <input id="facing_deg" type="number" min="0" max="359" step="1" value="0">
             <p class="hint">Real-world direction at the top of the screen (0 = north, 90 = east, 180 = south, 270 = west). You can also set this on the device under Settings → Display → Facing.</p>
@@ -374,6 +380,15 @@
                 <label for="live_map_heading_up">Rotate map to heading (default: north-up)</label>
                 <span class="switch"><input id="live_map_heading_up" type="checkbox"><span class="track"></span></span>
             </div>
+            <label for="live_tracking_preview_minutes" style="margin-top:.75rem">Follow zoom preview (minutes)</label>
+            <input id="live_tracking_preview_minutes" type="number" min="1" max="30" step="0.5" value="5">
+            <p class="hint">How far ahead (at current ground speed) the Follow map tries to show. Larger = wider zoom at the same speed. Default 5.</p>
+            <label for="live_tracking_min_radius" id="live_tracking_min_radius_label">Follow min radius</label>
+            <input id="live_tracking_min_radius" type="number" min="0.5" max="200" step="0.1" value="3.22">
+            <p class="hint" id="live_tracking_min_radius_hint">Floor for the speed-based zoom curve (not the taxi snap). Default matches ~2 mi.</p>
+            <label for="live_tracking_max_radius" id="live_tracking_max_radius_label">Follow max radius</label>
+            <input id="live_tracking_max_radius" type="number" min="1" max="200" step="1" value="120">
+            <p class="hint" id="live_tracking_max_radius_hint">Ceiling for cruise / high-speed Follow zoom.</p>
             <button class="btn btn-primary" id="btn-position-sources" style="margin-top:.7rem" type="button">Save position sources</button>
             <button class="btn" id="btn-position-sources-reset" style="margin-top:.4rem" type="button">Reset to default order</button>
             <div id="position-sources-status" class="status"></div>
@@ -627,7 +642,7 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#128273;</span>API Keys<span class="sum">FR24, Tomorrow.io, AirLabs, AIS, FlightAware, FIRMS</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#128273;</span>API Keys<span class="sum">FR24, Tomorrow.io, AirLabs, AIS, FlightAware, FIRMS, Stadia</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <div class="chk">
                 <label for="use-fr24-api">Use FR24 API</label>
@@ -690,6 +705,14 @@
             <input type="password" id="firms-key" placeholder="MAP_KEY" autocomplete="off">
             <p class="hint" id="firms-hint"></p>
             <p class="hint">Free key from <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener">FIRMS map key</a>. Used for satellite hotspots when the radar is outside the USA and Canada. In California: CAL FIRE; elsewhere in USA/Canada: NIFC WFIGS (no key).</p>
+            <div class="chk">
+                <label for="use-stadia-maps">Use Stadia Maps</label>
+                <span class="switch"><input id="use-stadia-maps" type="checkbox" checked><span class="track"></span></span>
+            </div>
+            <label for="stadia-key">Stadia Maps API key</label>
+            <input type="password" id="stadia-key" placeholder="API key" autocomplete="off">
+            <p class="hint" id="stadia-hint"></p>
+            <p class="hint">Free key from <a href="https://client.stadiamaps.com/signup/" target="_blank" rel="noopener">Stadia Maps</a>. Required for Dark: Stadia and Light: Toner basemap styles on the Radar card.</p>
             <div class="track-row" style="margin-top:.6rem">
                 <button class="btn btn-primary" id="btn-keys-save" type="button">Save keys</button>
                 <button class="btn" id="btn-keys-restart" type="button">Save &amp; restart</button>
@@ -885,6 +908,7 @@ function applyKeyHints(keys) {
         OPENSKY_API_CLIENT_SECRET: "opensky-client-secret-hint",
         ADSBEXCHANGE_API_KEY: "adsbexchange-hint",
         FIRMS_MAP_KEY: "firms-hint",
+        STADIA_MAPS_API_KEY: "stadia-hint",
     };
     Object.entries(map).forEach(([key, id]) => {
         const el = $(id);
@@ -1144,6 +1168,15 @@ async function loadAll() {
         if ($("live_map_heading_up")) {
             $("live_map_heading_up").checked = !!r.live_map_heading_up;
         }
+        if ($("live_tracking_preview_minutes")) {
+            $("live_tracking_preview_minutes").value = String(
+                r.live_tracking_preview_minutes != null ? r.live_tracking_preview_minutes : 5
+            );
+        }
+        setFollowRadiusInputsFromKm(
+            r.live_tracking_min_radius_km != null ? r.live_tracking_min_radius_km : FOLLOW_DEFAULT_MIN_KM,
+            r.live_tracking_max_radius_km != null ? r.live_tracking_max_radius_km : FOLLOW_DEFAULT_MAX_KM
+        );
         $("show_compass").checked = !!r.show_compass_rose;
         if ($("show_range_rings")) $("show_range_rings").checked = r.show_range_rings !== false;
         if ($("color_by_altitude")) $("color_by_altitude").checked = !!r.color_by_altitude;
@@ -1151,6 +1184,7 @@ async function loadAll() {
         $("facing_deg").value = String(Math.round(Number(r.facing_deg) || 0) % 360);
         $("show_sweep").checked = !!r.show_sweep_line;
         if ($("show_tag_leaders")) $("show_tag_leaders").checked = r.show_tag_leaders !== false;
+        if ($("rim_target_style")) $("rim_target_style").value = r.rim_target_style || "plane";
         syncTagLeadersControl();
         $("show_precip").checked = r.show_precipitation !== false;
         if ($("show_wildfires")) $("show_wildfires").checked = !!r.show_wildfires;
@@ -1270,6 +1304,9 @@ async function loadAll() {
         if ($("use-adsbexchange-api")) {
             $("use-adsbexchange-api").checked = !!toggles.USE_ADSBEXCHANGE_API;
         }
+        if ($("use-stadia-maps")) {
+            $("use-stadia-maps").checked = toggles.USE_STADIA_MAPS !== false;
+        }
         const rso = keys.route_source_order || {};
         if ($("route_source_order")) {
             $("route_source_order").value = rso.ROUTE_SOURCE_ORDER || "";
@@ -1351,6 +1388,120 @@ function speedUnitFromSelect() {
     return selectedUnitPreset().split("_")[1] || "kph";
 }
 
+/** Convert km ↔ mi/nm/km for Follow radius fields (stored as km server-side). */
+function kmToDistanceUnit(km, units) {
+    const v = Number(km);
+    if (!Number.isFinite(v)) return 0;
+    if (units === "mi") return v / STATUTE_MILE_KM;
+    if (units === "nm") return v * NM_PER_KM;
+    return v;
+}
+
+function distanceUnitToKm(val, units) {
+    const v = Number(val);
+    if (!Number.isFinite(v)) return 0;
+    if (units === "mi") return v * STATUTE_MILE_KM;
+    if (units === "nm") return v / NM_PER_KM;
+    return v;
+}
+
+function formatDistanceAmount(km, units) {
+    const v = kmToDistanceUnit(km, units);
+    if (units === "km" && v >= 10) return String(Math.round(v));
+    if ((units === "mi" || units === "nm") && Math.abs(v - Math.round(v)) < 0.05) {
+        return String(Math.round(v));
+    }
+    return (Math.round(v * 100) / 100).toFixed(2).replace(/\.?0+$/, "") || "0";
+}
+
+function formatSpeedAmountFromKt(kt) {
+    const n = Number(kt) || 0;
+    const units = speedUnitFromSelect();
+    if (units === "mph") return `${Math.round(n * 1.15078)} mph`;
+    if (units === "kts") return `${Math.round(n)} kt`;
+    return `${Math.round(n * 1.852)} kph`;
+}
+
+const FOLLOW_DEFAULT_MIN_KM = 3.22;
+const FOLLOW_DEFAULT_MAX_KM = 120;
+let _followRadiusKm = {
+    min: FOLLOW_DEFAULT_MIN_KM,
+    max: FOLLOW_DEFAULT_MAX_KM,
+};
+let _followRadiusDisplayUnit = "km";
+
+function setFollowRadiusInputsFromKm(minKm, maxKm) {
+    _followRadiusKm.min = Number(minKm);
+    _followRadiusKm.max = Number(maxKm);
+    if (!Number.isFinite(_followRadiusKm.min)) _followRadiusKm.min = FOLLOW_DEFAULT_MIN_KM;
+    if (!Number.isFinite(_followRadiusKm.max)) _followRadiusKm.max = FOLLOW_DEFAULT_MAX_KM;
+    _followRadiusDisplayUnit = distanceUnitFromSelect();
+    const units = _followRadiusDisplayUnit;
+    const minEl = $("live_tracking_min_radius");
+    const maxEl = $("live_tracking_max_radius");
+    if (minEl) {
+        minEl.value = String(
+            Math.round(kmToDistanceUnit(_followRadiusKm.min, units) * 100) / 100
+        );
+    }
+    if (maxEl) {
+        maxEl.value = String(
+            Math.round(kmToDistanceUnit(_followRadiusKm.max, units) * 100) / 100
+        );
+    }
+    syncFollowRadiusUnitLabels();
+}
+
+function readFollowRadiusKmFromInputs() {
+    const units = _followRadiusDisplayUnit || distanceUnitFromSelect();
+    const minEl = $("live_tracking_min_radius");
+    const maxEl = $("live_tracking_max_radius");
+    if (minEl) {
+        _followRadiusKm.min = distanceUnitToKm(minEl.value, units);
+    }
+    if (maxEl) {
+        _followRadiusKm.max = distanceUnitToKm(maxEl.value, units);
+    }
+    return {
+        min: _followRadiusKm.min,
+        max: _followRadiusKm.max,
+    };
+}
+
+function syncFollowRadiusUnitLabels() {
+    const dist = distanceUnitFromSelect();
+    const minLabel = $("live_tracking_min_radius_label");
+    const maxLabel = $("live_tracking_max_radius_label");
+    const minHint = $("live_tracking_min_radius_hint");
+    const maxHint = $("live_tracking_max_radius_hint");
+    if (minLabel) minLabel.textContent = `Follow min radius (${dist})`;
+    if (maxLabel) maxLabel.textContent = `Follow max radius (${dist})`;
+    const taxiDist = formatDistanceAmount(FOLLOW_DEFAULT_MIN_KM, dist);
+    const defMin = formatDistanceAmount(FOLLOW_DEFAULT_MIN_KM, dist);
+    const defMax = formatDistanceAmount(FOLLOW_DEFAULT_MAX_KM, dist);
+    const taxiSpeed = formatSpeedAmountFromKt(50);
+    if (minHint) {
+        minHint.textContent =
+            `Floor for the speed-based zoom curve (not the taxi snap under ${taxiSpeed}, ` +
+            `which stays ~${taxiDist} ${dist}). Default ${defMin} ${dist}.`;
+    }
+    if (maxHint) {
+        maxHint.textContent =
+            `Ceiling for cruise / high-speed Follow zoom. Default ${defMax} ${dist}.`;
+    }
+}
+
+function onDistanceUnitsChanged() {
+    // Fields still show the previous unit's numbers until rewritten.
+    const prev = _followRadiusDisplayUnit || distanceUnitFromSelect();
+    const minEl = $("live_tracking_min_radius");
+    const maxEl = $("live_tracking_max_radius");
+    if (minEl) _followRadiusKm.min = distanceUnitToKm(minEl.value, prev);
+    if (maxEl) _followRadiusKm.max = distanceUnitToKm(maxEl.value, prev);
+    setFollowRadiusInputsFromKm(_followRadiusKm.min, _followRadiusKm.max);
+    syncMinSpeedUnitLabels();
+}
+
 function formatSpeedFloorFromKt(kt) {
     const n = Number(kt) || 0;
     if (n <= 0) return "Any (no floor)";
@@ -1406,6 +1557,7 @@ async function saveRadar() {
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,
                 show_tag_leaders: $("show_tag_leaders") ? $("show_tag_leaders").checked : true,
+                rim_target_style: $("rim_target_style") ? $("rim_target_style").value : "plane",
                 show_precipitation: $("show_precip").checked,
                 show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
                 show_earthquakes: $("show_earthquakes") ? $("show_earthquakes").checked : false,
@@ -1539,6 +1691,10 @@ async function savePositionSources() {
         const order = [...document.querySelectorAll("#position-source-list .drag-item")]
             .map((li) => li.dataset.source);
         const headingUp = $("live_map_heading_up") ? $("live_map_heading_up").checked : false;
+        const previewMin = $("live_tracking_preview_minutes")
+            ? Number($("live_tracking_preview_minutes").value)
+            : 5;
+        const radii = readFollowRadiusKmFromInputs();
         await jsonFetch("/api-keys", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1547,7 +1703,12 @@ async function savePositionSources() {
         await jsonFetch("/radar", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ live_map_heading_up: headingUp }),
+            body: JSON.stringify({
+                live_map_heading_up: headingUp,
+                live_tracking_preview_minutes: previewMin,
+                live_tracking_min_radius_km: radii.min,
+                live_tracking_max_radius_km: radii.max,
+            }),
         });
         // Show the effective/parsed order after save (same PR #69 review
         // feedback applied here too: confirm what was actually persisted,
@@ -1586,6 +1747,7 @@ async function saveAndReloadSettings() {
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,
                 show_tag_leaders: $("show_tag_leaders") ? $("show_tag_leaders").checked : true,
+                rim_target_style: $("rim_target_style") ? $("rim_target_style").value : "plane",
                 show_precipitation: $("show_precip").checked,
                 show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
                 show_earthquakes: $("show_earthquakes") ? $("show_earthquakes").checked : false,
@@ -1842,6 +2004,7 @@ async function saveApiKeys(restart) {
                 opensky_api_client_secret: $("opensky-client-secret") ? $("opensky-client-secret").value : "",
                 adsbexchange_api_key: $("adsbexchange-key") ? $("adsbexchange-key").value : "",
                 firms_map_key: $("firms-key") ? $("firms-key").value : "",
+                stadia_maps_api_key: $("stadia-key") ? $("stadia-key").value : "",
                 use_fr24_api: $("use-fr24-api").checked,
                 use_tomorrow_weather: $("use-tomorrow-weather").checked,
                 use_airlabs_api: $("use-airlabs-api").checked,
@@ -1849,6 +2012,7 @@ async function saveApiKeys(restart) {
                 use_flightaware_api: $("use-flightaware-api") ? $("use-flightaware-api").checked : false,
                 use_opensky_api: $("use-opensky-api") ? $("use-opensky-api").checked : true,
                 use_adsbexchange_api: $("use-adsbexchange-api") ? $("use-adsbexchange-api").checked : false,
+                use_stadia_maps: $("use-stadia-maps") ? $("use-stadia-maps").checked : true,
                 restart: !!restart,
             }),
         });
@@ -1861,6 +2025,7 @@ async function saveApiKeys(restart) {
         if ($("opensky-client-secret")) $("opensky-client-secret").value = "";
         if ($("adsbexchange-key")) $("adsbexchange-key").value = "";
         if ($("firms-key")) $("firms-key").value = "";
+        if ($("stadia-key")) $("stadia-key").value = "";
         if (data.keys) applyKeyHints(data.keys);
         showStatus("api-keys-status", data.message || "API keys saved.");
     } catch (e) {
@@ -2567,7 +2732,13 @@ if ($("btn-earthquake-voice-preview")) {
     });
 }
 if ($("vfr_opacity")) $("vfr_opacity").addEventListener("input", syncVfrOpacityLabel);
-if ($("dist_units")) $("dist_units").addEventListener("change", syncMinSpeedUnitLabels);
+if ($("dist_units")) $("dist_units").addEventListener("change", onDistanceUnitsChanged);
+if ($("live_tracking_min_radius")) {
+    $("live_tracking_min_radius").addEventListener("change", readFollowRadiusKmFromInputs);
+}
+if ($("live_tracking_max_radius")) {
+    $("live_tracking_max_radius").addEventListener("change", readFollowRadiusKmFromInputs);
+}
 if ($("atc_volume")) {
     $("atc_volume").addEventListener("input", onAtcVolumeInput);
     $("atc_volume").addEventListener("change", onAtcVolumeChange);

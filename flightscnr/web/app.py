@@ -1105,6 +1105,7 @@ def radar_json():
             "facing_deg": settings.facing_deg(),
             "show_sweep_line": settings.show_sweep_line(),
             "show_tag_leaders": settings.tag_leaders_preferred(),
+            "rim_target_style": settings.rim_target_style(),
             "show_precipitation": settings.show_precipitation(),
             "show_wildfires": settings.show_wildfires(),
             "show_earthquakes": settings.show_earthquakes(),
@@ -1121,6 +1122,9 @@ def radar_json():
             "vfr_map_opacity": settings.vfr_map_opacity(),
             "dump1090": dump1090_portal_status(),
             "live_map_heading_up": settings.live_map_heading_up(),
+            "live_tracking_preview_minutes": settings.live_tracking_preview_minutes(),
+            "live_tracking_min_radius_km": settings.live_tracking_min_radius_km(),
+            "live_tracking_max_radius_km": settings.live_tracking_max_radius_km(),
         }
     )
 
@@ -1212,6 +1216,8 @@ def radar_save():
         settings.set_show_sweep_line(bool(data.get("show_sweep_line")))
     if "show_tag_leaders" in data:
         settings.set_show_tag_leaders(bool(data.get("show_tag_leaders")))
+    if "rim_target_style" in data:
+        settings.set_rim_target_style(str(data.get("rim_target_style") or ""))
     if "show_precipitation" in data:
         settings.set_show_precipitation(bool(data.get("show_precipitation")))
         rainviewer_overlay.invalidate()
@@ -1282,6 +1288,18 @@ def radar_save():
         )
     if "live_map_heading_up" in data:
         settings.set_live_map_heading_up(bool(data.get("live_map_heading_up")))
+    if "live_tracking_preview_minutes" in data:
+        settings.set_live_tracking_preview_minutes(
+            data.get("live_tracking_preview_minutes")
+        )
+    if "live_tracking_min_radius_km" in data:
+        settings.set_live_tracking_min_radius_km(
+            data.get("live_tracking_min_radius_km")
+        )
+    if "live_tracking_max_radius_km" in data:
+        settings.set_live_tracking_max_radius_km(
+            data.get("live_tracking_max_radius_km")
+        )
     settings.request_reload()
     return jsonify({"ok": True, "message": "Radar settings saved."})
 

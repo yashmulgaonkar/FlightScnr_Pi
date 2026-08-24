@@ -23,6 +23,22 @@ os.environ.setdefault("TOMORROW_API_KEY", "test")
 
 
 class TestRadiusAndBBox(unittest.TestCase):
+    def setUp(self):
+        # Isolate from portal Follow-zoom prefs left by other tests.
+        self._settings_patch = mock.patch(
+            "utilities.position_source._settings",
+            return_value=(
+                ("dump1090", "adsbfi", "opensky", "adsbexchange", "fr24"),
+                5.0,
+                3.22,
+                120.0,
+            ),
+        )
+        self._settings_patch.start()
+
+    def tearDown(self):
+        self._settings_patch.stop()
+
     def test_radius_floors_without_speed(self):
         from utilities import position_source
 

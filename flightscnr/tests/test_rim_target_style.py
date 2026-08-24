@@ -46,10 +46,18 @@ class TestRimStyleParsing(unittest.TestCase):
 
 
 class TestRimTargetStyle(unittest.TestCase):
-    def test_reads_the_validated_config_value(self):
-        for value in config.RIM_STYLES:
-            with mock.patch.object(config, "RADAR_RIM_STYLE", value):
-                self.assertEqual(settings.rim_target_style(), value)
+    def test_set_and_read_round_trip(self):
+        for value in settings.RIM_TARGET_STYLES:
+            settings.set_rim_target_style(value)
+            self.assertEqual(settings.rim_target_style(), value)
+            self.assertEqual(
+                settings.rim_target_style_label(),
+                settings.RIM_TARGET_STYLE_LABELS[value],
+            )
+
+    def test_invalid_falls_back_to_plane(self):
+        settings.set_rim_target_style("wobble")
+        self.assertEqual(settings.rim_target_style(), "plane")
 
     def test_config_default_is_a_valid_style(self):
         self.assertIn(config.RADAR_RIM_STYLE, config.RIM_STYLES)

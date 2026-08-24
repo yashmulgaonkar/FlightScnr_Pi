@@ -80,6 +80,7 @@ DISPLAY_ACTIONS = (
     "sweep",
     "tag_leaders",
     "color_by_altitude",
+    "rim_style",
     "units",
     "range",
     "rotate",
@@ -191,6 +192,7 @@ _LIST_PICKER_TITLES = {
     "units": "Units",
     "rotate": "Rotate screen",
     "aircraft_tag": "Traffic labels",
+    "rim_style": "Rim targets",
     "min_height": "Min altitude",
     "max_height": "Max altitude",
     "aircraft_min_speed": "Min aircraft speed",
@@ -452,6 +454,12 @@ def _build_settings_picker_items(kind: str) -> list[dict]:
             settings.TRAFFIC_LABEL_MODES,
             settings.traffic_labels(),
             lambda mode: settings.TRAFFIC_LABEL_LABELS.get(mode, str(mode)),
+        )
+    if kind == "rim_style":
+        return _enum_picker_items(
+            settings.RIM_TARGET_STYLES,
+            settings.rim_target_style(),
+            lambda style: settings.RIM_TARGET_STYLE_LABELS.get(style, str(style)),
         )
     if kind == "min_height":
         return _enum_picker_items(
@@ -1817,6 +1825,7 @@ def _display_row_labels() -> list[str]:
             else "Tag Leaders (labels off)"
         ),
         "Color by Altitude",
+        f"Rim Targets › {settings.rim_target_style_label()}",
         f"Units › {settings.unit_preset_label()}",
         f"Radar Range › {settings.scale_label()}",
         f"Rotate Screen › {settings.display_rotation()}°",

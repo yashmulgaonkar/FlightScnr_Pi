@@ -1632,6 +1632,8 @@ class RoundTouchDisplay:
         elif action == "color_by_altitude":
             settings.toggle_color_by_altitude()
             radar.invalidate_frame_layer()
+        elif action == "rim_style":
+            self._open_atc_picker("rim_style")
         elif action == "precipitation":
             settings.toggle_show_precipitation()
             rainviewer_overlay.invalidate()
@@ -1875,6 +1877,10 @@ class RoundTouchDisplay:
             return
         if kind == "aircraft_tag":
             settings.set_traffic_labels(choice)
+            radar.invalidate_frame_layer()
+            return
+        if kind == "rim_style":
+            settings.set_rim_target_style(choice)
             radar.invalidate_frame_layer()
             return
         if kind == "min_height":
