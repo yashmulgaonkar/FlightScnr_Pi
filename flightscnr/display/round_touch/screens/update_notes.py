@@ -24,7 +24,7 @@ def footer_labels() -> tuple[str, ...]:
 
 
 def tap_footer_action(x: int, y: int) -> str | None:
-    idx = nav.tap_footer_button(x, y, len(FOOTER_BUTTONS))
+    idx = nav.tap_footer_button(x, y, len(FOOTER_BUTTONS), kinds=list(FOOTER_BUTTONS))
     if idx is None:
         return None
     return FOOTER_BUTTONS[idx]

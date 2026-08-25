@@ -296,8 +296,13 @@ def footer_button_rects(
     y_offset: int = 0,
     button_size: int | None = None,
     button_gap: int | None = None,
+    kinds: list[str] | None = None,
 ) -> list[pygame.Rect]:
-    """Equal-width footer tap targets, left to right."""
+    """Footer tap targets, left to right, centered as a group.
+
+    When ``kinds`` includes text actions (tonight/dismiss), those slots hug the
+    label width so the row centers correctly next to icon buttons like radar.
+    """
     if button_count <= 0:
         return []
     top, band_h = _footer_band(y_offset, button_size)
@@ -306,6 +311,34 @@ def footer_button_rects(
     y = top + (band_h - btn_h) // 2
     max_w = _max_text_width(y + btn_h // 2, btn_h)
     total_gap = gap * max(0, button_count - 1)
+
+    kind_list = list(kinds) if kinds and len(kinds) == button_count else None
+    if kind_list and any(k in ("tonight", "dismiss") for k in kind_list):
+        label_font = draw.load_font(theme.s(13), bold=True)
+        pad_x = theme.s(12)
+        widths: list[int] = []
+        for kind in kind_list:
+            if kind in ("tonight", "dismiss"):
+                label = "TONIGHT" if kind == "tonight" else "DISMISS"
+                tw = label_font.size(label)[0] + pad_x * 2
+                widths.append(max(theme.s(64), min(tw, theme.s(100))))
+            else:
+                # Square icon slot (radar / pin / …)
+                widths.append(min(btn_h, theme.s(56)))
+        total_w = sum(widths) + total_gap
+        if total_w > max_w and total_w > 0:
+            scale = (max_w - total_gap) / sum(widths)
+            widths = [max(theme.s(40), int(w * scale)) for w in widths]
+            total_w = sum(widths) + total_gap
+        x0 = theme.CENTER_X - total_w // 2
+        rects = []
+        x = x0
+        for w in widths:
+            ry = top + (band_h - btn_h) // 2
+            rects.append(pygame.Rect(x, ry, w, btn_h))
+            x += w + gap
+        return rects
+
     if button_size:
         btn_w = btn_h
         total_w = btn_w * button_count + total_gap
@@ -429,6 +462,23 @@ def _draw_footer_button(
         surface.blit(png, png.get_rect(center=rect.center))
         return
 
+    # Update-notes actions: outlined text pills (no fill / icons).
+    if kind in ("tonight", "dismiss"):
+        label_font = draw.load_font(theme.s(13), bold=True)
+        label = "TONIGHT" if kind == "tonight" else "DISMISS"
+        text = draw.fit_text(label, label_font, rect.width - theme.s(8))
+        rendered = label_font.render(text, True, theme.SWEEP)
+        radius = max(theme.s(6), rect.height // 4)
+        pygame.draw.rect(
+            surface,
+            theme.SWEEP,
+            rect,
+            width=max(1, theme.s(2)),
+            border_radius=radius,
+        )
+        surface.blit(rendered, rendered.get_rect(center=rect.center))
+        return
+
     accent = kind == "radar" or (kind == "pin" and active)
     _draw_round_button(surface, rect, accent=accent)
     icon_color = _BTN_ICON_ACCENT if accent else _BTN_ICON
@@ -438,8 +488,6 @@ def _draw_footer_button(
         "next": "NEXT",
         "radar": "RADAR",
         "pin": "PIN IT",
-        "tonight": "TONIGHT",
-        "dismiss": "DISMISS",
     }
     label = labels.get(kind, kind.upper())
 
@@ -459,25 +507,6 @@ def _draw_footer_button(
             theme.SWEEP,
             active=active,
         )
-    elif kind == "tonight":
-        pygame.draw.circle(surface, icon_color, (rect.centerx, icon_cy), max(4, theme.s(6)), max(1, theme.s(2)))
-    elif kind == "dismiss":
-        inset = max(3, theme.s(4))
-        x_w = max(2, theme.s(2))
-        pygame.draw.line(
-            surface,
-            icon_color,
-            (rect.centerx - inset, icon_cy - inset),
-            (rect.centerx + inset, icon_cy + inset),
-            x_w,
-        )
-        pygame.draw.line(
-            surface,
-            icon_color,
-            (rect.centerx + inset, icon_cy - inset),
-            (rect.centerx - inset, icon_cy + inset),
-            x_w,
-        )
 
     label_color = theme.SWEEP if accent else theme.HINT
     text = draw.fit_text(label, label_font, rect.width - theme.s(6))
@@ -494,7 +523,7 @@ def draw_footer_buttons(
     button_gap: int | None = None,
     pin_active: bool = False,
 ):
-    """Draw tappable footer buttons. Kinds: prev, next, radar, pin."""
+    """Draw tappable footer buttons. Kinds: prev, next, radar, pin, tonight, dismiss."""
     if not kinds:
         return
     rects = footer_button_rects(
@@ -502,6 +531,7 @@ def draw_footer_buttons(
         y_offset=y_offset,
         button_size=button_size,
         button_gap=button_gap,
+        kinds=kinds,
     )
     for kind, rect in zip(kinds, rects):
         _draw_footer_button(
@@ -520,6 +550,7 @@ def tap_footer_button(
     y_offset: int = 0,
     button_size: int | None = None,
     button_gap: int | None = None,
+    kinds: list[str] | None = None,
 ) -> int | None:
     """Return tapped footer button index (0=left), or None."""
     rects = footer_button_rects(
@@ -527,6 +558,7 @@ def tap_footer_button(
         y_offset=y_offset,
         button_size=button_size,
         button_gap=button_gap,
+        kinds=kinds,
     )
     for i, rect in enumerate(rects):
         if rect.collidepoint(x, y):
