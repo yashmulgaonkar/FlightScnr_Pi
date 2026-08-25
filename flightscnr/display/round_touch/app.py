@@ -3825,7 +3825,19 @@ class RoundTouchDisplay:
         elif tap and self.screen == SCREEN_UPDATE_NOTES:
             self._note_activity()
             action = update_notes.tap_footer_action(tap[0], tap[1])
-            if action == "tonight":
+            if action == "now":
+                try:
+                    from utilities.updater import start_update, update_running
+
+                    if not update_running():
+                        start_update()
+                    update_bubble.invalidate_cache()
+                except Exception:
+                    pass
+                self._return_to_radar()
+                radar.invalidate_frame_layer()
+                self._safe_draw()
+            elif action == "tonight":
                 try:
                     from utilities.updater import schedule_update_tonight, update_is_scheduled
 

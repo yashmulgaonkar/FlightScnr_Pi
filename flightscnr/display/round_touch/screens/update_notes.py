@@ -14,7 +14,7 @@ from __future__ import annotations
 from display.round_touch import draw, nav, theme
 from display.round_touch.screens import common
 
-FOOTER_BUTTONS = ("tonight", "dismiss", "radar")
+FOOTER_BUTTONS = ("now", "tonight", "dismiss", "radar")
 
 _UNAVAILABLE = "Release notes unavailable"
 
@@ -57,7 +57,7 @@ def draw_update_notes(surface, scroll_offset: int = 0) -> int:
     title_font = draw.load_font(theme.s(16), bold=True)
     body_font = draw.load_font(theme.s(13))
     chrome_top = nav.content_top_y(has_dots=False)
-    bottom = nav.content_bottom_y()
+    bottom = nav.content_bottom_y(footer_rows=2)
     line_gap = theme.s(2)
     para_gap = theme.s(8)
 

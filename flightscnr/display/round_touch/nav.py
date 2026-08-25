@@ -71,14 +71,31 @@ def _footer_button_height() -> int:
     return theme.s(28)
 
 
-def _footer_band(y_offset: int = 0, button_height: int | None = None) -> tuple[int, int]:
-    """Return (top_y, band_height) for the footer button row."""
+def _footer_band(
+    y_offset: int = 0,
+    button_height: int | None = None,
+    *,
+    rows: int = 1,
+) -> tuple[int, int]:
+    """Return (top_y, band_height) for the footer button area.
+
+    Multi-row footers grow upward so the bottom stays near the dial rim.
+    """
     btn_h = button_height or _footer_button_height()
     pad = theme.s(6)
-    # Lower on the round dial so detail content (photos + telemetry) clears HDG.
-    center_y = theme.CENTER_Y + int(theme.VISIBLE_RADIUS * 0.71) + y_offset
-    top = center_y - btn_h // 2 - pad // 2
-    return top, btn_h + pad
+    row_gap = theme.s(8) if rows > 1 else 0
+    rows = max(1, int(rows))
+    band_h = rows * btn_h + (rows - 1) * row_gap + pad
+    # Lower on the round dial so detail content clears HDG / rim.
+    bottom_y = (
+        theme.CENTER_Y
+        + int(theme.VISIBLE_RADIUS * 0.71)
+        + y_offset
+        + btn_h // 2
+        + pad // 2
+    )
+    top = bottom_y - band_h
+    return top, band_h
 
 
 def _max_text_width(y: int, font_height: int) -> int:
@@ -107,8 +124,8 @@ def content_top_y(has_dots: bool = False) -> int:
     return _top_y() + theme.s(36)
 
 
-def content_bottom_y(footer_y_offset: int = 0) -> int:
-    top, _ = _footer_band(footer_y_offset)
+def content_bottom_y(footer_y_offset: int = 0, *, footer_rows: int = 1) -> int:
+    top, _ = _footer_band(footer_y_offset, rows=footer_rows)
     return top - theme.s(10)
 
 
@@ -298,42 +315,93 @@ def footer_button_rects(
     button_gap: int | None = None,
     kinds: list[str] | None = None,
 ) -> list[pygame.Rect]:
-    """Footer tap targets, left to right, centered as a group.
-
-    When ``kinds`` includes text actions (tonight/dismiss), those slots hug the
-    label width so the row centers correctly next to icon buttons like radar.
-    """
+    """Footer tap targets, left to right (or two rows for update-notes actions)."""
     if button_count <= 0:
         return []
-    top, band_h = _footer_band(y_offset, button_size)
     btn_h = button_size or _footer_button_height()
     gap = button_gap if button_gap is not None else theme.s(10)
+    row_gap = theme.s(8)
+
+    _TEXT_FOOTER = ("now", "tonight", "dismiss")
+    _TEXT_LABELS = {"now": "NOW", "tonight": "TONIGHT", "dismiss": "DISMISS"}
+
+    kind_list = list(kinds) if kinds and len(kinds) == button_count else None
+
+    # Update notes: two rows so labels never truncate
+    #   NOW      TONIGHT
+    #   DISMISS  (radar)
+    if (
+        kind_list
+        and "now" in kind_list
+        and "tonight" in kind_list
+        and "dismiss" in kind_list
+    ):
+        top, _ = _footer_band(y_offset, button_size, rows=2)
+        label_font = draw.load_font(theme.s(13), bold=True)
+        pad_x = theme.s(10)
+
+        def _text_w(label: str) -> int:
+            return max(theme.s(56), label_font.size(label)[0] + pad_x * 2)
+
+        radar_w = min(btn_h, theme.s(56))
+        widths = {
+            "now": _text_w("NOW"),
+            "tonight": _text_w("TONIGHT"),
+            "dismiss": _text_w("DISMISS"),
+            "radar": radar_w,
+        }
+        y0 = top + theme.s(3)
+        y1 = y0 + btn_h + row_gap
+        max_w0 = _max_text_width(y0 + btn_h // 2, btn_h)
+        max_w1 = _max_text_width(y1 + btn_h // 2, btn_h)
+
+        row0 = [k for k in ("now", "tonight") if k in kind_list]
+        row1 = [k for k in kind_list if k not in row0]
+
+        def _row_rects(row_kinds: list[str], y: int, max_w: int) -> dict[str, pygame.Rect]:
+            ws = [widths.get(k, btn_h) for k in row_kinds]
+            total = sum(ws) + gap * max(0, len(ws) - 1)
+            if total > max_w and sum(ws) > 0:
+                scale = (max_w - gap * max(0, len(ws) - 1)) / sum(ws)
+                ws = [max(theme.s(44), int(w * scale)) for w in ws]
+                total = sum(ws) + gap * max(0, len(ws) - 1)
+            x = theme.CENTER_X - total // 2
+            out: dict[str, pygame.Rect] = {}
+            for k, w in zip(row_kinds, ws):
+                out[k] = pygame.Rect(x, y, w, btn_h)
+                x += w + gap
+            return out
+
+        by_kind = {}
+        by_kind.update(_row_rects(row0, y0, max_w0))
+        by_kind.update(_row_rects(row1, y1, max_w1))
+        return [by_kind[k] for k in kind_list]
+
+    top, band_h = _footer_band(y_offset, button_size, rows=1)
     y = top + (band_h - btn_h) // 2
     max_w = _max_text_width(y + btn_h // 2, btn_h)
     total_gap = gap * max(0, button_count - 1)
 
-    kind_list = list(kinds) if kinds and len(kinds) == button_count else None
-    if kind_list and any(k in ("tonight", "dismiss") for k in kind_list):
+    if kind_list and any(k in _TEXT_FOOTER for k in kind_list):
         label_font = draw.load_font(theme.s(13), bold=True)
-        pad_x = theme.s(12)
-        widths: list[int] = []
+        pad_x = theme.s(10)
+        widths_list: list[int] = []
         for kind in kind_list:
-            if kind in ("tonight", "dismiss"):
-                label = "TONIGHT" if kind == "tonight" else "DISMISS"
+            if kind in _TEXT_FOOTER:
+                label = _TEXT_LABELS[kind]
                 tw = label_font.size(label)[0] + pad_x * 2
-                widths.append(max(theme.s(64), min(tw, theme.s(100))))
+                widths_list.append(max(theme.s(52), min(tw, theme.s(96))))
             else:
-                # Square icon slot (radar / pin / …)
-                widths.append(min(btn_h, theme.s(56)))
-        total_w = sum(widths) + total_gap
+                widths_list.append(min(btn_h, theme.s(56)))
+        total_w = sum(widths_list) + total_gap
         if total_w > max_w and total_w > 0:
-            scale = (max_w - total_gap) / sum(widths)
-            widths = [max(theme.s(40), int(w * scale)) for w in widths]
-            total_w = sum(widths) + total_gap
+            scale = (max_w - total_gap) / sum(widths_list)
+            widths_list = [max(theme.s(40), int(w * scale)) for w in widths_list]
+            total_w = sum(widths_list) + total_gap
         x0 = theme.CENTER_X - total_w // 2
         rects = []
         x = x0
-        for w in widths:
+        for w in widths_list:
             ry = top + (band_h - btn_h) // 2
             rects.append(pygame.Rect(x, ry, w, btn_h))
             x += w + gap
@@ -463,10 +531,15 @@ def _draw_footer_button(
         return
 
     # Update-notes actions: outlined text pills (no fill / icons).
-    if kind in ("tonight", "dismiss"):
+    if kind in ("now", "tonight", "dismiss"):
         label_font = draw.load_font(theme.s(13), bold=True)
-        label = "TONIGHT" if kind == "tonight" else "DISMISS"
-        text = draw.fit_text(label, label_font, rect.width - theme.s(8))
+        labels = {"now": "NOW", "tonight": "TONIGHT", "dismiss": "DISMISS"}
+        label = labels[kind]
+        # Prefer full label; only clip if the slot is still too narrow.
+        if label_font.size(label)[0] <= rect.width - theme.s(8):
+            text = label
+        else:
+            text = draw.fit_text(label, label_font, rect.width - theme.s(8))
         rendered = label_font.render(text, True, theme.SWEEP)
         radius = max(theme.s(6), rect.height // 4)
         pygame.draw.rect(
@@ -523,7 +596,7 @@ def draw_footer_buttons(
     button_gap: int | None = None,
     pin_active: bool = False,
 ):
-    """Draw tappable footer buttons. Kinds: prev, next, radar, pin, tonight, dismiss."""
+    """Draw tappable footer buttons. Kinds: prev, next, radar, pin, now, tonight, dismiss."""
     if not kinds:
         return
     rects = footer_button_rects(
