@@ -113,6 +113,12 @@ ATC_VOLUME_MAX = 100
 RADAR_HUD_OPACITY_MIN = 0
 RADAR_HUD_OPACITY_MAX = 100
 RADAR_HUD_POSITIONS = ("top", "bottom")
+DEFAULT_CLOCKS = ("digital", "analog", "night")
+DEFAULT_CLOCK_LABELS = {
+    "digital": "Digital",
+    "analog": "Analog",
+    "night": "Analog (altimeter, night)",
+}
 HOURLY_CHIME_VOLUME_MIN = 0
 HOURLY_CHIME_VOLUME_MAX = 100
 # Shared 0–100 scale for tracked-enter / military alert SFX.
@@ -312,6 +318,7 @@ _defaults = {
     "min_height_ft": 1000,
     "max_height_ft": 100000,
     "auto_idle_clock": True,
+    "default_clock": "digital",
     "flight_detail_timeout_s": 20,
     "clock_timeout_s": 10,
     # aircraft | marine | both — what the radar shows
@@ -813,6 +820,12 @@ def _load():
         migrated = True
     else:
         state["radar_hud_position"] = pos
+    clock_face = str(state.get("default_clock") or "digital").strip().lower()
+    if clock_face not in DEFAULT_CLOCKS:
+        state["default_clock"] = "digital"
+        migrated = True
+    else:
+        state["default_clock"] = clock_face
     try:
         if "radar_hud_opacity" not in data:
             state["radar_hud_opacity"] = 72
@@ -1062,6 +1075,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("max_height_ft"),
         state.get("brightness_percent"),
         state.get("auto_idle_clock"),
+        str(state.get("default_clock") or "digital"),
         state.get("flight_detail_timeout_s"),
         state.get("clock_timeout_s"),
         state.get("clock_12hr"),
@@ -2081,6 +2095,30 @@ def toggle_auto_idle_clock():
 def set_auto_idle_clock_enabled(enabled: bool):
     _state["auto_idle_clock"] = bool(enabled)
     _save(_state)
+
+
+def default_clock() -> str:
+    face = str(_state.get("default_clock") or "digital").strip().lower()
+    return face if face in DEFAULT_CLOCKS else "digital"
+
+
+def default_clock_label() -> str:
+    return DEFAULT_CLOCK_LABELS.get(default_clock(), "Digital")
+
+
+def set_default_clock(face: str) -> str:
+    value = str(face or "digital").strip().lower()
+    if value not in DEFAULT_CLOCKS:
+        value = "digital"
+    _state["default_clock"] = value
+    _save(_state)
+    return value
+
+
+def toggle_default_clock() -> str:
+    order = list(DEFAULT_CLOCKS)
+    i = order.index(default_clock()) if default_clock() in order else 0
+    return set_default_clock(order[(i + 1) % len(order)])
 
 
 def flight_detail_timeout_s() -> int:

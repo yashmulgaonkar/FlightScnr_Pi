@@ -870,6 +870,7 @@ def display_json():
             "auto_idle_clock": settings.auto_idle_clock_enabled(),
             "display_rotation": settings.display_rotation(),
             "clock_12hr": settings.use_12hr_clock(),
+            "default_clock": settings.default_clock(),
             "radar_hud_enabled": settings.radar_hud_enabled(),
             "radar_hud_position": settings.radar_hud_position(),
             "radar_hud_opacity": settings.radar_hud_opacity(),
@@ -906,6 +907,8 @@ def display_save():
         settings.set_display_rotation(data.get("display_rotation"))
     if "clock_12hr" in data:
         settings.set_use_12hr_clock(bool(data.get("clock_12hr")))
+    if "default_clock" in data:
+        settings.set_default_clock(str(data.get("default_clock") or "digital"))
     if "radar_hud_enabled" in data:
         settings.set_radar_hud_enabled(bool(data.get("radar_hud_enabled")))
     if "radar_hud_position" in data:
@@ -958,6 +961,7 @@ def display_save():
             "auto_idle_clock": settings.auto_idle_clock_enabled(),
             "display_rotation": settings.display_rotation(),
             "clock_12hr": settings.use_12hr_clock(),
+            "default_clock": settings.default_clock(),
             "radar_hud_enabled": settings.radar_hud_enabled(),
             "radar_hud_position": settings.radar_hud_position(),
             "radar_hud_opacity": settings.radar_hud_opacity(),

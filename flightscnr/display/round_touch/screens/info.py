@@ -119,6 +119,7 @@ LAYERS_ACTIONS = (
     "airport_icons",
     "ground_vehicles",
     "idle_clock",
+    "default_clock",
     "alert_military",
     "alert_emergency",
     "alert_hide_non_alerted",
@@ -180,6 +181,7 @@ LIST_PICKER_KINDS = frozenset(
         "quiet_start",
         "quiet_end",
         "hud_position",
+        "default_clock",
         "hud_dark",
     }
 )
@@ -202,6 +204,7 @@ _LIST_PICKER_TITLES = {
     "quiet_start": "Quiet start",
     "quiet_end": "Quiet end",
     "hud_position": "Clock position",
+    "default_clock": "Default clock",
     "hud_dark": "HUD style",
 }
 _ATC_PICKER_TITLES = _LIST_PICKER_TITLES
@@ -516,6 +519,12 @@ def _build_settings_picker_items(kind: str) -> list[dict]:
             settings.RADAR_HUD_POSITIONS,
             settings.radar_hud_position(),
             lambda pos: str(pos).title(),
+        )
+    if kind == "default_clock":
+        return _enum_picker_items(
+            settings.DEFAULT_CLOCKS,
+            settings.default_clock(),
+            lambda face: settings.DEFAULT_CLOCK_LABELS.get(face, str(face).title()),
         )
     if kind == "hud_dark":
         current = "dark" if settings.radar_hud_dark() else "light"
@@ -1876,6 +1885,7 @@ def _layers_row_labels() -> list[str]:
         "Show Airport Icons",
         "Show Ground Vehicles",
         "Auto Idle Clock",
+        f"Default Clock › {settings.default_clock_label()}",
         "Alert on military aircraft",
         "Alert on emergency squawk (7700/7600/7500)",
         "Hide non-alerted aircraft on radar",
