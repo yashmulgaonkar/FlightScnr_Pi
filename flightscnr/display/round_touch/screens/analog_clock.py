@@ -9,7 +9,7 @@
 
 """Altimeter-style analog clock — right of the digital clock (swipe left).
 
-Day face sits beside digital; swipe left again for a night-vision red wash.
+Day face sits beside digital; swipe left again for night-vision, then Flieger.
 """
 
 from __future__ import annotations

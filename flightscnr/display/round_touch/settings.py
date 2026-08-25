@@ -113,11 +113,12 @@ ATC_VOLUME_MAX = 100
 RADAR_HUD_OPACITY_MIN = 0
 RADAR_HUD_OPACITY_MAX = 100
 RADAR_HUD_POSITIONS = ("top", "bottom")
-DEFAULT_CLOCKS = ("digital", "analog", "night")
+DEFAULT_CLOCKS = ("digital", "analog", "night", "flieger")
 DEFAULT_CLOCK_LABELS = {
     "digital": "Digital",
     "analog": "Analog",
     "night": "Analog (altimeter, night)",
+    "flieger": "Flieger chronograph",
 }
 HOURLY_CHIME_VOLUME_MIN = 0
 HOURLY_CHIME_VOLUME_MAX = 100
