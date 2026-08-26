@@ -83,18 +83,19 @@ def _red_seconds_hand(
     angle_rad: float,
     scale: float,
 ) -> None:
+    # Same silhouette as before, ~75% width (length unchanged).
     black_local = [
-        (-0.012 * scale, -0.08 * scale),
-        (0.012 * scale, -0.08 * scale),
-        (0.012 * scale, 0.02 * scale),
-        (-0.012 * scale, 0.02 * scale),
+        (-0.009 * scale, -0.08 * scale),
+        (0.009 * scale, -0.08 * scale),
+        (0.009 * scale, 0.02 * scale),
+        (-0.009 * scale, 0.02 * scale),
     ]
     red_local = [
-        (-0.015 * scale, 0.035 * scale),
-        (-0.04 * scale, 0.08 * scale),
+        (-0.011 * scale, 0.035 * scale),
+        (-0.03 * scale, 0.08 * scale),
         (0.0, 0.17 * scale),
-        (0.04 * scale, 0.08 * scale),
-        (0.015 * scale, 0.035 * scale),
+        (0.03 * scale, 0.08 * scale),
+        (0.011 * scale, 0.035 * scale),
     ]
     pygame.draw.polygon(surface, (17, 17, 17), _rotate(black_local, cx, cy, angle_rad))
     pygame.draw.polygon(surface, _RED, _rotate(red_local, cx, cy, angle_rad))
@@ -110,9 +111,11 @@ def _hour_bar(
     dial_r: float,
     w: float,
     h: float,
+    *,
+    radial: float = 0.78,
 ) -> None:
     angle = math.radians(hour * 30)
-    rcx, rcy = _pt(cx, cy, dial_r * 0.78, angle)
+    rcx, rcy = _pt(cx, cy, dial_r * radial, angle)
     cos_a = math.sin(angle)
     sin_a = -math.cos(angle)
     tx, ty = -sin_a, cos_a
@@ -151,18 +154,17 @@ def _draw_seconds_subdial(
     label_font: pygame.font.Font,
 ) -> None:
     _draw_well(surface, cx, cy, r)
-    for i in range(60):
+    # One tick every 5 seconds (12 ticks total).
+    for i in range(0, 60, 5):
         ang = math.radians(i * 6)
-        major = i % 5 == 0
-        r_in = r * (0.82 if major else 0.88)
-        p0 = _pt(cx, cy, r_in, ang)
+        p0 = _pt(cx, cy, r * 0.82, ang)
         p1 = _pt(cx, cy, r * 0.98, ang)
         pygame.draw.line(
             surface,
             _INK,
             (int(p0[0]), int(p0[1])),
             (int(p1[0]), int(p1[1])),
-            max(1, theme.s(2 if major else 1)),
+            max(1, theme.s(2)),
         )
     for text, ang_deg in (("20", 120.0), ("40", 240.0), ("60", 0.0)):
         px, py = _pt(cx, cy, r * 0.52, math.radians(ang_deg))
@@ -186,18 +188,20 @@ def _build_static(cx: float, cy: float, dial_r: float) -> pygame.Surface:
 
     pygame.draw.circle(surf, (17, 17, 17), (int(cx), int(cy)), int(dial_r), max(2, theme.s(2)))
 
-    # Minute ticks only (60). Skip under the 12 triangle tip and Flieger dots.
+    # Minute ticks (60). Skip hour marks entirely — chunky bars / 12 triangle
+    # own those positions. Also skip under the 12 triangle tip and Flieger dots.
     for i in range(60):
-        if i in (0, 1, 59):
+        if i % 5 == 0 or i in (1, 59):
             continue
         ang = math.radians(i * 6)
-        major = i % 5 == 0
-        r_in = dial_r * (0.88 if major else 0.925)
-        lw = max(2, theme.s(3)) if major else max(1, theme.s(1))
-        p0 = _pt(cx, cy, r_in, ang)
+        p0 = _pt(cx, cy, dial_r * 0.925, ang)
         p1 = _pt(cx, cy, dial_r * 0.985, ang)
         pygame.draw.line(
-            surf, _INK, (int(p0[0]), int(p0[1])), (int(p1[0]), int(p1[1])), lw
+            surf,
+            _INK,
+            (int(p0[0]), int(p0[1])),
+            (int(p1[0]), int(p1[1])),
+            max(1, theme.s(1)),
         )
 
     # 12 marker flush with outer rim
@@ -212,14 +216,16 @@ def _build_static(cx: float, cy: float, dial_r: float) -> pygame.Surface:
         dx, dy = _pt(cx, cy, dial_r * 0.94, ang)
         pygame.draw.circle(surf, _INK, (int(dx), int(dy)), max(2, int(0.018 * dial_r)))
 
-    bar_w, bar_h = dial_r * 0.16, dial_r * 0.05
-    for hr in (3, 6, 9):
-        _hour_bar(surf, cx, cy, hr, dial_r, bar_w, bar_h)
+    # Chunky rectangular hour indices at the outer rim (replace thin hour ticks).
+    bar_w, bar_h = dial_r * 0.14, dial_r * 0.05
+    for hr in range(1, 12):
+        _hour_bar(surf, cx, cy, hr, dial_r, bar_w, bar_h, radial=0.91)
 
+    # Arabic hour numerals (inward of the outer bars; 3/6/9 keep bars only).
     num_font = draw.load_font(max(theme.s(28), int(dial_r * 0.11)), bold=True)
     for hr in (1, 2, 4, 5, 7, 8, 10, 11):
         ang = math.radians(hr * 30)
-        tx, ty = _pt(cx, cy, dial_r * 0.75, ang)
+        tx, ty = _pt(cx, cy, dial_r * 0.72, ang)
         glyph = draw.render_text_cached(num_font, str(hr), _INK)
         surf.blit(glyph, glyph.get_rect(center=(tx, ty)))
 
@@ -236,7 +242,8 @@ def _build_static(cx: float, cy: float, dial_r: float) -> pygame.Surface:
 
 def _ensure_static(cx: float, cy: float, dial_r: float) -> pygame.Surface:
     global _static, _static_key
-    key = (int(cx), int(cy), int(dial_r), theme.SIZE, theme.s(1), 4)
+    # Bump cache key when static face geometry changes.
+    key = (int(cx), int(cy), int(dial_r), theme.SIZE, theme.s(1), 8)
     if _static is None or _static_key != key:
         _static = _build_static(cx, cy, dial_r)
         _static_key = key
