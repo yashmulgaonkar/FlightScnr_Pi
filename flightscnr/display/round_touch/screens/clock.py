@@ -38,7 +38,11 @@ def _time_strings(now: datetime | None = None):
 
 def _date_string(now: datetime | None = None) -> str:
     now = now or datetime.now()
-    return f"{now.strftime('%a, %b')} {now.day}"
+    weekday = now.strftime("%a")
+    month = now.strftime("%b")
+    if settings.use_european_date():
+        return f"{weekday}, {now.day} {month}"
+    return f"{weekday}, {month} {now.day}"
 
 
 def _format_sun_time(value: str) -> str:

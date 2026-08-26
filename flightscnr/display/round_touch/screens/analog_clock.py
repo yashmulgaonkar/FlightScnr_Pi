@@ -20,10 +20,19 @@ from typing import NamedTuple
 
 import pygame
 
-from display.round_touch import draw, theme
+from display.round_touch import draw, settings, theme
 
 # Reference layout was 600×600 with center 300; scale via dial radius.
 _REF_R = 270.0
+
+
+def _altimeter_date_strftime() -> str:
+    """Drum format: US ``MM DD`` or EU ``DD MM`` (same 5-character width)."""
+    return "%d %m" if settings.use_european_date() else "%m %d"
+
+
+def _altimeter_date_label() -> str:
+    return "DD MM" if settings.use_european_date() else "MM DD"
 
 
 class _Palette(NamedTuple):
@@ -214,8 +223,8 @@ def draw_analog_clock(surface: pygame.Surface, *, night_vision: bool = False) ->
         },
         {
             **ref_box(360, 385, 160, 50),
-            "curr": time.strftime("%m %d", t_curr),
-            "next": time.strftime("%m %d", t_next),
+            "curr": time.strftime(_altimeter_date_strftime(), t_curr),
+            "next": time.strftime(_altimeter_date_strftime(), t_next),
         },
         {
             **ref_box(150, 275, 80, 50),
@@ -300,7 +309,7 @@ def draw_analog_clock(surface: pygame.Surface, *, night_vision: bool = False) ->
     yx, yy = ref(440, 240)
     surface.blit(year_l, year_l.get_rect(center=(yx, yy)))
 
-    date_l = draw.render_text_cached(label_font, "MM DD", pal.muted)
+    date_l = draw.render_text_cached(label_font, _altimeter_date_label(), pal.muted)
     dx, dy = ref(440, 450)
     surface.blit(date_l, date_l.get_rect(center=(dx, dy)))
 

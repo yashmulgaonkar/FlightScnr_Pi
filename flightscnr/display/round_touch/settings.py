@@ -120,6 +120,7 @@ DEFAULT_CLOCK_LABELS = {
     "night": "Analog (altimeter, night)",
     "flieger": "Flieger chronograph",
 }
+DATE_FORMATS = ("us", "eu")
 HOURLY_CHIME_VOLUME_MIN = 0
 HOURLY_CHIME_VOLUME_MAX = 100
 # Shared 0–100 scale for tracked-enter / military alert SFX.
@@ -315,6 +316,8 @@ _defaults = {
     "runway_light_rgb": list(color_presets.DEFAULT_RUNWAY_LIGHT_RGB),
     "theme_palette_v": color_presets.THEME_PALETTE_V,
     "clock_12hr": True,
+    # us | eu — digital and altimeter clock date order (Flieger unchanged).
+    "date_format": "us",
     "auto_timezone": True,
     "min_height_ft": 1000,
     "max_height_ft": 100000,
@@ -847,6 +850,12 @@ def _load():
             migrated = True
         else:
             state["default_clock_off_hours"] = night_face
+    date_fmt = str(state.get("date_format") or "us").strip().lower()
+    if date_fmt not in DATE_FORMATS:
+        state["date_format"] = "us"
+        migrated = True
+    else:
+        state["date_format"] = date_fmt
     try:
         if "radar_hud_opacity" not in data:
             state["radar_hud_opacity"] = 72
@@ -1101,6 +1110,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("flight_detail_timeout_s"),
         state.get("clock_timeout_s"),
         state.get("clock_12hr"),
+        str(state.get("date_format") or "us"),
         state.get("auto_timezone"),
         state.get("traffic_mode"),
         state.get("ais_enabled"),
@@ -2103,6 +2113,28 @@ def set_use_12hr_clock(enabled: bool) -> bool:
 
 def toggle_clock_format():
     return set_use_12hr_clock(not use_12hr_clock())
+
+
+def date_format() -> str:
+    fmt = str(_state.get("date_format") or "us").strip().lower()
+    return fmt if fmt in DATE_FORMATS else "us"
+
+
+def use_european_date() -> bool:
+    return date_format() == "eu"
+
+
+def set_date_format(fmt: str) -> str:
+    value = str(fmt or "us").strip().lower()
+    if value not in DATE_FORMATS:
+        value = "us"
+    _state["date_format"] = value
+    _save(_state)
+    return value
+
+
+def set_use_european_date(enabled: bool) -> str:
+    return set_date_format("eu" if enabled else "us")
 
 
 def auto_idle_clock_enabled() -> bool:

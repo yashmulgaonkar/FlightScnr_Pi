@@ -487,6 +487,11 @@
                 <span class="switch"><input id="clock_12hr" type="checkbox" checked><span class="track"></span></span>
             </div>
             <p class="hint">Applies everywhere: radar HUD, clock screen, and settings. Off = 24-hour.</p>
+            <div class="chk">
+                <label for="date_format_eu">European date format</label>
+                <span class="switch"><input id="date_format_eu" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">Digital clock: <code>Wed, 26 Aug</code>. Altimeter drums: <code>DD MM</code>. Flieger is unchanged (day + date only).</p>
             <label for="default_clock">Daytime clock face</label>
             <select id="default_clock">
                 <option value="digital">Digital</option>
@@ -1258,6 +1263,7 @@ async function loadAll() {
         $("clock_timeout").value = String(d.clock_timeout_s ?? 10);
         $("idle_clock").checked = !!d.auto_idle_clock;
         if ($("clock_12hr")) $("clock_12hr").checked = d.clock_12hr !== false;
+        if ($("date_format_eu")) $("date_format_eu").checked = d.date_format === "eu";
         if ($("default_clock")) {
             const face = d.default_clock;
             $("default_clock").value = (face === "analog" || face === "night" || face === "flieger") ? face : "digital";
@@ -1879,6 +1885,7 @@ async function saveAndReloadSettings() {
                 clock_timeout_s: Number($("clock_timeout").value),
                 auto_idle_clock: $("idle_clock").checked,
                 clock_12hr: $("clock_12hr") ? $("clock_12hr").checked : true,
+                date_format: $("date_format_eu") && $("date_format_eu").checked ? "eu" : "us",
                 default_clock: $("default_clock") ? $("default_clock").value : "digital",
                 default_clock_off_hours: $("default_clock_off_hours")
                     ? $("default_clock_off_hours").value
