@@ -559,6 +559,8 @@ def dedupe_flights(flights: list[dict], *, threshold_km: float = 1.2) -> list[di
                 flight["callsign"] = duplicate.get("callsign") or flight.get("callsign")
             if not (flight.get("registration") or "").strip():
                 flight["registration"] = duplicate.get("registration") or ""
+            if flight.get("local_adsb") or duplicate.get("local_adsb"):
+                flight["local_adsb"] = True
             _unindex(dup_idx, duplicate)
             kept[dup_idx] = flight
             _index(dup_idx, flight)
@@ -569,6 +571,8 @@ def dedupe_flights(flights: list[dict], *, threshold_km: float = 1.2) -> list[di
                 duplicate["callsign"] = flight.get("callsign") or duplicate.get("callsign")
             if not (duplicate.get("registration") or "").strip():
                 duplicate["registration"] = flight.get("registration") or ""
+            if flight.get("local_adsb") or duplicate.get("local_adsb"):
+                duplicate["local_adsb"] = True
             _index(dup_idx, duplicate)
 
     return kept

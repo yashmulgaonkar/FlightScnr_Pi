@@ -15,14 +15,19 @@ and returns flight dicts compatible with overhead/radar display.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
+import os
 import time
 from urllib.parse import urljoin
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+DATA_DIR = os.environ.get("FLIGHTSCNR_DATA_DIR", "/var/lib/flightscnr")
+RADAR_STATUS_PATH = os.path.join(DATA_DIR, "dump1090_radar_status.json")
 
 _CACHE: dict = {
     "entries": [],
@@ -39,6 +44,11 @@ _CONNECT_TIMEOUT_S = 0.5
 _READ_TIMEOUT_S = 2.0
 # Ignore tracks with no fresh position (seconds).
 _MAX_SEEN_POS_S = 60.0
+
+
+def feed_backoff_active() -> bool:
+    """True while skipping network after a failed aircraft.json fetch."""
+    return time.time() < float(_CACHE.get("fail_until") or 0.0)
 
 
 def _parse_alt_ft(plane: dict) -> int:
@@ -171,6 +181,8 @@ def _to_entry(
         "db_flags": 0,
         "adsb_category": adsb_category,
         "data_source": "dump1090",
+        # Radar UI: local receiver refreshed this track (survives FR24 merge).
+        "local_adsb": True,
     }
 
 
@@ -251,3 +263,104 @@ def fetch_aircraft_entries(
         feed_url,
     )
     return list(entries)
+
+
+def write_radar_status(
+    *,
+    enabled: bool,
+    ok: bool | None = None,
+    raw: int = 0,
+    added: int = 0,
+    updated: int = 0,
+    error: str = "",
+    url: str = "",
+) -> None:
+    """Publish last overhead-cycle dump1090 merge stats for the portal."""
+    payload = {
+        "enabled": bool(enabled),
+        "ok": ok,
+        "raw": int(raw),
+        "added": int(added),
+        "updated": int(updated),
+        "error": (error or "")[:240],
+        "url": (url or "")[:240],
+        "ts": time.time(),
+    }
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        tmp = RADAR_STATUS_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+        os.replace(tmp, RADAR_STATUS_PATH)
+    except OSError as exc:
+        logger.debug("Could not write dump1090 radar status: %s", exc)
+
+
+def read_radar_status() -> dict:
+    """Last overhead dump1090 cycle stats (empty dict if missing/stale file)."""
+    try:
+        with open(RADAR_STATUS_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+
+
+def probe_feed_status(url: str | None = None) -> dict:
+    """Lightweight health probe of aircraft.json for the portal (web process).
+
+    Returns reachable flag plus total/fresh aircraft counts. Does not apply
+    home-radius filtering — that is overhead's job.
+    """
+    try:
+        from config import DUMP1090_URL
+
+        configured = DUMP1090_URL
+    except ImportError:
+        configured = "http://127.0.0.1:8080/data/aircraft.json"
+    feed_url = _aircraft_json_url(url or configured)
+    out: dict = {
+        "reachable": False,
+        "url": feed_url,
+        "aircraft_total": 0,
+        "aircraft_fresh": 0,
+        "error": "",
+    }
+    try:
+        resp = requests.get(
+            feed_url, timeout=(_CONNECT_TIMEOUT_S, _READ_TIMEOUT_S)
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.RequestException as exc:
+        out["error"] = str(exc)[:240]
+        return out
+    except ValueError as exc:
+        out["error"] = f"invalid JSON: {exc}"[:240]
+        return out
+
+    aircraft = data.get("aircraft") or data.get("ac") or []
+    if not isinstance(aircraft, list):
+        aircraft = []
+    total = 0
+    fresh = 0
+    for plane in aircraft:
+        if not isinstance(plane, dict):
+            continue
+        total += 1
+        lat = plane.get("lat")
+        lon = plane.get("lon")
+        if not _valid_position(lat, lon):
+            continue
+        try:
+            seen = float(plane.get("seen_pos", plane.get("seen", 0)) or 0)
+        except (TypeError, ValueError):
+            seen = 0.0
+        if seen <= _MAX_SEEN_POS_S:
+            fresh += 1
+    out["reachable"] = True
+    out["aircraft_total"] = total
+    out["aircraft_fresh"] = fresh
+    return out

@@ -1301,6 +1301,21 @@ class Overhead:
                     dump_on = DUMP1090_ENABLED
             use_adsb_cloud = adsb_on and location_configured()
             use_dump1090 = dump_on and location_configured()
+            if not use_dump1090:
+                try:
+                    from utilities.dump1090_client import write_radar_status
+
+                    write_radar_status(
+                        enabled=bool(dump_on),
+                        ok=None,
+                        raw=0,
+                        added=0,
+                        updated=0,
+                        error="" if dump_on else "disabled",
+                        url=dump_url or "",
+                    )
+                except Exception:
+                    pass
             if use_adsb_cloud or use_dump1090:
                 from display.round_touch import scale, settings
 
@@ -1317,16 +1332,30 @@ class Overhead:
                         )
                     )
                 dump_entries: list[dict] = []
+                dump_fetch_ok: bool | None = None
+                dump_fetch_error = ""
                 if use_dump1090:
-                    from utilities.dump1090_client import fetch_aircraft_entries as fetch_dump1090
-
-                    dump_entries = fetch_dump1090(
-                        LOCATION_DEFAULT[0],
-                        LOCATION_DEFAULT[1],
-                        search_radius_nm,
-                        MIN_ALTITUDE,
-                        url=dump_url,
+                    from utilities.dump1090_client import (
+                        feed_backoff_active,
+                        fetch_aircraft_entries as fetch_dump1090,
                     )
+
+                    try:
+                        dump_entries = fetch_dump1090(
+                            LOCATION_DEFAULT[0],
+                            LOCATION_DEFAULT[1],
+                            search_radius_nm,
+                            MIN_ALTITUDE,
+                            url=dump_url,
+                        )
+                        dump_fetch_ok = not feed_backoff_active()
+                        if not dump_fetch_ok:
+                            dump_fetch_error = "feed unreachable or invalid (using cache)"
+                    except Exception as exc:
+                        dump_fetch_ok = False
+                        dump_fetch_error = str(exc)[:240]
+                        dump_entries = []
+                        logger.warning("dump1090 fetch raised: %s", exc)
                     stats["dump1090_raw"] = len(dump_entries)
                 else:
                     stats["dump1090_raw"] = 0
@@ -1493,6 +1522,7 @@ class Overhead:
                                         target["registration"] = cs
                             # Prefer local dump1090 tag when it refreshed kinematics.
                             if entry.get("data_source") == "dump1090":
+                                target["local_adsb"] = True
                                 src = (target.get("data_source") or "")
                                 if src.startswith("adsb") or src == "adsb_fi":
                                     target["data_source"] = "dump1090"
@@ -1504,6 +1534,8 @@ class Overhead:
                             )
                             _gil_yield(_i)
                             continue
+                        if entry.get("data_source") == "dump1090":
+                            entry["local_adsb"] = True
                         _maybe_feed_enrich(entry)
                         overhead_data.append(entry)
                         stats[f"{stat_prefix}_added"] = (
@@ -1528,6 +1560,22 @@ class Overhead:
                 # Cloud first, then local dump1090 so local kinematics win on overlap.
                 _merge_position_entries(adsb_entries, stat_prefix="adsb")
                 _merge_position_entries(dump_entries, stat_prefix="dump1090")
+
+                if use_dump1090:
+                    try:
+                        from utilities.dump1090_client import write_radar_status
+
+                        write_radar_status(
+                            enabled=True,
+                            ok=dump_fetch_ok,
+                            raw=int(stats.get("dump1090_raw") or 0),
+                            added=int(stats.get("dump1090_added") or 0),
+                            updated=int(stats.get("dump1090_updated") or 0),
+                            error=dump_fetch_error,
+                            url=dump_url or "",
+                        )
+                    except Exception:
+                        logger.debug("dump1090 radar status write failed", exc_info=True)
 
                 apply_adsb_alert_fields(overhead_data, adsb_entries + dump_entries)
                 _t_dedupe = time()

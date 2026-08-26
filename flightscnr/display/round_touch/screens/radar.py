@@ -940,6 +940,10 @@ def _aircraft_tag_lines(flight):
     alt_color = aircraft.altitude_tag_color(flight.get("vertical_speed"))
 
     lines = []
+    # Local ADS-B marker: * before callsign when dump1090 refreshed this track.
+    if flight.get("local_adsb") and callsign and callsign != "—":
+        if not str(callsign).startswith("*"):
+            callsign = f"* {callsign}"
     raw_lines = [
         (callsign, _overlay_color_for_basemap(theme.GRID), main_font, offsets[0]),
         (plane_type, _overlay_color_for_basemap(theme.TAG_TYPE), sub_font, offsets[1]),

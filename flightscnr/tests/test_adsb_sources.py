@@ -72,6 +72,7 @@ class TestDump1090Client(unittest.TestCase):
                 )
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["data_source"], "dump1090")
+        self.assertTrue(entries[0].get("local_adsb"))
         self.assertEqual(entries[0]["icao_hex"], "A55DB1")
         self.assertEqual(entries[0]["callsign"].strip(), "N445DB")
 
@@ -198,12 +199,160 @@ class TestDump1090Richness(unittest.TestCase):
             "plane_longitude": -122.301,
             "altitude": 3480,
             "data_source": "dump1090",
+            "local_adsb": True,
             "squawk": "1200",
         }
         with mock.patch.object(aircraft_alert.geo, "distance_km", return_value=0.2):
             out = aircraft_alert.dedupe_flights([cloud, local])
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["data_source"], "dump1090")
+        self.assertTrue(out[0].get("local_adsb"))
+
+    def test_dedupe_preserves_local_adsb_when_fr24_wins(self):
+        from utilities import aircraft_alert
+
+        fr24 = {
+            "callsign": "UAL123",
+            "icao_hex": "A12345",
+            "airline": "United",
+            "origin": "SFO",
+            "destination": "EWR",
+            "plane_latitude": 37.80,
+            "plane_longitude": -122.30,
+            "altitude": 10000,
+            "data_source": "fr24_grpc",
+        }
+        local = {
+            "callsign": "UAL123",
+            "icao_hex": "A12345",
+            "plane_latitude": 37.801,
+            "plane_longitude": -122.301,
+            "altitude": 9980,
+            "data_source": "dump1090",
+            "local_adsb": True,
+        }
+        with mock.patch.object(aircraft_alert.geo, "distance_km", return_value=0.2):
+            out = aircraft_alert.dedupe_flights([fr24, local])
+        self.assertEqual(len(out), 1)
+        self.assertTrue(out[0]["data_source"].startswith("fr24"))
+        self.assertTrue(out[0].get("local_adsb"))
+
+
+class TestLocalAdsbMergeFlag(unittest.TestCase):
+    def test_dump1090_entry_sets_local_adsb(self):
+        from utilities import dump1090_client
+
+        plane = {
+            "hex": "a55db1",
+            "flight": "N445DB ",
+            "r": "N445DB",
+            "t": "GL5T",
+            "lat": 37.80,
+            "lon": -122.30,
+            "alt_baro": 3500,
+            "gs": 220,
+            "track": 90,
+            "seen_pos": 1.0,
+        }
+        entry = dump1090_client._to_entry(
+            plane, home_lat=37.80, home_lon=-122.30, radius_nm=20.0, min_altitude=0
+        )
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["data_source"], "dump1090")
+        self.assertTrue(entry.get("local_adsb"))
+
+    def test_merge_onto_fr24_sets_local_adsb_keeps_source(self):
+        """Simulate overhead merge: dump1090 refreshes FR24 without retagging source."""
+        target = {
+            "callsign": "UAL123",
+            "icao_hex": "A12345",
+            "plane_latitude": 37.80,
+            "plane_longitude": -122.30,
+            "altitude": 10000,
+            "data_source": "fr24_grpc",
+        }
+        entry = {
+            "callsign": "UAL123",
+            "icao_hex": "A12345",
+            "plane_latitude": 37.801,
+            "plane_longitude": -122.301,
+            "altitude": 9980,
+            "heading": 90,
+            "ground_speed": 420,
+            "vertical_speed": 0,
+            "squawk": "1200",
+            "db_flags": 0,
+            "registration": "",
+            "plane": "",
+            "adsb_category": "",
+            "data_source": "dump1090",
+            "local_adsb": True,
+        }
+        from utilities.aircraft_alert import merge_live_fields
+
+        live_fields = (
+            "plane_latitude",
+            "plane_longitude",
+            "altitude",
+            "heading",
+            "ground_speed",
+            "vertical_speed",
+            "squawk",
+            "db_flags",
+            "icao_hex",
+            "registration",
+            "callsign",
+            "plane",
+            "adsb_category",
+        )
+        merge_live_fields(target, entry, live_fields)
+        if entry.get("data_source") == "dump1090":
+            target["local_adsb"] = True
+            src = (target.get("data_source") or "")
+            if src.startswith("adsb") or src == "adsb_fi":
+                target["data_source"] = "dump1090"
+            elif not src:
+                target["data_source"] = "dump1090"
+        self.assertEqual(target["data_source"], "fr24_grpc")
+        self.assertTrue(target.get("local_adsb"))
+        self.assertEqual(target["altitude"], 9980)
+
+    def test_probe_feed_counts_fresh(self):
+        from utilities import dump1090_client
+
+        payload = {
+            "aircraft": [
+                {"hex": "aaa", "lat": 1.0, "lon": 2.0, "seen_pos": 5.0},
+                {"hex": "bbb", "lat": 1.0, "lon": 2.0, "seen_pos": 120.0},
+                {"hex": "ccc", "seen_pos": 1.0},
+            ]
+        }
+        with mock.patch.object(dump1090_client.requests, "get") as get:
+            resp = mock.Mock()
+            resp.raise_for_status = mock.Mock()
+            resp.json.return_value = payload
+            get.return_value = resp
+            out = dump1090_client.probe_feed_status("http://127.0.0.1:8080/data/aircraft.json")
+        self.assertTrue(out["reachable"])
+        self.assertEqual(out["aircraft_total"], 3)
+        self.assertEqual(out["aircraft_fresh"], 1)
+
+    def test_write_and_read_radar_status(self):
+        from utilities import dump1090_client
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "dump1090_radar_status.json")
+            with mock.patch.object(dump1090_client, "DATA_DIR", tmp):
+                with mock.patch.object(dump1090_client, "RADAR_STATUS_PATH", path):
+                    dump1090_client.write_radar_status(
+                        enabled=True, ok=True, raw=4, added=1, updated=3
+                    )
+                    data = dump1090_client.read_radar_status()
+        self.assertTrue(data.get("enabled"))
+        self.assertTrue(data.get("ok"))
+        self.assertEqual(data.get("raw"), 4)
+        self.assertEqual(data.get("added"), 1)
+        self.assertEqual(data.get("updated"), 3)
 
 
 if __name__ == "__main__":

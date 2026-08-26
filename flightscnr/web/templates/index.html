@@ -358,7 +358,8 @@
             </div>
             <label for="dump1090_url">aircraft.json URL</label>
             <input id="dump1090_url" type="text" autocomplete="off" placeholder="http://127.0.0.1:8080/data/aircraft.json">
-            <p class="hint">Local receiver feed (dump1090-fa, readsb, or tar1090). Merges with FR24/adsb.fi; local positions win on overlap. Leave off if nothing is listening — connection refused will spam the logs.</p>
+            <p class="hint">Local receiver feed (dump1090-fa, readsb, or tar1090). Merges with FR24/adsb.fi; local positions win on overlap. Leave off if nothing is listening — connection refused will spam the logs. Aircraft heard locally show a <code>*</code> before the callsign on the radar tag.</p>
+            <p id="dump1090-live" class="hint" style="margin-top:.45rem">Status: …</p>
             <button class="btn btn-primary" id="btn-dump1090" style="margin-top:.7rem" type="button">Save local ADS-B</button>
             <div id="dump1090-status" class="status"></div>
         </div>
@@ -1643,9 +1644,59 @@ async function saveDump1090() {
                 : "Local ADS-B disabled."
         );
         await loadAll();
+        await refreshDump1090Live();
     } catch (e) {
         showStatus("dump1090-status", e.message, true);
     }
+}
+
+function formatDump1090Live(data) {
+    if (!data || !data.enabled) {
+        return "Status: disabled";
+    }
+    if (data.reachable === false) {
+        const err = data.error ? ` (${data.error})` : "";
+        return `Status: unreachable${err}`;
+    }
+    if (data.reachable !== true) {
+        return "Status: checking…";
+    }
+    const fresh = Number(data.aircraft_fresh || 0);
+    const total = Number(data.aircraft_total || 0);
+    let line = `Status: reachable — ${fresh} aircraft with fresh position`;
+    if (total > fresh) {
+        line += ` (${total} in feed)`;
+    }
+    const radar = data.radar || {};
+    const added = Number(radar.added || 0);
+    const updated = Number(radar.updated || 0);
+    const raw = Number(radar.raw || 0);
+    if (radar.ts) {
+        line += `. Last radar cycle: ${raw} in range, ${added} new, ${updated} refreshed`;
+        if (radar.ok === false) {
+            line += " (feed error — may be using cache)";
+        }
+    }
+    return line;
+}
+
+let dump1090LiveTimer = null;
+
+async function refreshDump1090Live() {
+    const el = $("dump1090-live");
+    if (!el) return;
+    try {
+        const data = await jsonFetch("/dump1090/status.json");
+        el.textContent = formatDump1090Live(data);
+    } catch (e) {
+        el.textContent = `Status: ${e.message || "unavailable"}`;
+    }
+}
+
+function startDump1090LivePoll() {
+    refreshDump1090Live();
+    if (dump1090LiveTimer) clearInterval(dump1090LiveTimer);
+    dump1090LiveTimer = setInterval(refreshDump1090Live, 5000);
 }
 
 async function saveRouteSourceOrder() {
@@ -3042,6 +3093,7 @@ document.addEventListener("DOMContentLoaded", () => {
     wireRgbGroup("runway");
     loadAll();
     checkUpdates();
+    startDump1090LivePoll();
 });
 </script>
 </body>

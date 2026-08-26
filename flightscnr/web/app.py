@@ -1139,6 +1139,46 @@ def dump1090_portal_status() -> dict:
     return dump1090_settings()
 
 
+@app.get("/dump1090/status.json")
+def dump1090_live_status():
+    """Live local ADS-B feed health + last radar merge counts for the portal."""
+    from secrets_store import dump1090_settings
+    from utilities import dump1090_client
+
+    cfg = dump1090_settings()
+    enabled = bool(cfg.get("DUMP1090_ENABLED"))
+    url = (cfg.get("DUMP1090_URL") or "").strip()
+    out: dict = {
+        "enabled": enabled,
+        "url": url,
+        "reachable": None,
+        "aircraft_total": 0,
+        "aircraft_fresh": 0,
+        "error": "",
+        "radar": {},
+    }
+    radar = dump1090_client.read_radar_status()
+    if radar:
+        out["radar"] = {
+            "ok": radar.get("ok"),
+            "raw": int(radar.get("raw") or 0),
+            "added": int(radar.get("added") or 0),
+            "updated": int(radar.get("updated") or 0),
+            "ts": radar.get("ts"),
+            "error": radar.get("error") or "",
+        }
+    if not enabled:
+        out["error"] = "disabled"
+        return jsonify(out)
+    probe = dump1090_client.probe_feed_status(url or None)
+    out["reachable"] = bool(probe.get("reachable"))
+    out["url"] = probe.get("url") or url
+    out["aircraft_total"] = int(probe.get("aircraft_total") or 0)
+    out["aircraft_fresh"] = int(probe.get("aircraft_fresh") or 0)
+    out["error"] = probe.get("error") or ""
+    return jsonify(out)
+
+
 @app.post("/radar")
 def radar_save():
     from display.round_touch import map_bg, rainviewer_overlay, scale, settings
