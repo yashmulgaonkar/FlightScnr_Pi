@@ -320,6 +320,8 @@ _defaults = {
     "max_height_ft": 100000,
     "auto_idle_clock": True,
     "default_clock": "digital",
+    # Clock face while Off-Hours window is active (force-clock / idle / open).
+    "default_clock_off_hours": "digital",
     "flight_detail_timeout_s": 20,
     "clock_timeout_s": 10,
     # aircraft | marine | both — what the radar shows
@@ -827,6 +829,24 @@ def _load():
         migrated = True
     else:
         state["default_clock"] = clock_face
+    if "default_clock_off_hours" not in data:
+        # Migrate: night-as-default → day analog + off-hours night.
+        day = state["default_clock"]
+        if day == "night":
+            state["default_clock"] = "analog"
+            state["default_clock_off_hours"] = "night"
+        elif day == "analog":
+            state["default_clock_off_hours"] = "night"
+        else:
+            state["default_clock_off_hours"] = day
+        migrated = True
+    else:
+        night_face = str(state.get("default_clock_off_hours") or "digital").strip().lower()
+        if night_face not in DEFAULT_CLOCKS:
+            state["default_clock_off_hours"] = "digital"
+            migrated = True
+        else:
+            state["default_clock_off_hours"] = night_face
     try:
         if "radar_hud_opacity" not in data:
             state["radar_hud_opacity"] = 72
@@ -1077,6 +1097,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("brightness_percent"),
         state.get("auto_idle_clock"),
         str(state.get("default_clock") or "digital"),
+        str(state.get("default_clock_off_hours") or "digital"),
         state.get("flight_detail_timeout_s"),
         state.get("clock_timeout_s"),
         state.get("clock_12hr"),
@@ -2120,6 +2141,38 @@ def toggle_default_clock() -> str:
     order = list(DEFAULT_CLOCKS)
     i = order.index(default_clock()) if default_clock() in order else 0
     return set_default_clock(order[(i + 1) % len(order)])
+
+
+def default_clock_off_hours() -> str:
+    face = str(_state.get("default_clock_off_hours") or "digital").strip().lower()
+    return face if face in DEFAULT_CLOCKS else "digital"
+
+
+def default_clock_off_hours_label() -> str:
+    return DEFAULT_CLOCK_LABELS.get(default_clock_off_hours(), "Digital")
+
+
+def set_default_clock_off_hours(face: str) -> str:
+    value = str(face or "digital").strip().lower()
+    if value not in DEFAULT_CLOCKS:
+        value = "digital"
+    _state["default_clock_off_hours"] = value
+    _save(_state)
+    return value
+
+
+def preferred_clock_face(*, in_off_hours: bool | None = None) -> str:
+    """Day or off-hours clock face for auto-open / force-clock / idle."""
+    if in_off_hours is None:
+        try:
+            from display.round_touch import off_hours
+
+            in_off_hours = bool(off_hours.in_off_hours())
+        except Exception:
+            in_off_hours = False
+    if in_off_hours:
+        return default_clock_off_hours()
+    return default_clock()
 
 
 def flight_detail_timeout_s() -> int:

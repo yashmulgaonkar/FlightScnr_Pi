@@ -871,6 +871,7 @@ def display_json():
             "display_rotation": settings.display_rotation(),
             "clock_12hr": settings.use_12hr_clock(),
             "default_clock": settings.default_clock(),
+            "default_clock_off_hours": settings.default_clock_off_hours(),
             "radar_hud_enabled": settings.radar_hud_enabled(),
             "radar_hud_position": settings.radar_hud_position(),
             "radar_hud_opacity": settings.radar_hud_opacity(),
@@ -909,6 +910,10 @@ def display_save():
         settings.set_use_12hr_clock(bool(data.get("clock_12hr")))
     if "default_clock" in data:
         settings.set_default_clock(str(data.get("default_clock") or "digital"))
+    if "default_clock_off_hours" in data:
+        settings.set_default_clock_off_hours(
+            str(data.get("default_clock_off_hours") or "digital")
+        )
     if "radar_hud_enabled" in data:
         settings.set_radar_hud_enabled(bool(data.get("radar_hud_enabled")))
     if "radar_hud_position" in data:
@@ -962,6 +967,7 @@ def display_save():
             "display_rotation": settings.display_rotation(),
             "clock_12hr": settings.use_12hr_clock(),
             "default_clock": settings.default_clock(),
+            "default_clock_off_hours": settings.default_clock_off_hours(),
             "radar_hud_enabled": settings.radar_hud_enabled(),
             "radar_hud_position": settings.radar_hud_position(),
             "radar_hud_opacity": settings.radar_hud_opacity(),

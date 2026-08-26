@@ -1467,8 +1467,10 @@ class RoundTouchDisplay:
             self._safe_draw()
 
     def _preferred_clock_screen(self) -> str:
-        """Digital / analog / night / flieger clock, per Settings › Layers › Default Clock."""
-        face = settings.default_clock()
+        """Day or off-hours clock face (Settings › Layers / portal Display)."""
+        return self._clock_screen_for_face(settings.preferred_clock_face())
+
+    def _clock_screen_for_face(self, face: str) -> str:
         if face == "analog":
             return SCREEN_ANALOG_CLOCK
         if face == "night":
@@ -1696,6 +1698,8 @@ class RoundTouchDisplay:
             settings.toggle_auto_idle_clock()
         elif action == "default_clock":
             self._open_atc_picker("default_clock")
+        elif action == "default_clock_off_hours":
+            self._open_atc_picker("default_clock_off_hours")
         elif action == "alert_military":
             from display.round_touch import alert_prefs
 
@@ -1960,6 +1964,9 @@ class RoundTouchDisplay:
             return
         if kind == "default_clock":
             settings.set_default_clock(choice)
+            return
+        if kind == "default_clock_off_hours":
+            settings.set_default_clock_off_hours(choice)
             return
         if kind == "hud_dark":
             settings.set_radar_hud_dark(choice == "dark")
@@ -4048,8 +4055,19 @@ class RoundTouchDisplay:
         # (https://github.com/yashmulgaonkar/FlightScnr_Pi/issues/18).
         if was_force:
             return
-        if self.screen not in (SCREEN_CLOCK, SCREEN_ANALOG_CLOCK, SCREEN_ANALOG_NIGHT, SCREEN_FLIEGER_CLOCK, SCREEN_FORECAST):
-            self._open_preferred_clock()
+        want = self._preferred_clock_screen()
+        clock_faces = (
+            SCREEN_CLOCK,
+            SCREEN_ANALOG_CLOCK,
+            SCREEN_ANALOG_NIGHT,
+            SCREEN_FLIEGER_CLOCK,
+        )
+        # Open preferred from radar/etc., or switch day↔night if already on a clock.
+        if self.screen not in (*clock_faces, SCREEN_FORECAST):
+            self._open_screen(want)
+            self._safe_draw()
+        elif self.screen in clock_faces and self.screen != want:
+            self._open_screen(want)
             self._safe_draw()
 
     def _apply_reloaded_settings(self):

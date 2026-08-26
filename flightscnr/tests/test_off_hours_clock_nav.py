@@ -42,10 +42,37 @@ class TestOffHoursClockNav(unittest.TestCase):
             "display.round_touch.off_hours.in_off_hours", return_value=True
         ), mock.patch(
             "display.round_touch.off_hours.force_clock_enabled", return_value=True
+        ), mock.patch(
+            "display.round_touch.settings.preferred_clock_face", return_value="digital"
         ):
             d._tick_off_hours_clock()
         self.assertEqual(d._opened, [app_mod.SCREEN_CLOCK])
         self.assertTrue(d._off_hours_force_clock_active)
+
+    def test_forces_off_hours_night_face_when_configured(self):
+        d = _bare_display()
+        with mock.patch(
+            "display.round_touch.off_hours.in_off_hours", return_value=True
+        ), mock.patch(
+            "display.round_touch.off_hours.force_clock_enabled", return_value=True
+        ), mock.patch(
+            "display.round_touch.settings.preferred_clock_face", return_value="night"
+        ):
+            d._tick_off_hours_clock()
+        self.assertEqual(d._opened, [app_mod.SCREEN_ANALOG_NIGHT])
+
+    def test_switches_day_analog_to_night_when_force_starts(self):
+        d = _bare_display()
+        d.screen = app_mod.SCREEN_ANALOG_CLOCK
+        with mock.patch(
+            "display.round_touch.off_hours.in_off_hours", return_value=True
+        ), mock.patch(
+            "display.round_touch.off_hours.force_clock_enabled", return_value=True
+        ), mock.patch(
+            "display.round_touch.settings.preferred_clock_face", return_value="night"
+        ):
+            d._tick_off_hours_clock()
+        self.assertEqual(d._opened, [app_mod.SCREEN_ANALOG_NIGHT])
 
     def test_allows_radar_after_user_navigates(self):
         d = _bare_display()
@@ -53,6 +80,8 @@ class TestOffHoursClockNav(unittest.TestCase):
             "display.round_touch.off_hours.in_off_hours", return_value=True
         ), mock.patch(
             "display.round_touch.off_hours.force_clock_enabled", return_value=True
+        ), mock.patch(
+            "display.round_touch.settings.preferred_clock_face", return_value="digital"
         ):
             d._tick_off_hours_clock()  # enter force-clock → snap once
             d.screen = app_mod.SCREEN_RADAR  # user swipes to radar
@@ -67,6 +96,8 @@ class TestOffHoursClockNav(unittest.TestCase):
             "display.round_touch.off_hours.in_off_hours", return_value=True
         ), mock.patch(
             "display.round_touch.off_hours.force_clock_enabled", return_value=False
+        ), mock.patch(
+            "display.round_touch.settings.preferred_clock_face", return_value="night"
         ):
             d._tick_off_hours_clock()
         self.assertEqual(d._opened, [])
@@ -83,6 +114,9 @@ class TestOffHoursClockNav(unittest.TestCase):
             "display.round_touch.off_hours.effective_brightness_percent",
             return_value=20,
         ), mock.patch(
+            "display.round_touch.off_hours.prefs",
+            return_value={"mode": "clock"},
+        ), mock.patch(
             "display.round_touch.settings.brightness_percent", return_value=80
         ), mock.patch(
             "display.round_touch.backlight.apply_percent", side_effect=applied.append
@@ -97,6 +131,9 @@ class TestOffHoursClockNav(unittest.TestCase):
         ), mock.patch(
             "display.round_touch.off_hours.effective_brightness_percent",
             return_value=20,
+        ), mock.patch(
+            "display.round_touch.off_hours.prefs",
+            return_value={"mode": "clock"},
         ), mock.patch(
             "display.round_touch.settings.brightness_percent", return_value=80
         ), mock.patch(

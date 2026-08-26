@@ -487,14 +487,21 @@
                 <span class="switch"><input id="clock_12hr" type="checkbox" checked><span class="track"></span></span>
             </div>
             <p class="hint">Applies everywhere: radar HUD, clock screen, and settings. Off = 24-hour.</p>
-            <label for="default_clock">Default clock face</label>
+            <label for="default_clock">Daytime clock face</label>
             <select id="default_clock">
                 <option value="digital">Digital</option>
                 <option value="analog">Analog (altimeter)</option>
                 <option value="night">Analog (altimeter, night)</option>
                 <option value="flieger">Flieger chronograph</option>
             </select>
-            <p class="hint">Used when opening the clock from radar, auto-idle, or off-hours. Swipe between faces still works.</p>
+            <label for="default_clock_off_hours">Off-hours clock face</label>
+            <select id="default_clock_off_hours">
+                <option value="digital">Digital</option>
+                <option value="analog">Analog (altimeter)</option>
+                <option value="night">Analog (altimeter, night)</option>
+                <option value="flieger">Flieger chronograph</option>
+            </select>
+            <p class="hint">Daytime face is used outside the Off-Hours window; off-hours face while that schedule is active (force-clock, auto-idle, or opening the clock). Swipe between faces still works.</p>
             <div class="chk">
                 <label for="radar_hud">Show radar clock HUD</label>
                 <span class="switch"><input id="radar_hud" type="checkbox" checked><span class="track"></span></span>
@@ -1255,6 +1262,13 @@ async function loadAll() {
             const face = d.default_clock;
             $("default_clock").value = (face === "analog" || face === "night" || face === "flieger") ? face : "digital";
         }
+        if ($("default_clock_off_hours")) {
+            const nightFace = d.default_clock_off_hours;
+            $("default_clock_off_hours").value =
+                (nightFace === "analog" || nightFace === "night" || nightFace === "flieger")
+                    ? nightFace
+                    : "digital";
+        }
         if ($("radar_hud")) $("radar_hud").checked = d.radar_hud_enabled !== false;
         if ($("radar_hud_dark")) $("radar_hud_dark").checked = !!d.radar_hud_dark;
         if ($("radar_hud_position")) $("radar_hud_position").value = d.radar_hud_position === "bottom" ? "bottom" : "top";
@@ -1866,6 +1880,9 @@ async function saveAndReloadSettings() {
                 auto_idle_clock: $("idle_clock").checked,
                 clock_12hr: $("clock_12hr") ? $("clock_12hr").checked : true,
                 default_clock: $("default_clock") ? $("default_clock").value : "digital",
+                default_clock_off_hours: $("default_clock_off_hours")
+                    ? $("default_clock_off_hours").value
+                    : "digital",
                 radar_hud_enabled: $("radar_hud") ? $("radar_hud").checked : true,
                 radar_hud_dark: $("radar_hud_dark") ? $("radar_hud_dark").checked : false,
                 radar_hud_position: $("radar_hud_position") ? $("radar_hud_position").value : "top",
