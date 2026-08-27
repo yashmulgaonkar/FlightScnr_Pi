@@ -76,15 +76,15 @@ MAP_STYLES = (
     "satellite",
 )
 MAP_STYLE_LABELS = {
-    "dark": "Dark: Carto (needs CARTO_BASEMAPS_API_KEY)",
+    "dark": "Dark: Carto",
     "osm": "Dark: OSM",
     "stadia_dark": "Dark: Stadia (needs STADIA_MAPS_API_KEY)",
     "black": "Dark: Flat",
-    "light": "Light: Carto (needs CARTO_BASEMAPS_API_KEY)",
+    "light": "Light: Carto",
     "toner": "Light: Toner (needs STADIA_MAPS_API_KEY)",
     "vfr": "Light: VFR",
     "streets": "Street: Esri",
-    "voyager": "Street: Voyager (needs CARTO_BASEMAPS_API_KEY)",
+    "voyager": "Street: Voyager",
     "satellite": "Satellite: Esri",
 }
 FLAT_BLACK = (0, 0, 0)
@@ -236,6 +236,13 @@ def _carto_tile_url(style_path: str, z: int, x: int, y: int) -> str:
     return url
 
 
+def _carto_cache_auth(style: str) -> int | None:
+    """0 = no key, 1 = keyed; None for non-CARTO styles."""
+    if normalize_map_style(style) not in CARTO_STYLES:
+        return None
+    return 1 if _carto_api_key() else 0
+
+
 def _tile_url_for_log(url: str) -> str:
     if "api_key=" not in url and "key=" not in url:
         return url
@@ -314,17 +321,22 @@ def _cache_key_for_scale(scale_index: int) -> tuple | None:
         return None
     if not location_configured():
         return None
+    style = _resolved_style()
+    carto_auth = _carto_cache_auth(style)
     return (
         round(LOCATION_HOME[0], 5),
         round(LOCATION_HOME[1], 5),
         scale_index,
-        _resolved_style(),
+        style,
+        carto_auth if carto_auth is not None else -1,
     )
 
 
 def _cache_path_for_key(key: tuple) -> str:
     lat, lon, scale_idx, style = key[0], key[1], key[2], key[3]
-    return os.path.join(CACHE_DIR, f"bg_{style}_{lat}_{lon}_{scale_idx}.png")
+    auth = key[4] if len(key) > 4 else -1
+    auth_tag = f"_k{auth}" if auth in (0, 1) else ""
+    return os.path.join(CACHE_DIR, f"bg_{style}{auth_tag}_{lat}_{lon}_{scale_idx}.png")
 
 
 def _manifest_path_for_key(key: tuple) -> str:
@@ -904,6 +916,8 @@ def _save_cache(surface: pygame.Surface, key: tuple):
         "style_version": CACHE_STYLE_VERSION,
         "path": os.path.basename(path),
     }
+    if len(key) > 4 and key[4] in (0, 1):
+        manifest["carto_auth"] = key[4]
     tmp = manifest_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2)
@@ -926,6 +940,11 @@ def _load_cache(key: tuple) -> pygame.Surface | None:
             if manifest.get("scale_index") != key[2]:
                 return None
             if manifest.get("provider") != key[3]:
+                return None
+            if len(key) > 4 and key[4] in (0, 1):
+                if manifest.get("carto_auth") != key[4]:
+                    return None
+            elif manifest.get("carto_auth") in (0, 1):
                 return None
             if manifest.get("style_version") != CACHE_STYLE_VERSION:
                 return None

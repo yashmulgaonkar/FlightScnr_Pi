@@ -98,15 +98,15 @@ MAP_STYLES = (
     "satellite",
 )
 MAP_STYLE_LABELS = {
-    "dark": "Dark: Carto (needs CARTO_BASEMAPS_API_KEY)",
+    "dark": "Dark: Carto",
     "osm": "Dark: OSM",
     "stadia_dark": "Dark: Stadia (needs STADIA_MAPS_API_KEY)",
     "black": "Dark: Flat",
-    "light": "Light: Carto (needs CARTO_BASEMAPS_API_KEY)",
+    "light": "Light: Carto",
     "toner": "Light: Toner (needs STADIA_MAPS_API_KEY)",
     "vfr": "Light: VFR",
     "streets": "Street: Esri",
-    "voyager": "Street: Voyager (needs CARTO_BASEMAPS_API_KEY)",
+    "voyager": "Street: Voyager",
     "satellite": "Satellite: Esri",
 }
 
@@ -1696,7 +1696,7 @@ def map_style() -> str:
 
 
 def map_style_label() -> str:
-    return MAP_STYLE_LABELS.get(map_style(), "Dark: Carto (needs CARTO_BASEMAPS_API_KEY)")
+    return MAP_STYLE_LABELS.get(map_style(), "Dark: Carto")
 
 
 def set_map_style(value: str) -> str:

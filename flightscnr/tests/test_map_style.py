@@ -65,18 +65,11 @@ class TestMapStyle(unittest.TestCase):
         self.assertEqual(settings.MAP_STYLE_LABELS["black"], "Dark: Flat")
         self.assertEqual(settings.MAP_STYLE_LABELS["satellite"], "Satellite: Esri")
         self.assertEqual(settings.MAP_STYLE_LABELS["streets"], "Street: Esri")
-        self.assertEqual(
-            settings.MAP_STYLE_LABELS["dark"],
-            "Dark: Carto (needs CARTO_BASEMAPS_API_KEY)",
-        )
-        self.assertEqual(
-            settings.MAP_STYLE_LABELS["light"],
-            "Light: Carto (needs CARTO_BASEMAPS_API_KEY)",
-        )
-        self.assertEqual(
-            settings.MAP_STYLE_LABELS["voyager"],
-            "Street: Voyager (needs CARTO_BASEMAPS_API_KEY)",
-        )
+        self.assertEqual(settings.MAP_STYLE_LABELS["dark"], "Dark: Carto")
+        self.assertEqual(settings.MAP_STYLE_LABELS["light"], "Light: Carto")
+        self.assertEqual(settings.MAP_STYLE_LABELS["voyager"], "Street: Voyager")
+        for label in settings.MAP_STYLE_LABELS.values():
+            self.assertNotIn("CARTO_BASEMAPS_API_KEY", label)
 
     def test_map_style_label_flat_black(self):
         import display.round_touch.settings as settings
@@ -156,6 +149,72 @@ class TestMapStyle(unittest.TestCase):
             redacted,
             "https://a.basemaps.cartocdn.com/dark_nolabels/1/2/3.png?key=…",
         )
+
+    def test_carto_cache_path_includes_auth_suffix(self):
+        from display.round_touch import map_bg
+
+        key_k0 = (37.61966, -122.37204, 0, "dark", 0)
+        key_k1 = (37.61966, -122.37204, 0, "dark", 1)
+        key_osm = (37.61966, -122.37204, 0, "osm", -1)
+
+        path_k0 = map_bg._cache_path_for_key(key_k0)
+        path_k1 = map_bg._cache_path_for_key(key_k1)
+        path_osm = map_bg._cache_path_for_key(key_osm)
+
+        self.assertIn("bg_dark_k0_", path_k0)
+        self.assertIn("bg_dark_k1_", path_k1)
+        self.assertNotIn("_k0_", path_osm)
+        self.assertNotIn("_k1_", path_osm)
+        self.assertNotEqual(path_k0, path_k1)
+
+    def test_cache_key_for_scale_tracks_carto_auth(self):
+        from display.round_touch import map_bg
+
+        with patch("config.location_configured", return_value=True), patch(
+            "config.LOCATION_HOME", [37.62, -122.37]
+        ), patch.object(map_bg, "_resolved_style", return_value="dark"):
+            with patch.object(map_bg, "_carto_api_key", return_value=""):
+                key_no = map_bg._cache_key_for_scale(0)
+            with patch.object(map_bg, "_carto_api_key", return_value="secret"):
+                key_yes = map_bg._cache_key_for_scale(0)
+
+        self.assertEqual(key_no[-1], 0)
+        self.assertEqual(key_yes[-1], 1)
+        self.assertNotEqual(key_no, key_yes)
+
+    def test_load_cache_rejects_mismatched_carto_auth(self):
+        import json
+        import tempfile
+
+        import pygame
+
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        pygame.init()
+        from display.round_touch import map_bg
+
+        key_k1 = (37.61966, -122.37204, 0, "dark", 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(map_bg, "CACHE_DIR", tmp):
+                path = map_bg._cache_path_for_key(key_k1)
+                manifest_path = map_bg._manifest_path_for_key(key_k1)
+                os.makedirs(tmp, exist_ok=True)
+                surf = pygame.Surface((8, 8))
+                surf.fill((0, 0, 0))
+                pygame.image.save(surf, path)
+                with open(manifest_path, "w", encoding="utf-8") as fh:
+                    json.dump(
+                        {
+                            "home_lat": key_k1[0],
+                            "home_lon": key_k1[1],
+                            "scale_index": key_k1[2],
+                            "provider": key_k1[3],
+                            "carto_auth": 0,
+                            "style_version": map_bg.CACHE_STYLE_VERSION,
+                            "fetched_at": 1_700_000_000,
+                        },
+                        fh,
+                    )
+                self.assertIsNone(map_bg._load_cache(key_k1))
 
     def test_candidate_attribution(self):
         from display.round_touch import map_bg

@@ -681,11 +681,17 @@ def bbox_around(
     return lon - half, lat - half, lon + half, lat + half
 
 
-def _write_map_file(quake_id: str, data: bytes, *, suffix: str = ".png") -> str | None:
+def _write_map_file(
+    quake_id: str,
+    data: bytes,
+    *,
+    suffix: str = ".png",
+    basename: str | None = None,
+) -> str | None:
     if not data or not data.startswith((b"\x89PNG", b"\xff\xd8\xff")):
         logger.warning("Earthquake map: not an image for %s (%d bytes)", quake_id, len(data or b""))
         return None
-    safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", quake_id)[:80] or "quake"
+    safe = basename or (re.sub(r"[^a-zA-Z0-9_-]+", "_", quake_id)[:80] or "quake")
     path = os.path.join(_maps_dir(), f"{safe}{suffix}")
     tmp = path + ".tmp"
     try:
@@ -704,7 +710,25 @@ def _cached_map_path(quake_id: str) -> str | None:
         path = os.path.join(_maps_dir(), f"{safe}{suffix}")
         if os.path.isfile(path) and os.path.getsize(path) > 200:
             return path
+    try:
+        from display.round_touch import map_bg
+
+        auth = "k1" if map_bg._carto_api_key() else "k0"
+    except Exception:
+        auth = "k0"
+    for suffix in (".png", ".jpg"):
+        path = os.path.join(_maps_dir(), f"{safe}_carto_{auth}{suffix}")
+        if os.path.isfile(path) and os.path.getsize(path) > 200:
+            return path
     return None
+
+
+def _carto_map_basename(quake_id: str) -> str:
+    from display.round_touch import map_bg
+
+    safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", quake_id)[:80] or "quake"
+    auth = "k1" if map_bg._carto_api_key() else "k0"
+    return f"{safe}_carto_{auth}"
 
 
 def _http_get(
@@ -858,6 +882,8 @@ def _carto_export_map(lat: float, lon: float, quake_id: str) -> str | None:
 
     from PIL import Image
 
+    from display.round_touch import map_bg
+
     zoom = 11
     tx = _lon_to_tile_x(lon, zoom)
     ty = _lat_to_tile_y(lat, zoom)
@@ -867,25 +893,17 @@ def _carto_export_map(lat: float, lon: float, quake_id: str) -> str | None:
             x, y = tx + dx, ty + dy
             if x < 0 or y < 0:
                 continue
-            sub = "abcd"[(x + y) % 4]
-            url = (
-                f"https://{sub}.basemaps.cartocdn.com/rastertiles/voyager/"
-                f"{zoom}/{x}/{y}.png"
-            )
-            try:
-                from display.round_touch import map_bg
-
-                key = map_bg._carto_api_key()
-                if key:
-                    url = f"{url}?key={key}"
-            except Exception:
-                pass
+            url = map_bg._carto_tile_url("rastertiles/voyager", zoom, x, y)
             try:
                 resp = _http_get(url)
                 resp.raise_for_status()
                 tiles[(dx, dy)] = Image.open(BytesIO(resp.content)).convert("RGBA")
             except Exception as exc:
-                logger.debug("CARTO tile %s failed: %s", url.split("?", 1)[0], exc)
+                logger.debug(
+                    "CARTO tile %s failed: %s",
+                    map_bg._tile_url_for_log(url),
+                    exc,
+                )
     if not tiles:
         logger.warning("Earthquake CARTO snapshot got no tiles for %s", quake_id)
         return None
@@ -933,7 +951,12 @@ def _carto_export_map(lat: float, lon: float, quake_id: str) -> str | None:
         logger.debug("Could not overlay epicenter on CARTO map", exc_info=True)
     buf = BytesIO()
     image.save(buf, format="PNG")
-    return _write_map_file(quake_id, buf.getvalue(), suffix=".png")
+    return _write_map_file(
+        quake_id,
+        buf.getvalue(),
+        suffix=".png",
+        basename=_carto_map_basename(quake_id),
+    )
 
 
 def fetch_map_for_quake(quake: dict[str, Any]) -> str | None:
