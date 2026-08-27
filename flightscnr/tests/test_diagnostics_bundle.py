@@ -40,11 +40,29 @@ class DiagnosticsBundleTests(unittest.TestCase):
                 prefs["settings"]["weather_prefs"]["temperature_units"], "metric"
             )
 
+    def test_redact_value_covers_managed_keys(self):
+        for key in (
+            "CARTO_BASEMAPS_API_KEY",
+            "FIRMS_MAP_KEY",
+            "FLIGHTAWARE_API_KEY",
+            "ADSBEXCHANGE_API_KEY",
+            "OPENSKY_API_CLIENT_ID",
+        ):
+            with self.subTest(key=key):
+                self.assertEqual(
+                    diagnostics_bundle._redact_value(key, "secret-value"),
+                    "***REDACTED***",
+                )
+        self.assertEqual(diagnostics_bundle._redact_value("HOME_LAT", 37.62), 37.62)
+        self.assertEqual(diagnostics_bundle._redact_value("HOME_LON", -122.37), -122.37)
+
     def test_build_zip_includes_manifest_and_device(self):
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "update.log").write_text("ota line\n", encoding="utf-8")
             Path(tmp, "secrets.json").write_text(
-                '{"TOMORROW_API_KEY": "weather-secret"}', encoding="utf-8"
+                '{"TOMORROW_API_KEY": "weather-secret", '
+                '"CARTO_BASEMAPS_API_KEY": "carto-secret"}',
+                encoding="utf-8",
             )
             logs = Path(tmp) / "logs"
             logs.mkdir()
@@ -76,9 +94,14 @@ class DiagnosticsBundleTests(unittest.TestCase):
                     prefs["settings"]["secrets"]["TOMORROW_API_KEY"],
                     "***REDACTED***",
                 )
+                self.assertEqual(
+                    prefs["settings"]["secrets"]["CARTO_BASEMAPS_API_KEY"],
+                    "***REDACTED***",
+                )
                 # Ensure raw secret never appears anywhere in the zip.
                 raw = payload
                 self.assertNotIn(b"weather-secret", raw)
+                self.assertNotIn(b"carto-secret", raw)
                 self.assertNotIn(b"super-secret", raw)
 
                 manifest = json.loads(zf.read("manifest.json"))

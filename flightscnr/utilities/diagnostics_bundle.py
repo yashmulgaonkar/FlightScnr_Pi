@@ -37,14 +37,12 @@ MEMBER_TAIL_BYTES = 100_000
 JOURNAL_LINES = 2000
 JOURNAL_TIMEOUT_S = 10.0
 
-_REDACT_SECRET_KEYS = frozenset(
+_LOCATION_KEYS = frozenset({"HOME_LAT", "HOME_LON"})
+_SECRET_KEY_ALIASES = frozenset(
     {
-        "FR24_API_KEY",
-        "TOMORROW_API_KEY",
-        "AIRLABS_API_KEY",
-        "AISSTREAM_API_KEY",
-        "STADIA_MAPS_API_KEY",
-        "OPENSKY_CLIENT_ID",
+        "CARTO_API_KEY",  # env alias used by map_bg
+        "STADIA_API_KEY",  # env alias used by map_bg
+        "OPENSKY_CLIENT_ID",  # legacy / typo guard
         "OPENSKY_CLIENT_SECRET",
         "SMTP_PASSWORD",
         "EMAIL_PASSWORD",
@@ -55,6 +53,12 @@ _REDACT_SECRET_KEYS = frozenset(
         "apikey",
     }
 )
+
+
+def _secret_key_names() -> frozenset[str]:
+    from secrets_store import MANAGED_KEYS
+
+    return frozenset(k for k in MANAGED_KEYS if k not in _LOCATION_KEYS) | _SECRET_KEY_ALIASES
 
 
 class DiagnosticsBundleError(RuntimeError):
@@ -70,7 +74,9 @@ def _json_bytes(obj: Any) -> bytes:
 
 def _redact_value(key: str, value: Any) -> Any:
     key_l = str(key).lower()
-    if key in _REDACT_SECRET_KEYS or key_l in {k.lower() for k in _REDACT_SECRET_KEYS}:
+    secret_keys = _secret_key_names()
+    secret_keys_lower = {k.lower() for k in secret_keys}
+    if key in secret_keys or key_l in secret_keys_lower:
         if value is None or value == "":
             return value
         return "***REDACTED***"
