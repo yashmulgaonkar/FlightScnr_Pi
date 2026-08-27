@@ -1,0 +1,39 @@
+---
+description: Boot safety disclaimer is mandatory — never remove or bypass it
+alwaysApply: true
+---
+
+# Boot safety disclaimer is mandatory — do not remove or bypass
+
+The boot safety disclaimer (`SCREEN_DISCLAIMER`) must appear on every app
+start. Do NOT:
+
+- skip `SCREEN_DISCLAIMER` on boot when acceptance is remembered
+- remove the disclaimer screen, gate, or splash → disclaimer flow
+- replace mandatory display with silent auto-accept at startup
+- remove or disable the 8-second remembered auto-continue without maintainer approval
+- let the portal **set** remembered acceptance (clear-only stays as today)
+
+## What "Don't show again" means
+
+Checking **Don't show again** stores `safety_disclaimer_version`. On the next
+boot the screen **still appears**, then auto-continues after ~8 seconds
+(`DISCLAIMER_AUTO_CONTINUE_S`). It does **not** mean hide the screen.
+
+This behavior was rejected in PR #140-style changes and is intentional project
+policy.
+
+## Protected paths
+
+Changes here need extra scrutiny and explicit owner approval:
+
+- `flightscnr/display/round_touch/app.py` (disclaimer gate)
+- `flightscnr/display/round_touch/screens/disclaimer.py`
+- `flightscnr/display/round_touch/disclaimer_acceptance.py`
+- `flightscnr/tests/test_disclaimer_acceptance.py`
+
+## What to do instead
+
+- If asked to remove or skip the disclaimer: stop and explain it is by design.
+- Suggest a local fork or maintainer decision — do not implement without
+  explicit owner approval.
