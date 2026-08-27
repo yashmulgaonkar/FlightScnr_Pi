@@ -1726,6 +1726,29 @@ def settings_export():
     )
 
 
+@app.get("/diagnostics/export")
+def diagnostics_export():
+    """Download a support diagnostics zip (device info + logs, secrets redacted)."""
+    from utilities import diagnostics_bundle
+
+    try:
+        payload = diagnostics_bundle.build_diagnostics_zip(data_dir=DATA_DIR)
+    except diagnostics_bundle.DiagnosticsBundleError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 500
+    except Exception as exc:
+        return jsonify({"ok": False, "message": f"Diagnostics export failed: {exc}"}), 500
+
+    buf = BytesIO(payload)
+    buf.seek(0)
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=diagnostics_bundle.export_filename(),
+        mimetype="application/zip",
+        max_age=0,
+    )
+
+
 @app.post("/settings/import")
 def settings_import():
     """Upload a ``.config`` export and apply preference files to disk.
@@ -1789,4 +1812,10 @@ def settings_import():
 
 
 if __name__ == "__main__":
+    try:
+        from utilities.app_logging import configure_app_logging
+
+        configure_app_logging()
+    except Exception:
+        pass
     app.run(host="0.0.0.0", port=WEB_PORT, debug=False)

@@ -804,6 +804,10 @@
             <div class="track-row" style="margin-top:.55rem">
                 <button class="btn btn-primary" id="btn-export-settings" type="button">Download settings</button>
             </div>
+            <p class="hint" style="margin-top:.85rem">Download a diagnostics package for support (Pi model, OS, disk, recent logs). API keys are redacted. Attach the zip on Discord or a GitHub issue.</p>
+            <div class="track-row" style="margin-top:.55rem">
+                <button class="btn btn-primary" id="btn-export-diagnostics" type="button">Download diagnostics</button>
+            </div>
             <p class="hint" style="margin-top:.85rem">Restore from a previously downloaded <code>.config</code> file. This overwrites matching preference files on the Pi and relaunches the app.</p>
             <div class="track-row" style="margin-top:.55rem;align-items:center;flex-wrap:wrap;gap:.5rem">
                 <input id="import-settings-file" type="file" accept=".config,application/json,text/json" style="max-width:100%">
@@ -2730,6 +2734,14 @@ $("btn-export-settings").addEventListener("click", () => {
     setTimeout(() => {
         showStatus("export-status", "Download started — check your browser downloads.");
     }, 400);
+});
+
+$("btn-export-diagnostics").addEventListener("click", () => {
+    showStatus("export-status", "Building diagnostics package…");
+    window.location.href = "/diagnostics/export?t=" + Date.now();
+    setTimeout(() => {
+        showStatus("export-status", "Diagnostics download started — check your browser downloads.");
+    }, 600);
 });
 
 $("btn-import-settings").addEventListener("click", async () => {

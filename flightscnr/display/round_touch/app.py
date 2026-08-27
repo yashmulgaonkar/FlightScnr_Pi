@@ -1205,13 +1205,18 @@ class RoundTouchDisplay:
         gap = (now - self._frame_prev_at) if self._frame_prev_at else 0.0
         if self._frame_prev_at and gap >= _HITCH_GAP_S:
             try:
-                with open(_HITCH_LOG, "a", encoding="utf-8") as fh:
-                    fh.write(
+                from utilities.log_util import HITCH_LOG_MAX_BYTES, append_capped
+
+                append_capped(
+                    _HITCH_LOG,
+                    (
                         f"{time.time():.3f}\tgap_ms={gap * 1000:.0f}\t"
                         f"draw_ms={draw_s * 1000:.0f}\t"
                         f"proc={int(bool(self.overhead.processing))}\t"
                         f"grab={self.overhead.grab_seq}\n"
-                    )
+                    ),
+                    max_bytes=HITCH_LOG_MAX_BYTES,
+                )
             except Exception:
                 pass
         if self._frame_prev_at and FRAME_DEBUG:

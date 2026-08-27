@@ -71,5 +71,5 @@ body:
     id: diagnostics
     attributes:
       label: Diagnostics / logs (optional)
-      description: Relevant `journalctl`, `evtest`, portal settings, or other checks you already ran.
+      description: Prefer Portal → System → Download diagnostics, then attach the zip. Or paste relevant `journalctl` / portal settings.
       render: shell

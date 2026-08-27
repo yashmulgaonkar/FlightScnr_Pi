@@ -48,6 +48,17 @@ _AUTO_RESYNC_DELAY_S = 12.0
 _auto_resync_started = False
 
 
+def _open_update_log_append():
+    """Open update.log for append after a best-effort size trim."""
+    try:
+        from utilities.log_util import UPDATE_LOG_MAX_BYTES, trim_log_file
+
+        trim_log_file(UPDATE_LOG_PATH, max_bytes=UPDATE_LOG_MAX_BYTES)
+    except Exception:
+        pass
+    return open(UPDATE_LOG_PATH, "a", encoding="utf-8")
+
+
 def repo_root() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -1170,7 +1181,7 @@ def _spawn_portal_script(*, mode: str = "update", status_message: str) -> dict:
     os.makedirs(DATA_DIR, exist_ok=True)
     _write_status("running", status_message)
 
-    log_fh = open(UPDATE_LOG_PATH, "a", encoding="utf-8")
+    log_fh = _open_update_log_append()
     log_fh.write(
         f"\n--- {mode} started {datetime.now(timezone.utc).isoformat()} ---\n"
     )
@@ -1258,7 +1269,7 @@ def start_factory_reset() -> dict:
     os.makedirs(DATA_DIR, exist_ok=True)
     _write_status("running", "Factory reset started. Do not turn off.")
 
-    log_fh = open(UPDATE_LOG_PATH, "a", encoding="utf-8")
+    log_fh = _open_update_log_append()
     log_fh.write(
         f"\n--- factory-reset started {datetime.now(timezone.utc).isoformat()} ---\n"
     )
