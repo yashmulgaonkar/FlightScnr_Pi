@@ -49,6 +49,7 @@ from display.round_touch import (
     settings,
     theme,
     touch_debug,
+    follow_zoom,
     lofi_controls,
     video,
     wildfire_overlay,
@@ -1064,12 +1065,16 @@ class RoundTouchDisplay:
             if speed_known
             else self._live_map_last_radius_km
         )
-        self._live_map_last_radius_km = live_map.stabilize_radius_km(
-            self._live_map_last_radius_km,
-            radius_km,
-            have_speed=speed_known,
-            taxi_snap=taxi_snap,
-        )
+        manual_km = follow_zoom.manual_radius_km()
+        if manual_km is not None:
+            self._live_map_last_radius_km = manual_km
+        else:
+            self._live_map_last_radius_km = live_map.stabilize_radius_km(
+                self._live_map_last_radius_km,
+                radius_km,
+                have_speed=speed_known,
+                taxi_snap=taxi_snap,
+            )
 
         source = display_data.get("data_source") or "tracked"
         entry = {
@@ -1193,6 +1198,7 @@ class RoundTouchDisplay:
         if self._follow_photo_open:
             tracked.draw_follow_photo_popup(self.surface, overlay)
         tracked.draw_footer(self.surface, display_data)
+        follow_zoom.draw(self.surface)
         nav.draw_curved_breadcrumb(self.surface, trail, with_scrim=True)
 
     def _timeout_duration_s(self) -> float | None:
@@ -1607,6 +1613,8 @@ class RoundTouchDisplay:
             self._scroll.reset()
             self._settings_drag_y = None
             self._settings_drag_scrolled = False
+        if previous == SCREEN_LIVE and screen != SCREEN_LIVE:
+            follow_zoom.reset()
         if screen == SCREEN_LIVE and previous != SCREEN_LIVE:
             # Fresh entry into live tracking — force an immediate position fetch.
             self._live_map_last_fetch = 0.0
@@ -3968,6 +3976,17 @@ class RoundTouchDisplay:
                 # Absorb other taps while the popup is open.
                 else:
                     self._note_activity()
+                return
+            zoom_action = follow_zoom.hit_button(tap[0], tap[1])
+            if zoom_action:
+                new_km = follow_zoom.zoom(
+                    zoom_action, current_km=self._live_map_last_radius_km
+                )
+                follow_zoom.note_tap(zoom_action)
+                self._live_map_last_radius_km = new_km
+                self._live_map_last_fetch = 0.0
+                self._note_activity()
+                self._safe_draw()
                 return
             airport, airport_d2 = follow_overlays.pick_airport_at(tap[0], tap[1])
             aircraft_hit = tracked.follow_aircraft_hit(tap[0], tap[1])
