@@ -11,7 +11,8 @@
 
 Layout follows the AeroWatch METAR card (ident + flight-category badge,
 wind / visibility / sky / temp / altimeter rows) drawn in FlightScnr's
-frosted HUD chrome. Airports without a METAR show identity plus the FAA
+frosted HUD chrome with a yellow ident accent (``theme.TAG_TYPE``, same as the
+old airport callout on main). Airports without a METAR show identity plus the FAA
 service chips (tower / fuel / beacon). METAR fetches happen on a worker
 thread; the tile shows a fetching hint until data lands.
 """
@@ -220,6 +221,7 @@ def draw(surface: pygame.Surface) -> pygame.Rect | None:
     from utilities import metar as metar_mod
 
     glyph_rgb, fill_rgba = radar_hud._hud_chrome()
+    accent_rgb = theme.TAG_TYPE
     ident_font = _load(theme.s(15), bold=True)
     name_font = _load(max(8, theme.s(9)))
     label_font = _load(max(8, theme.s(9)), bold=True)
@@ -269,12 +271,12 @@ def draw(surface: pygame.Surface) -> pygame.Rect | None:
     panel = pygame.Surface((width, height), pygame.SRCALPHA)
     pygame.draw.rect(panel, fill_rgba, panel.get_rect(), border_radius=theme.s(10))
     pygame.draw.rect(
-        panel, (*glyph_rgb, 90), panel.get_rect(), width=max(1, theme.s(1)),
+        panel, (*accent_rgb, 90), panel.get_rect(), width=max(1, theme.s(1)),
         border_radius=theme.s(10),
     )
 
     y = pad
-    ident_img = ident_font.render(ident, True, glyph_rgb)
+    ident_img = ident_font.render(ident, True, accent_rgb)
     panel.blit(ident_img, (pad, y))
     # Flight-category badge, AeroWatch style.
     cat = (m or {}).get("flt_cat") if m else None
