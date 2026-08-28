@@ -798,7 +798,7 @@ _FOOTER_LABELS = {"prev": "Prev", "next": "Next"}
 
 
 def draw_curved_footer(surface: pygame.Surface, kinds: list[str]) -> None:
-    """Curved footer: outlined Prev/Next pills + bare oversized radar art."""
+    """Curved footer: frosted Prev/Next pills + bare oversized radar art."""
     if not kinds:
         return
     from display.round_touch import radar_hud
@@ -817,14 +817,7 @@ def draw_curved_footer(surface: pygame.Surface, kinds: list[str]) -> None:
             py = cy + int(round(r * math.sin(mid)))
             surface.blit(icon, icon.get_rect(center=(px, py)))
             continue
-        # Outline stroke first (slightly larger stamp), then the frosted fill.
-        edge = max(1, theme.s(2))
-        radar_hud._draw_curved_white_pill(
-            surface, cx, cy, r, mid, band + edge * 2,
-            (*glyph_color, 90),
-            arc_a0=mid - half - edge / float(max(1, r)),
-            arc_a1=mid + half + edge / float(max(1, r)),
-        )
+        # Single frosted pill — same material as the radar HUD (no outline halo).
         radar_hud._draw_curved_white_pill(
             surface, cx, cy, r, mid, band, fill_rgba,
             arc_a0=mid - half, arc_a1=mid + half,

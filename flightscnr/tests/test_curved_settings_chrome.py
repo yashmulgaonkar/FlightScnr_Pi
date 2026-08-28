@@ -261,11 +261,12 @@ class TestCurvedBreadcrumb:
 
     @pytest.mark.skipif(not _FONT_OK, reason="pygame.font unavailable on this host")
     def test_app_dispatch_keeps_straight_band_on_other_screens(self):
-        # The legacy straight hit path measures fonts, hence the guard.
-        from display.round_touch.app import RoundTouchDisplay, SCREEN_CLOCK
+        # Digital clock uses the curved band (see TestClockCurvedBreadcrumb); analog
+        # clock screens still use the legacy straight hit path.
+        from display.round_touch.app import RoundTouchDisplay, SCREEN_ANALOG_CLOCK
 
         fake = type("F", (), {})()
-        fake.screen = SCREEN_CLOCK
+        fake.screen = SCREEN_ANALOG_CLOCK
         top_edge_y = theme.CENTER_Y - int(theme.VISIBLE_RADIUS * 0.97)
         assert not RoundTouchDisplay._breadcrumb_tapped(fake, theme.CENTER_X, top_edge_y)
 
