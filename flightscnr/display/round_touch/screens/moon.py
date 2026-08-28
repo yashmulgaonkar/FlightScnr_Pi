@@ -14,7 +14,7 @@ nearly filling the dial over a sparse starfield, with the un-illuminated
 part shaded by a terminator mask. Phase and rise/set come from
 utilities/sun_moon.py (the AeroWatch port), computed for the currently
 selected radar location. Curved rim pills (radar-HUD style) show the
-phase name + illumination up top and moonrise/moonset with vector icons
+phase name + illumination up top and moonrise/moonset with PNG icons
 below; a tap hides the pills for a clean moon.
 
 Drawn as seen from the northern hemisphere: waxing lights up the right limb.
@@ -298,14 +298,17 @@ def _blit_arc_items(
         )
 
 
-# Soft moonlight silver-blue for the rise/set crescents.
+# Soft moonlight silver-blue for the vector rise/set fallback.
 _MOON_ICON_BLUE = (174, 191, 214)
-_RISE_SET_DIR = os.path.join(os.path.dirname(os.path.normpath(_ASSET_PATH)))
+_RISE_SET_DIR = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "..", "..", "assets", "weather", "moon",
+))
 _rise_set_cache: dict[tuple[str, int], pygame.Surface | None] = {}
 
 
 def _rise_set_asset(kind: str) -> pygame.Surface | None:
-    """White-on-transparent Noun Project crescent+arrow art (tintable)."""
+    """Moonrise/moonset PNG art from assets/weather/moon/."""
     key = (kind, 0)
     if key in _rise_set_cache:
         return _rise_set_cache[key]
@@ -336,14 +339,14 @@ def draw_rise_set_icon(
     up_arrow: bool,
     color: tuple[int, int, int] | None = None,
 ) -> None:
-    """Moonrise/moonset glyph: Noun Project crescent + arrow art, tinted.
+    """Moonrise/moonset glyph from assets/weather/moon/ PNG art.
 
     Falls back to a simple vector crescent+arrow when the asset is missing.
     """
     rgb = color or _MOON_ICON_BLUE
     art = _rise_set_asset("moonrise" if up_arrow else "moonset")
     if art is not None:
-        # Assets are pre-colored (deep-blue crescent, white arrow) — no tint.
+        # Assets are pre-colored — no runtime tint.
         icon = pygame.transform.smoothscale(art, (size, size))
         surface.blit(icon, icon.get_rect(center=center))
         return

@@ -307,8 +307,8 @@ class TestRiseSetIcons:
         assert white > 5   # arrow strokes
         assert blue > 50   # crescent body
 
-    def test_uses_noun_project_assets(self):
-        # The committed crescent+arrow art must load for both kinds.
+    def test_uses_rise_set_assets(self):
+        # The committed moonrise/moonset art must load for both kinds.
         assert moon._rise_set_asset("moonrise") is not None
         assert moon._rise_set_asset("moonset") is not None
 

@@ -8,8 +8,5 @@ rendered from Lunar Reconnaissance Orbiter data.
 - Credit: NASA's Scientific Visualization Studio / Ernie Wright
 - License: NASA imagery is not copyrighted (public domain); credit requested.
 
-## Rise/set icons
-
-`moonrise.png` / `moonset.png` are recolored rasters of "Moonrise" (icon
-217513) and "Moonset" (icon 217512) from the Noun Project
-(https://thenounproject.com), used under the Noun Project license.
+Moonrise/moonset icons live under `assets/weather/moon/` (see that folder's
+`ATTRIBUTION.md`).
