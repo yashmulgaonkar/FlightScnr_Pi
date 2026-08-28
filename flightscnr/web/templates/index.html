@@ -213,7 +213,7 @@
                 <option value="voyager">Street: Voyager (CARTO)</option>
                 <option value="satellite">Satellite: Esri</option>
             </select>
-            <p class="hint">Dark/Light/Street/Satellite Carto, OSM, Esri, Voyager, Flat, and VFR need no key. Dark: Stadia and Light: Toner need a free STADIA_MAPS_API_KEY. VFR sectionals are public-domain FAA charts (US coverage).</p>
+            <p class="hint">Dark/Light/Voyager Carto need a free CARTO_BASEMAPS_API_KEY. Dark: Stadia and Light: Toner need a free STADIA_MAPS_API_KEY. OSM, Esri, Flat, and VFR need no key. VFR sectionals are public-domain FAA charts (US coverage).</p>
             <label for="vfr_opacity">VFR map opacity <span id="vfr_opacity_label">45%</span></label>
             <input id="vfr_opacity" type="range" min="15" max="100" step="1" value="45">
             <p class="hint">How strong the VFR chart appears under traffic (lower = paler). Applies when map style is VFR.</p>
@@ -286,6 +286,20 @@
                 <label for="show_airport_icons">Show airport icons</label>
                 <span class="switch"><input id="show_airport_icons" type="checkbox"><span class="track"></span></span>
             </div>
+            <label for="airport_icon_style">Airport icon style</label>
+            <select id="airport_icon_style">
+                <option value="classic">Classic pins</option>
+                <option value="chart">Chart style (sectional)</option>
+            </select>
+            <p class="hint">Chart style draws VFR-sectional symbols: blue = towered, magenta = untowered, tines = fuel available, star = rotating beacon. Fuel/beacon marks use FAA data and are US airports only.</p>
+            <label for="airport_min_size">Smallest airports shown</label>
+            <select id="airport_min_size">
+                <option value="large">Large only</option>
+                <option value="medium">Large + medium</option>
+                <option value="small_paved">Small (paved only)</option>
+                <option value="small">All small strips</option>
+            </select>
+            <p class="hint">OurAirports tags most dirt strips and private fields as small airports. "Paved only" keeps small fields with at least one paved runway.</p>
             <p class="hint">Airport pin icons (airport.png) for large, medium, and small airports in range. Heliports and closed fields are skipped.</p>
             <div class="chk">
                 <label for="show_ground_vehicles">Show ground vehicles</label>
@@ -535,6 +549,16 @@
             <input id="radar_hud_opacity" type="range" min="0" max="100" step="1" value="72">
             <p class="hint">Frosted glass pill behind the radar clock and icons (0% = invisible fill, 100% = solid). Dark mode uses a dark pill with light glyphs.</p>
             <div class="chk">
+                <label for="radar_zoom_buttons">Radar zoom &minus;/+ buttons</label>
+                <span class="switch"><input id="radar_zoom_buttons" type="checkbox" checked><span class="track"></span></span>
+            </div>
+            <p class="hint">Faint &minus;/+ pill on the edge of the radar. Taps step the range like pinch zoom.</p>
+            <label for="radar_zoom_position">Zoom buttons position</label>
+            <select id="radar_zoom_position">
+                <option value="right">Right</option>
+                <option value="left">Left</option>
+            </select>
+            <div class="chk">
                 <label for="hourly_chime">Hourly chime</label>
                 <button class="btn btn-sm" id="btn-chime-preview" type="button">Preview</button>
                 <span class="switch"><input id="hourly_chime" type="checkbox"><span class="track"></span></span>
@@ -744,6 +768,14 @@
             <p class="hint" id="firms-hint"></p>
             <p class="hint">Free key from <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener">FIRMS map key</a>. Used for satellite hotspots when the radar is outside the USA and Canada. In California: CAL FIRE; elsewhere in USA/Canada: NIFC WFIGS (no key).</p>
             <div class="chk">
+                <label for="use-carto-basemaps">Use CARTO basemaps</label>
+                <span class="switch"><input id="use-carto-basemaps" type="checkbox" checked><span class="track"></span></span>
+            </div>
+            <label for="carto-key">CARTO basemaps API key</label>
+            <input type="password" id="carto-key" placeholder="API key" autocomplete="off">
+            <p class="hint" id="carto-hint"></p>
+            <p class="hint">Free key from <a href="https://carto.com/basemaps/apikey/" target="_blank" rel="noopener">CARTO basemaps</a> (no CARTO account required). Required for Dark: Carto, Light: Carto, and Street: Voyager — without it tiles show an “API key required” watermark.</p>
+            <div class="chk">
                 <label for="use-stadia-maps">Use Stadia Maps</label>
                 <span class="switch"><input id="use-stadia-maps" type="checkbox" checked><span class="track"></span></span>
             </div>
@@ -799,6 +831,10 @@
             <p class="hint">Download a backup of portal preferences (radar, display, alerts, weather, off-hours, favourites, location, ATC, and API keys). The file includes secrets — keep it private. Does not include maps, photos, or <code>/etc/flightscnr.env</code>.</p>
             <div class="track-row" style="margin-top:.55rem">
                 <button class="btn btn-primary" id="btn-export-settings" type="button">Download settings</button>
+            </div>
+            <p class="hint" style="margin-top:.85rem">Download a diagnostics package for support (Pi model, OS, disk, recent logs). API keys are redacted. Attach the zip on Discord or a GitHub issue.</p>
+            <div class="track-row" style="margin-top:.55rem">
+                <button class="btn btn-primary" id="btn-export-diagnostics" type="button">Download diagnostics</button>
             </div>
             <p class="hint" style="margin-top:.85rem">Restore from a previously downloaded <code>.config</code> file. This overwrites matching preference files on the Pi and relaunches the app.</p>
             <div class="track-row" style="margin-top:.55rem;align-items:center;flex-wrap:wrap;gap:.5rem">
@@ -949,6 +985,7 @@ function applyKeyHints(keys) {
         ADSBEXCHANGE_API_KEY: "adsbexchange-hint",
         FIRMS_MAP_KEY: "firms-hint",
         STADIA_MAPS_API_KEY: "stadia-hint",
+        CARTO_BASEMAPS_API_KEY: "carto-hint",
     };
     Object.entries(map).forEach(([key, id]) => {
         const el = $(id);
@@ -1255,6 +1292,8 @@ async function loadAll() {
         if ($("show_earthquakes")) $("show_earthquakes").checked = !!r.show_earthquakes;
         if ($("show_airport_centerlines")) $("show_airport_centerlines").checked = !!r.show_airport_centerlines;
         if ($("show_airport_icons")) $("show_airport_icons").checked = !!r.show_airport_icons;
+        if ($("airport_icon_style")) $("airport_icon_style").value = r.airport_icon_style || "classic";
+        if ($("airport_min_size")) $("airport_min_size").value = r.airport_min_size || "small";
         if ($("show_ground_vehicles")) $("show_ground_vehicles").checked = r.show_ground_vehicles !== false;
         $("traffic_mode").value = r.traffic_mode || (r.ais_enabled ? "both" : "aircraft");
         if ($("vessel_min_speed")) $("vessel_min_speed").value = String(r.vessel_min_speed_kt ?? 0);
@@ -1290,6 +1329,8 @@ async function loadAll() {
         if ($("radar_hud")) $("radar_hud").checked = d.radar_hud_enabled !== false;
         if ($("radar_hud_dark")) $("radar_hud_dark").checked = !!d.radar_hud_dark;
         if ($("background_texture")) $("background_texture").checked = d.background_texture !== false;
+        if ($("radar_zoom_buttons")) $("radar_zoom_buttons").checked = d.radar_zoom_buttons !== false;
+        if ($("radar_zoom_position")) $("radar_zoom_position").value = d.radar_zoom_position || "right";
         if ($("radar_hud_position")) $("radar_hud_position").value = d.radar_hud_position === "bottom" ? "bottom" : "top";
         if ($("radar_hud_opacity")) {
             $("radar_hud_opacity").value = String(d.radar_hud_opacity ?? 72);
@@ -1383,6 +1424,9 @@ async function loadAll() {
         }
         if ($("use-stadia-maps")) {
             $("use-stadia-maps").checked = toggles.USE_STADIA_MAPS !== false;
+        }
+        if ($("use-carto-basemaps")) {
+            $("use-carto-basemaps").checked = toggles.USE_CARTO_BASEMAPS !== false;
         }
         const rso = keys.route_source_order || {};
         if ($("route_source_order")) {
@@ -1641,6 +1685,8 @@ async function saveRadar() {
                 show_earthquakes: $("show_earthquakes") ? $("show_earthquakes").checked : false,
                 show_airport_centerlines: $("show_airport_centerlines") ? $("show_airport_centerlines").checked : false,
                 show_airport_icons: $("show_airport_icons") ? $("show_airport_icons").checked : false,
+                airport_icon_style: $("airport_icon_style") ? $("airport_icon_style").value : "classic",
+                airport_min_size: $("airport_min_size") ? $("airport_min_size").value : "small",
                 show_ground_vehicles: $("show_ground_vehicles") ? $("show_ground_vehicles").checked : true,
                 map_style: $("map_style").value,
                 vfr_map_opacity: Number($("vfr_opacity") ? $("vfr_opacity").value : 45),
@@ -1882,6 +1928,8 @@ async function saveAndReloadSettings() {
                 show_earthquakes: $("show_earthquakes") ? $("show_earthquakes").checked : false,
                 show_airport_centerlines: $("show_airport_centerlines") ? $("show_airport_centerlines").checked : false,
                 show_airport_icons: $("show_airport_icons") ? $("show_airport_icons").checked : false,
+                airport_icon_style: $("airport_icon_style") ? $("airport_icon_style").value : "classic",
+                airport_min_size: $("airport_min_size") ? $("airport_min_size").value : "small",
                 show_ground_vehicles: $("show_ground_vehicles") ? $("show_ground_vehicles").checked : true,
                 map_style: $("map_style").value,
                 vfr_map_opacity: Number($("vfr_opacity") ? $("vfr_opacity").value : 45),
@@ -1908,6 +1956,8 @@ async function saveAndReloadSettings() {
                 radar_hud_enabled: $("radar_hud") ? $("radar_hud").checked : true,
                 radar_hud_dark: $("radar_hud_dark") ? $("radar_hud_dark").checked : false,
                 background_texture: $("background_texture") ? $("background_texture").checked : true,
+                radar_zoom_buttons: $("radar_zoom_buttons") ? $("radar_zoom_buttons").checked : true,
+                radar_zoom_position: $("radar_zoom_position") ? $("radar_zoom_position").value : "right",
                 radar_hud_position: $("radar_hud_position") ? $("radar_hud_position").value : "top",
                 radar_hud_opacity: $("radar_hud_opacity") ? Number($("radar_hud_opacity").value) : 72,
                 hourly_chime_enabled: $("hourly_chime") ? $("hourly_chime").checked : false,
@@ -2140,6 +2190,7 @@ async function saveApiKeys(restart) {
                 adsbexchange_api_key: $("adsbexchange-key") ? $("adsbexchange-key").value : "",
                 firms_map_key: $("firms-key") ? $("firms-key").value : "",
                 stadia_maps_api_key: $("stadia-key") ? $("stadia-key").value : "",
+                carto_basemaps_api_key: $("carto-key") ? $("carto-key").value : "",
                 use_fr24_api: $("use-fr24-api").checked,
                 use_tomorrow_weather: $("use-tomorrow-weather").checked,
                 use_airlabs_api: $("use-airlabs-api").checked,
@@ -2148,6 +2199,7 @@ async function saveApiKeys(restart) {
                 use_opensky_api: $("use-opensky-api") ? $("use-opensky-api").checked : true,
                 use_adsbexchange_api: $("use-adsbexchange-api") ? $("use-adsbexchange-api").checked : false,
                 use_stadia_maps: $("use-stadia-maps") ? $("use-stadia-maps").checked : true,
+                use_carto_basemaps: $("use-carto-basemaps") ? $("use-carto-basemaps").checked : true,
                 restart: !!restart,
             }),
         });
@@ -2161,6 +2213,7 @@ async function saveApiKeys(restart) {
         if ($("adsbexchange-key")) $("adsbexchange-key").value = "";
         if ($("firms-key")) $("firms-key").value = "";
         if ($("stadia-key")) $("stadia-key").value = "";
+        if ($("carto-key")) $("carto-key").value = "";
         if (data.keys) applyKeyHints(data.keys);
         showStatus("api-keys-status", data.message || "API keys saved.");
     } catch (e) {
@@ -2721,6 +2774,14 @@ $("btn-export-settings").addEventListener("click", () => {
     setTimeout(() => {
         showStatus("export-status", "Download started — check your browser downloads.");
     }, 400);
+});
+
+$("btn-export-diagnostics").addEventListener("click", () => {
+    showStatus("export-status", "Building diagnostics package…");
+    window.location.href = "/diagnostics/export?t=" + Date.now();
+    setTimeout(() => {
+        showStatus("export-status", "Diagnostics download started — check your browser downloads.");
+    }, 600);
 });
 
 $("btn-import-settings").addEventListener("click", async () => {

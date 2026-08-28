@@ -21,12 +21,11 @@ for _stream in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
-# Configure logging for systemd (no timestamps — journald adds them)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(levelname)s: %(message)s",
-    stream=sys.stdout,
-)
+# Console → journald (no timestamps — journald adds them) plus a size-capped
+# rotating file under FLIGHTSCNR_DATA_DIR/logs/ for support downloads.
+from utilities.app_logging import configure_app_logging
+
+configure_app_logging()
 logger = logging.getLogger("flightscnr")
 
 
@@ -123,16 +122,26 @@ if __name__ == "__main__":
     # Validate configuration before starting
     validate_config()
 
+    try:
+        from utilities.device_info import log_startup_device_info
+
+        log_startup_device_info()
+    except Exception:
+        logger.debug("Startup device info failed", exc_info=True)
+
     # Build path to web/app.py
     app_path = os.path.join(base_dir, "web", "app.py")
 
     # Start Flask server in background (use same interpreter as this process)
+    logger.info("Starting web portal")
     web_server = subprocess.Popen([sys.executable, app_path])
 
     # Start round touch display loop
     from display import Display
     display = Display()
     try:
+        logger.info("Starting display loop")
         display.run()
     finally:
+        logger.info("Display loop ended — shutting down web portal")
         stop_web_server(web_server)

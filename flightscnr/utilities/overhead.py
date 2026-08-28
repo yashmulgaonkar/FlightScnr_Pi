@@ -600,8 +600,9 @@ def _log_route_audit(callsign, aircraft_type, distance, source, origin, destinat
     route_str = f"{origin or '?'}->{destination or '?'}"
     line = f"{ts} [{HOSTNAME}] {callsign} {aircraft_type} {distance:.1f} {source} {route_str}\n"
     try:
-        with open(ROUTE_AUDIT_LOG, "a", encoding="utf-8") as f:
-            f.write(line)
+        from utilities.log_util import ROUTE_AUDIT_MAX_BYTES, append_capped
+
+        append_capped(ROUTE_AUDIT_LOG, line, max_bytes=ROUTE_AUDIT_MAX_BYTES)
     except Exception:
         pass
 

@@ -314,6 +314,10 @@ _defaults = {
     "show_airport_centerlines": True,
     # airport.png pins for large/medium/small airports in range.
     "show_airport_icons": True,
+    # classic (airport.png pin) | chart (sectional-style vector icon).
+    "airport_icon_style": "classic",
+    # large | medium | small_paved | small — smallest airport tier drawn.
+    "airport_min_size": "small",
     # Airport ground vehicles (GRND/GVEH/… icon category) on the radar.
     "show_ground_vehicles": True,
     # Hide AIS vessels at or below this SOG (knots). 0 = show all speeds.
@@ -367,6 +371,10 @@ _defaults = {
     "radar_hud_dark": True,
     # Topo contour texture behind settings/detail screens.
     "background_texture": True,
+    # Faint − / + range-step buttons on the radar rim.
+    "radar_zoom_buttons": True,
+    # right | left — which rim edge holds the zoom pill.
+    "radar_zoom_position": "right",
     "radar_hud_arrange": False,  # legacy; arrange is gated by FLIGHTSCNR_HUD_ARRANGE
     "radar_hud_layout_top": copy_radar_hud_layout_top_default(),
     "radar_hud_layout_bottom": copy_radar_hud_layout_bottom_default(),
@@ -1119,6 +1127,8 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("earthquake_voice_enabled"),
         state.get("show_airport_centerlines"),
         state.get("show_airport_icons"),
+        str(state.get("airport_icon_style") or "classic"),
+        str(state.get("airport_min_size") or "small"),
         state.get("show_ground_vehicles"),
         state.get("vessel_min_speed_kt"),
         state.get("aircraft_min_speed_kt"),
@@ -1154,6 +1164,8 @@ def _settings_snapshot(state: dict) -> tuple:
         clamp_radar_hud_opacity(state.get("radar_hud_opacity", 72)),
         bool(state.get("radar_hud_dark", True)),
         bool(state.get("background_texture", True)),
+        bool(state.get("radar_zoom_buttons", True)),
+        str(state.get("radar_zoom_position") or "right"),
         bool(radar_hud_arrange_debug_enabled()),
         tuple(
             sorted(
@@ -1614,6 +1626,55 @@ def toggle_show_airport_icons():
 def set_show_airport_icons(enabled: bool):
     _state["show_airport_icons"] = bool(enabled)
     _save(_state)
+
+
+AIRPORT_ICON_STYLES = ("classic", "chart")
+AIRPORT_ICON_STYLE_LABELS = {"classic": "Classic pins", "chart": "Chart style"}
+
+
+def airport_icon_style() -> str:
+    style = str(_state.get("airport_icon_style") or "classic").strip().lower()
+    return style if style in AIRPORT_ICON_STYLES else "classic"
+
+
+def set_airport_icon_style(style: str) -> str:
+    value = str(style or "classic").strip().lower()
+    if value not in AIRPORT_ICON_STYLES:
+        value = "classic"
+    _state["airport_icon_style"] = value
+    _save(_state)
+    return value
+
+
+def airport_icon_style_label() -> str:
+    return AIRPORT_ICON_STYLE_LABELS.get(airport_icon_style(), "Classic pins")
+
+
+AIRPORT_MIN_SIZES = ("large", "medium", "small_paved", "small")
+AIRPORT_MIN_SIZE_LABELS = {
+    "large": "Large only",
+    "medium": "Large + medium",
+    "small_paved": "Small (paved only)",
+    "small": "All small strips",
+}
+
+
+def airport_min_size() -> str:
+    size = str(_state.get("airport_min_size") or "small").strip().lower()
+    return size if size in AIRPORT_MIN_SIZES else "small"
+
+
+def set_airport_min_size(size: str) -> str:
+    value = str(size or "small").strip().lower()
+    if value not in AIRPORT_MIN_SIZES:
+        value = "small"
+    _state["airport_min_size"] = value
+    _save(_state)
+    return value
+
+
+def airport_min_size_label() -> str:
+    return AIRPORT_MIN_SIZE_LABELS.get(airport_min_size(), "All small strips")
 
 
 def show_ground_vehicles() -> bool:
@@ -2565,6 +2626,38 @@ def set_radar_hud_dark(enabled: bool) -> None:
 def toggle_radar_hud_dark() -> bool:
     set_radar_hud_dark(not radar_hud_dark())
     return radar_hud_dark()
+
+
+RADAR_ZOOM_POSITIONS = ("right", "left")
+
+
+def radar_zoom_buttons() -> bool:
+    """Faint − / + range buttons on the radar rim."""
+    return bool(_state.get("radar_zoom_buttons", True))
+
+
+def radar_zoom_position() -> str:
+    pos = str(_state.get("radar_zoom_position") or "right").strip().lower()
+    return pos if pos in RADAR_ZOOM_POSITIONS else "right"
+
+
+def set_radar_zoom_position(position: str) -> str:
+    pos = str(position or "right").strip().lower()
+    if pos not in RADAR_ZOOM_POSITIONS:
+        pos = "right"
+    _state["radar_zoom_position"] = pos
+    _save(_state)
+    return pos
+
+
+def set_radar_zoom_buttons(enabled: bool) -> None:
+    _state["radar_zoom_buttons"] = bool(enabled)
+    _save(_state)
+
+
+def toggle_radar_zoom_buttons() -> bool:
+    set_radar_zoom_buttons(not radar_zoom_buttons())
+    return radar_zoom_buttons()
 
 
 def radar_hud_arrange() -> bool:

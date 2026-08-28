@@ -45,6 +45,21 @@ RADAR_AIRPORT_TYPES = frozenset(
     {"large_airport", "medium_airport", "small_airport"}
 )
 
+# Portal / on-device "minimum airport size" tiers. ``small_paved`` uses the
+# same types as ``small`` plus a paved-runway check in iter_airports_near.
+AIRPORT_SIZE_TIERS = {
+    "large": frozenset({"large_airport"}),
+    "medium": frozenset({"large_airport", "medium_airport"}),
+    "small_paved": RADAR_AIRPORT_TYPES,
+    "small": RADAR_AIRPORT_TYPES,
+}
+
+
+def types_for_min_size(size: str) -> frozenset:
+    return AIRPORT_SIZE_TIERS.get(
+        str(size or "").strip().lower(), RADAR_AIRPORT_TYPES
+    )
+
 # In-memory lookup: both IATA and ICAO -> {lat, lon, name?, type?}
 _db = {}
 _loaded = False
@@ -186,6 +201,7 @@ def iter_airports_near(
     lon: float,
     max_km: float,
     types: frozenset[str] | set[str] | None = None,
+    small_paved_only: bool = False,
 ) -> list[dict]:
     """Unique airport points within ``max_km`` of ``lat,lon``.
 
@@ -219,6 +235,11 @@ def iter_airports_near(
         atype = (rec.get("type") or "").strip().lower()
         if wanted and atype not in wanted:
             continue
+        if small_paved_only and atype == "small_airport":
+            from utilities import runways
+
+            if not runways.has_paved_runway(ident):
+                continue
         try:
             alat = float(rec["lat"])
             alon = float(rec["lon"])

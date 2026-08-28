@@ -61,7 +61,7 @@ Radar home, flight detail, **tracked flight** with route map, **Follow / Live** 
 
 ### Map layers
 
-Ten basemap styles: CARTO dark/light/Voyager, OSM dark, **Dark Flat** (solid black), Stadia dark + Toner (free `STADIA_MAPS_API_KEY`), Esri streets/satellite, and free FAA VFR sectionals (US). Optional **tag leaders**, **color by altitude**, precipitation, airport overlays, wildfires, and earthquakes.
+Ten basemap styles: CARTO dark/light/Voyager (free `CARTO_BASEMAPS_API_KEY`), OSM dark, **Dark Flat** (solid black), Stadia dark + Toner (free `STADIA_MAPS_API_KEY`), Esri streets/satellite, and free FAA VFR sectionals (US). Optional **tag leaders**, **color by altitude**, precipitation, airport overlays, wildfires, and earthquakes.
 
 <table>
 <tr>

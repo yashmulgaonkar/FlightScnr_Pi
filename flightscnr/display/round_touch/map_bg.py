@@ -10,15 +10,15 @@
 """Cached map background for the radar screen.
 
 Styles (settings map_style, fallback RADAR_MAP_PROVIDER):
-  dark — CARTO Dark Matter, no labels (default)
+  dark — CARTO Dark Matter, no labels (default; needs CARTO_BASEMAPS_API_KEY)
   osm — OpenStreetMap tiles remapped to a dark radar palette
   stadia_dark — Stadia Alidade Smooth Dark, lifted for radar (needs STADIA_MAPS_API_KEY)
   toner — Stamen Toner B&W (full style; needs Stadia key)
   satellite — Esri World Imagery (no API key)
   streets — Esri World Street Map, Google-like roadmap (no API key)
   black — solid black circle (no tiles)
-  light — CARTO Positron light, no labels
-  voyager — CARTO Voyager (color street map), no labels
+  light — CARTO Positron light, no labels (needs CARTO_BASEMAPS_API_KEY)
+  voyager — CARTO Voyager (color street map), no labels (needs CARTO_BASEMAPS_API_KEY)
   vfr  — FAA VFR sectional charts (US coverage, public domain)
 """
 
@@ -92,6 +92,7 @@ FLAT_BLACK = (0, 0, 0)
 OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 CARTO_SUBDOMAINS = "abcd"
 CARTO_TILE_URL = "https://{sub}.basemaps.cartocdn.com/{style}/{z}/{x}/{y}.png"
+CARTO_STYLES = frozenset({"dark", "light", "voyager"})
 # ArcGIS MapServer tiles use {z}/{y}/{x} (row/col), not OSM {z}/{x}/{y}.
 VFR_TILE_URL = (
     "https://tiles.arcgis.com/tiles/ssFJjBXIUyZDrSYZ/arcgis/rest/services/"
@@ -118,7 +119,9 @@ CARTO_TILE_WORKERS = 4
 OSM_TILE_WORKERS = 2
 VFR_TILE_WORKERS = 4
 CACHE_TTL_S = 7 * 24 * 3600
-CACHE_STYLE_VERSION = 22  # bump when map tint/placement/styles change
+# Bump when map tint/placement/styles change, or when tile auth changes so
+# watermarked/unauthorized cached PNGs are not kept after an upgrade.
+CACHE_STYLE_VERSION = 23
 
 
 _lock = threading.Lock()
@@ -129,6 +132,7 @@ _surfaces: dict[tuple, pygame.Surface] = {}
 _display_converted: set[tuple] = set()
 _fetch_threads: dict[tuple, threading.Thread] = {}
 _stadia_key_warned = False
+_carto_key_warned = False
 
 
 def normalize_map_style(raw: str | None) -> str:
@@ -198,6 +202,23 @@ def _stadia_api_key() -> str:
     return raw.split("#", 1)[0].strip()
 
 
+def _carto_api_key() -> str:
+    """Free CARTO basemap key (raster tiles watermark without it)."""
+    try:
+        from secrets_store import api_enabled
+
+        if not api_enabled("CARTO_BASEMAPS_API_KEY"):
+            return ""
+    except Exception:
+        pass
+    raw = (
+        os.environ.get("CARTO_BASEMAPS_API_KEY")
+        or os.environ.get("CARTO_API_KEY")
+        or ""
+    )
+    return raw.split("#", 1)[0].strip()
+
+
 def _stadia_tile_url(style_id: str, z: int, x: int, y: int) -> str:
     url = STADIA_TILE_URL.format(style=style_id, z=z, x=x, y=y)
     key = _stadia_api_key()
@@ -206,10 +227,29 @@ def _stadia_tile_url(style_id: str, z: int, x: int, y: int) -> str:
     return url
 
 
+def _carto_tile_url(style_path: str, z: int, x: int, y: int) -> str:
+    sub = CARTO_SUBDOMAINS[(x + y) % len(CARTO_SUBDOMAINS)]
+    url = CARTO_TILE_URL.format(sub=sub, style=style_path, z=z, x=x, y=y)
+    key = _carto_api_key()
+    if key:
+        return f"{url}?key={key}"
+    return url
+
+
+def _carto_cache_auth(style: str) -> int | None:
+    """0 = no key, 1 = keyed; None for non-CARTO styles."""
+    if normalize_map_style(style) not in CARTO_STYLES:
+        return None
+    return 1 if _carto_api_key() else 0
+
+
 def _tile_url_for_log(url: str) -> str:
-    if "api_key=" not in url:
+    if "api_key=" not in url and "key=" not in url:
         return url
-    return url.split("?", 1)[0] + "?api_key=…"
+    base = url.split("?", 1)[0]
+    if "api_key=" in url:
+        return base + "?api_key=…"
+    return base + "?key=…"
 
 
 def _enabled() -> bool:
@@ -241,8 +281,7 @@ def _tile_url(z: int, x: int, y: int, style: str | None = None) -> str:
     if style == "black":
         return ""
     if style == "dark":
-        sub = CARTO_SUBDOMAINS[(x + y) % len(CARTO_SUBDOMAINS)]
-        return CARTO_TILE_URL.format(sub=sub, style="dark_nolabels", z=z, x=x, y=y)
+        return _carto_tile_url("dark_nolabels", z, x, y)
     if style == "stadia_dark":
         return _stadia_tile_url("alidade_smooth_dark", z, x, y)
     if style == "toner":
@@ -253,13 +292,9 @@ def _tile_url(z: int, x: int, y: int, style: str | None = None) -> str:
     if style == "streets":
         return ESRI_WORLD_STREET_URL.format(z=z, y=y, x=x)
     if style == "light":
-        sub = CARTO_SUBDOMAINS[(x + y) % len(CARTO_SUBDOMAINS)]
-        return CARTO_TILE_URL.format(sub=sub, style="light_nolabels", z=z, x=x, y=y)
+        return _carto_tile_url("light_nolabels", z, x, y)
     if style == "voyager":
-        sub = CARTO_SUBDOMAINS[(x + y) % len(CARTO_SUBDOMAINS)]
-        return CARTO_TILE_URL.format(
-            sub=sub, style="rastertiles/voyager_nolabels", z=z, x=x, y=y
-        )
+        return _carto_tile_url("rastertiles/voyager_nolabels", z, x, y)
     if style == "vfr":
         # FAA ArcGIS: level / row / col
         return VFR_TILE_URL.format(z=z, y=y, x=x)
@@ -286,17 +321,22 @@ def _cache_key_for_scale(scale_index: int) -> tuple | None:
         return None
     if not location_configured():
         return None
+    style = _resolved_style()
+    carto_auth = _carto_cache_auth(style)
     return (
         round(LOCATION_HOME[0], 5),
         round(LOCATION_HOME[1], 5),
         scale_index,
-        _resolved_style(),
+        style,
+        carto_auth if carto_auth is not None else -1,
     )
 
 
 def _cache_path_for_key(key: tuple) -> str:
     lat, lon, scale_idx, style = key[0], key[1], key[2], key[3]
-    return os.path.join(CACHE_DIR, f"bg_{style}_{lat}_{lon}_{scale_idx}.png")
+    auth = key[4] if len(key) > 4 else -1
+    auth_tag = f"_k{auth}" if auth in (0, 1) else ""
+    return os.path.join(CACHE_DIR, f"bg_{style}{auth_tag}_{lat}_{lon}_{scale_idx}.png")
 
 
 def _manifest_path_for_key(key: tuple) -> str:
@@ -404,6 +444,16 @@ def _fetch_tile(
             logger.warning(
                 "Basemap %s needs STADIA_MAPS_API_KEY in /etc/flightscnr.env "
                 "(free key at stadiamaps.com); tiles will 401 without it",
+                style,
+            )
+    if style in CARTO_STYLES and not _carto_api_key():
+        global _carto_key_warned
+        if not _carto_key_warned:
+            _carto_key_warned = True
+            logger.warning(
+                "Basemap %s needs CARTO_BASEMAPS_API_KEY in /etc/flightscnr.env "
+                "or the portal (free key at carto.com/basemaps/apikey); "
+                "tiles show an API-key watermark without it",
                 style,
             )
     for attempt in range(3):
@@ -866,6 +916,8 @@ def _save_cache(surface: pygame.Surface, key: tuple):
         "style_version": CACHE_STYLE_VERSION,
         "path": os.path.basename(path),
     }
+    if len(key) > 4 and key[4] in (0, 1):
+        manifest["carto_auth"] = key[4]
     tmp = manifest_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2)
@@ -888,6 +940,11 @@ def _load_cache(key: tuple) -> pygame.Surface | None:
             if manifest.get("scale_index") != key[2]:
                 return None
             if manifest.get("provider") != key[3]:
+                return None
+            if len(key) > 4 and key[4] in (0, 1):
+                if manifest.get("carto_auth") != key[4]:
+                    return None
+            elif manifest.get("carto_auth") in (0, 1):
                 return None
             if manifest.get("style_version") != CACHE_STYLE_VERSION:
                 return None

@@ -83,6 +83,8 @@ DISPLAY_ACTIONS = (
     "rim_style",
     "units",
     "range",
+    "zoom_buttons",
+    "zoom_position",
     "rotate",
     "background_texture",
     "brightness",
@@ -119,6 +121,8 @@ LAYERS_ACTIONS = (
     "earthquakes",
     "airport_centerlines",
     "airport_icons",
+    "airport_icon_style",
+    "airport_size",
     "ground_vehicles",
     "idle_clock",
     "default_clock",
@@ -188,6 +192,9 @@ LIST_PICKER_KINDS = frozenset(
         "default_clock",
         "default_clock_off_hours",
         "hud_dark",
+        "airport_icon_style",
+        "airport_size",
+        "zoom_position",
     }
 )
 _LIST_PICKER_TITLES = {
@@ -210,6 +217,9 @@ _LIST_PICKER_TITLES = {
     "quiet_start": "Quiet start",
     "quiet_end": "Quiet end",
     "hud_position": "Clock position",
+    "airport_icon_style": "Icon style",
+    "airport_size": "Airport size",
+    "zoom_position": "Zoom position",
     "default_clock": "Daytime clock",
     "default_clock_off_hours": "Off-hours clock",
     "hud_dark": "HUD style",
@@ -527,10 +537,28 @@ def _build_settings_picker_items(kind: str) -> list[dict]:
         )
         slots = [format_hhmm(mins) for mins in range(0, 24 * 60, 30)]
         return _enum_picker_items(slots, current, format_hhmm_12h)
+    if kind == "airport_icon_style":
+        return _enum_picker_items(
+            settings.AIRPORT_ICON_STYLES,
+            settings.airport_icon_style(),
+            lambda style: settings.AIRPORT_ICON_STYLE_LABELS.get(style, str(style)),
+        )
+    if kind == "airport_size":
+        return _enum_picker_items(
+            settings.AIRPORT_MIN_SIZES,
+            settings.airport_min_size(),
+            lambda size: settings.AIRPORT_MIN_SIZE_LABELS.get(size, str(size)),
+        )
     if kind == "hud_position":
         return _enum_picker_items(
             settings.RADAR_HUD_POSITIONS,
             settings.radar_hud_position(),
+            lambda pos: str(pos).title(),
+        )
+    if kind == "zoom_position":
+        return _enum_picker_items(
+            settings.RADAR_ZOOM_POSITIONS,
+            settings.radar_zoom_position(),
             lambda pos: str(pos).title(),
         )
     if kind == "default_clock":
@@ -1853,6 +1881,8 @@ def _display_row_labels() -> list[str]:
         f"Rim Targets › {settings.rim_target_style_label()}",
         f"Units › {settings.unit_preset_label()}",
         f"Radar Range › {settings.scale_label()}",
+        "Zoom −/+ Buttons",
+        f"Zoom Position › {settings.radar_zoom_position().title()}",
         f"Rotate Screen › {settings.display_rotation()}°",
         "Background Texture",
         "",  # brightness slider
@@ -1901,6 +1931,8 @@ def _layers_row_labels() -> list[str]:
         "Show Earthquakes",
         "Show Airport Centerlines",
         "Show Airport Icons",
+        f"Icon Style \u203a {settings.airport_icon_style_label()}",
+        f"Airports \u203a {settings.airport_min_size_label()}",
         "Show Ground Vehicles",
         "Auto Idle Clock",
         f"Daytime Clock › {settings.default_clock_label()}",
@@ -1921,6 +1953,7 @@ _TOGGLE_ROW_STATE = {
     "color_by_altitude": settings.color_by_altitude,
     "radar_hud": settings.radar_hud_enabled,
     "background_texture": settings.background_texture,
+    "zoom_buttons": settings.radar_zoom_buttons,
     "precipitation": settings.show_precipitation,
     "wildfires": settings.show_wildfires,
     "earthquakes": settings.show_earthquakes,

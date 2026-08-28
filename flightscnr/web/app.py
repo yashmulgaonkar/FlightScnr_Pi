@@ -878,6 +878,8 @@ def display_json():
             "radar_hud_opacity": settings.radar_hud_opacity(),
             "radar_hud_dark": settings.radar_hud_dark(),
             "background_texture": settings.background_texture(),
+            "radar_zoom_buttons": settings.radar_zoom_buttons(),
+            "radar_zoom_position": settings.radar_zoom_position(),
             "hourly_chime_enabled": settings.hourly_chime_enabled(),
             "hourly_chime_volume": settings.hourly_chime_volume(),
             "traffic_sfx_enabled": settings.traffic_sfx_enabled(),
@@ -933,6 +935,10 @@ def display_save():
         settings.set_radar_hud_dark(bool(data.get("radar_hud_dark")))
     if "background_texture" in data:
         settings.set_background_texture(bool(data.get("background_texture")))
+    if "radar_zoom_buttons" in data:
+        settings.set_radar_zoom_buttons(bool(data.get("radar_zoom_buttons")))
+    if "radar_zoom_position" in data:
+        settings.set_radar_zoom_position(str(data.get("radar_zoom_position") or "right"))
     if "hourly_chime_enabled" in data:
         settings.set_hourly_chime_enabled(bool(data.get("hourly_chime_enabled")))
     if "hourly_chime_volume" in data:
@@ -982,6 +988,8 @@ def display_save():
             "radar_hud_opacity": settings.radar_hud_opacity(),
             "radar_hud_dark": settings.radar_hud_dark(),
             "background_texture": settings.background_texture(),
+            "radar_zoom_buttons": settings.radar_zoom_buttons(),
+            "radar_zoom_position": settings.radar_zoom_position(),
             "hourly_chime_enabled": settings.hourly_chime_enabled(),
             "hourly_chime_volume": settings.hourly_chime_volume(),
             "traffic_sfx_enabled": settings.traffic_sfx_enabled(),
@@ -1133,6 +1141,8 @@ def radar_json():
             "earthquake_voice_enabled": settings.earthquake_voice_enabled(),
             "show_airport_centerlines": settings.show_airport_centerlines(),
             "show_airport_icons": settings.show_airport_icons(),
+            "airport_icon_style": settings.airport_icon_style(),
+            "airport_min_size": settings.airport_min_size(),
             "show_ground_vehicles": settings.show_ground_vehicles(),
             "traffic_mode": settings.traffic_mode(),
             "ais_enabled": settings.ais_enabled(),
@@ -1313,6 +1323,16 @@ def radar_save():
             settings.set_show_airport_centerlines(bool(data.get("show_airport_centerlines")))
         if "show_airport_icons" in data:
             settings.set_show_airport_icons(bool(data.get("show_airport_icons")))
+        airport_overlay.invalidate()
+    if "airport_icon_style" in data:
+        from display.round_touch import airport_overlay
+
+        settings.set_airport_icon_style(str(data.get("airport_icon_style") or "classic"))
+        airport_overlay.invalidate()
+    if "airport_min_size" in data:
+        from display.round_touch import airport_overlay
+
+        settings.set_airport_min_size(str(data.get("airport_min_size") or "small"))
         airport_overlay.invalidate()
     if "show_ground_vehicles" in data:
         settings.set_show_ground_vehicles(bool(data.get("show_ground_vehicles")))
@@ -1730,6 +1750,29 @@ def settings_export():
     )
 
 
+@app.get("/diagnostics/export")
+def diagnostics_export():
+    """Download a support diagnostics zip (device info + logs, secrets redacted)."""
+    from utilities import diagnostics_bundle
+
+    try:
+        payload = diagnostics_bundle.build_diagnostics_zip(data_dir=DATA_DIR)
+    except diagnostics_bundle.DiagnosticsBundleError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 500
+    except Exception as exc:
+        return jsonify({"ok": False, "message": f"Diagnostics export failed: {exc}"}), 500
+
+    buf = BytesIO(payload)
+    buf.seek(0)
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=diagnostics_bundle.export_filename(),
+        mimetype="application/zip",
+        max_age=0,
+    )
+
+
 @app.post("/settings/import")
 def settings_import():
     """Upload a ``.config`` export and apply preference files to disk.
@@ -1793,4 +1836,10 @@ def settings_import():
 
 
 if __name__ == "__main__":
+    try:
+        from utilities.app_logging import configure_app_logging
+
+        configure_app_logging()
+    except Exception:
+        pass
     app.run(host="0.0.0.0", port=WEB_PORT, debug=False)

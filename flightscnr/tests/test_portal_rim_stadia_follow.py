@@ -102,5 +102,37 @@ class TestStadiaToggle(unittest.TestCase):
             self.assertEqual(map_bg._stadia_api_key(), "secret")
 
 
+class TestCartoToggle(unittest.TestCase):
+    def test_api_enabled_maps_carto_toggle(self):
+        from secrets_store import api_enabled
+
+        with mock.patch(
+            "secrets_store.load_toggles",
+            return_value={"USE_CARTO_BASEMAPS": False},
+        ):
+            self.assertFalse(api_enabled("CARTO_BASEMAPS_API_KEY"))
+        with mock.patch(
+            "secrets_store.load_toggles",
+            return_value={"USE_CARTO_BASEMAPS": True},
+        ):
+            self.assertTrue(api_enabled("CARTO_BASEMAPS_API_KEY"))
+
+    def test_carto_key_empty_when_toggle_off(self):
+        from display.round_touch import map_bg
+
+        with mock.patch(
+            "secrets_store.api_enabled", return_value=False
+        ), mock.patch.dict(
+            os.environ, {"CARTO_BASEMAPS_API_KEY": "carto-secret"}, clear=False
+        ):
+            self.assertEqual(map_bg._carto_api_key(), "")
+        with mock.patch(
+            "secrets_store.api_enabled", return_value=True
+        ), mock.patch.dict(
+            os.environ, {"CARTO_BASEMAPS_API_KEY": "carto-secret"}, clear=False
+        ):
+            self.assertEqual(map_bg._carto_api_key(), "carto-secret")
+
+
 if __name__ == "__main__":
     unittest.main()

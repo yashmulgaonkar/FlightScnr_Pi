@@ -44,6 +44,7 @@ MANAGED_KEYS = (
     "ADSBEXCHANGE_API_KEY",
     "FIRMS_MAP_KEY",
     "STADIA_MAPS_API_KEY",
+    "CARTO_BASEMAPS_API_KEY",
     "HOME_LAT",
     "HOME_LON",
 )
@@ -72,6 +73,7 @@ TOGGLE_KEYS = (
     "USE_OPENSKY_API",
     "USE_ADSBEXCHANGE_API",
     "USE_STADIA_MAPS",
+    "USE_CARTO_BASEMAPS",
 )
 
 # Non-secret data-source settings stored alongside secrets.json.
@@ -178,6 +180,7 @@ def load_toggles() -> dict[str, bool]:
         "USE_OPENSKY_API": True,
         "USE_ADSBEXCHANGE_API": True,
         "USE_STADIA_MAPS": True,
+        "USE_CARTO_BASEMAPS": True,
     }
     try:
         with open(SECRETS_JSON_PATH, encoding="utf-8") as fh:
@@ -204,6 +207,7 @@ def api_enabled(key_name: str) -> bool:
         "OPENSKY_API_CLIENT_SECRET": "USE_OPENSKY_API",
         "ADSBEXCHANGE_API_KEY": "USE_ADSBEXCHANGE_API",
         "STADIA_MAPS_API_KEY": "USE_STADIA_MAPS",
+        "CARTO_BASEMAPS_API_KEY": "USE_CARTO_BASEMAPS",
     }
     toggle_key = mapping.get(key_name)
     if not toggle_key:
@@ -468,6 +472,7 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         "adsbexchange_api_key": "ADSBEXCHANGE_API_KEY",
         "firms_map_key": "FIRMS_MAP_KEY",
         "stadia_maps_api_key": "STADIA_MAPS_API_KEY",
+        "carto_basemaps_api_key": "CARTO_BASEMAPS_API_KEY",
     }
     for form_key, env_key in field_map.items():
         if form_key not in payload:
@@ -489,6 +494,7 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         "use_opensky_api": "USE_OPENSKY_API",
         "use_adsbexchange_api": "USE_ADSBEXCHANGE_API",
         "use_stadia_maps": "USE_STADIA_MAPS",
+        "use_carto_basemaps": "USE_CARTO_BASEMAPS",
     }
     for form_key, key in toggle_map.items():
         if form_key in payload:

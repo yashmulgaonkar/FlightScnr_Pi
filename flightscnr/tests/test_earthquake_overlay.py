@@ -247,6 +247,36 @@ class TestEarthquakeOverlay(unittest.TestCase):
         carto.assert_called_once()
         shake.assert_not_called()
 
+    def test_carto_export_map_uses_map_bg_tile_url(self):
+        from display.round_touch import earthquake_overlay, map_bg
+
+        fake_resp = mock.Mock()
+        fake_resp.content = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+            b"\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n"
+            b"-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        fake_resp.raise_for_status = mock.Mock()
+        with mock.patch.object(
+            map_bg,
+            "_carto_tile_url",
+            side_effect=lambda style, z, x, y: f"https://carto.test/{style}/{z}/{x}/{y}",
+        ) as tile_url:
+            with mock.patch.object(earthquake_overlay, "_http_get", return_value=fake_resp):
+                with mock.patch.object(
+                    earthquake_overlay,
+                    "_write_map_file",
+                    return_value="/tmp/quake_carto.png",
+                ) as write_map:
+                    path = earthquake_overlay._carto_export_map(37.5, -122.2, "nc1")
+        self.assertEqual(path, "/tmp/quake_carto.png")
+        self.assertGreater(tile_url.call_count, 0)
+        for call in tile_url.call_args_list:
+            self.assertEqual(call.args[0], "rastertiles/voyager")
+        write_map.assert_called_once()
+        self.assertIn("_carto_k", write_map.call_args.kwargs.get("basename", ""))
+
     def test_voice_primes_then_plays_new_m3(self):
         from display.round_touch import earthquake_overlay, hourly_chime, settings
 
