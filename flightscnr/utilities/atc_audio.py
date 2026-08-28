@@ -1611,6 +1611,45 @@ def maybe_resume_after_boot(
     return last
 
 
+_last_quiet_check = 0.0
+
+
+def enforce_quiet_hours() -> None:
+    """Apply the quiet window to a LIVE stream, not just new starts.
+
+    Called periodically from the display loop: stops playback once the
+    quiet window begins (unless overridden) and resumes it when the
+    window ends if the user still wants ATC playing. The lofi bed
+    follows is_playing(), so it obeys automatically.
+    """
+    global _last_quiet_check
+    now_mono = time.monotonic()
+    if now_mono - _last_quiet_check < 30.0:
+        return
+    _last_quiet_check = now_mono
+    try:
+        from display.round_touch import settings
+
+        if not settings.atc_quiet_hours_enabled():
+            return
+        if settings.atc_quiet_override():
+            return
+        if in_quiet_hours():
+            if is_playing():
+                logger.info("ATC stopped — quiet hours began")
+                stop(clear_override=False)
+            return
+        if (
+            settings.atc_want_playing()
+            and settings.atc_enabled()
+            and not is_playing()
+        ):
+            logger.info("ATC resuming — quiet hours ended")
+            start(override=False)
+    except Exception:
+        logger.debug("Quiet-hours enforcement failed", exc_info=True)
+
+
 def retune_if_playing(
     *,
     airport: str | None = None,

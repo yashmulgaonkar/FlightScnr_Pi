@@ -49,6 +49,7 @@ from display.round_touch import (
     settings,
     theme,
     touch_debug,
+    lofi_controls,
     video,
     wildfire_overlay,
     earthquake_overlay,
@@ -269,6 +270,7 @@ class RoundTouchDisplay:
         self._brightness_slider_active = False
         self._vfr_opacity_slider_active = False
         self._atc_volume_slider_active = False
+        self._lofi_volume_slider_active = False
         self._radar_hud_volume_drag = False
         self._radar_hud_layout_drag = False
         self._hud_opacity_slider_active = False
@@ -1767,6 +1769,15 @@ class RoundTouchDisplay:
             info.invalidate_atc_labels()
         elif action == "volume":
             return
+        elif action == "lofi":
+            settings.toggle_lofi_enabled()
+        elif action == "lofi_volume":
+            return
+        elif action == "lofi_controls":
+            settings.toggle_lofi_controls_enabled()
+            radar.invalidate_frame_layer()
+        elif action == "lofi_title_scroll":
+            settings.toggle_lofi_title_scroll()
         elif action == "quiet":
             settings.set_atc_quiet_hours_enabled(not settings.atc_quiet_hours_enabled())
         elif action == "quiet_start":
@@ -2316,6 +2327,45 @@ class RoundTouchDisplay:
         self.input.consume_scroll_drag()
         return changed
 
+    def _apply_lofi_volume_slider(self, x: int, *, persist: bool = True) -> bool:
+        value = info.lofi_volume_slider_value_at(x, self._scroll.offset)
+        if value is None:
+            return False
+        if value == settings.lofi_volume():
+            self._display_focus = info.lofi_volume_row_index()
+            return False
+        settings.set_lofi_volume(value, persist=persist)
+        self._display_focus = info.lofi_volume_row_index()
+        return True
+
+    def _update_lofi_volume_slider_drag(self) -> bool:
+        if self.screen != SCREEN_SETTINGS or self.settings_page != info.PAGE_ATC:
+            self._lofi_volume_slider_active = False
+            return False
+        if not self.input.is_dragging():
+            if self._lofi_volume_slider_active:
+                self._lofi_volume_slider_active = False
+                settings.set_lofi_volume(settings.lofi_volume(), persist=True)
+                self.input.consume_scroll_drag()
+                return True
+            return False
+        pos = self.input.drag_pos()
+        if pos is None:
+            return False
+        x, y = pos
+        if not self._lofi_volume_slider_active:
+            if not info.lofi_volume_slider_at(x, y, self._scroll.offset):
+                return False
+            self._lofi_volume_slider_active = True
+        elif not info.lofi_volume_slider_drag_band(x, y, self._scroll.offset):
+            self._lofi_volume_slider_active = False
+            settings.set_lofi_volume(settings.lofi_volume(), persist=True)
+            self.input.consume_scroll_drag()
+            return True
+        changed = self._apply_lofi_volume_slider(x, persist=False)
+        self.input.consume_scroll_drag()
+        return changed
+
     def _update_atc_volume_slider_drag(self) -> bool:
         if self.screen != SCREEN_SETTINGS or self.settings_page != info.PAGE_ATC:
             self._atc_volume_slider_active = False
@@ -2812,6 +2862,18 @@ class RoundTouchDisplay:
         # Temporary wake override is only for "turn off display" mode.
         if off_hours.effective_brightness_percent(settings.brightness_percent()) == 0:
             self._off_hours_wake_until = time.time() + OFF_HOURS_TOUCH_WAKE_S
+
+    def _apply_lofi_skip(self, action: str) -> None:
+        """Prev/next pill on the radar: skip the lofi track."""
+        from utilities import lofi_audio
+
+        if action == "next":
+            lofi_audio.next_track()
+        else:
+            lofi_audio.prev_track()
+        self._note_activity()
+        radar.invalidate_frame_layer()
+        self._safe_draw()
 
     def _apply_zoom_button(self, action: str) -> None:
         """Tap on the radar − / + pill: flash it and step the range like pinch."""
@@ -3426,6 +3488,10 @@ class RoundTouchDisplay:
                 x, y, self._scroll.offset
             ):
                 self._apply_atc_volume_slider(x, persist=True)
+            elif self.settings_page == info.PAGE_ATC and info.lofi_volume_slider_at(
+                x, y, self._scroll.offset
+            ):
+                self._apply_lofi_volume_slider(x, persist=True)
                 return
             if self.settings_page == info.PAGE_ATC:
                 btn = info.atc_action_at(x, y)
@@ -3766,6 +3832,10 @@ class RoundTouchDisplay:
                             zoom_action := zoom_buttons.hit_button(tap[0], tap[1])
                         ) is not None:
                             self._apply_zoom_button(zoom_action)
+                        elif (
+                            lofi_action := lofi_controls.hit_button(tap[0], tap[1])
+                        ) is not None:
+                            self._apply_lofi_skip(lofi_action)
                         elif self._open_flight_or_fire_at(tap[0], tap[1]):
                             self._safe_draw()
         elif tap and self.screen == SCREEN_FLIGHT:
@@ -4768,6 +4838,7 @@ class RoundTouchDisplay:
                     or self._update_hud_opacity_slider_drag()
                     or self._update_chime_volume_slider_drag()
                     or self._update_vfr_opacity_slider_drag()
+                    or self._update_lofi_volume_slider_drag()
                     or self._update_atc_volume_slider_drag()
                     or self._update_radar_hud_volume_drag()
                 ):
@@ -5062,6 +5133,13 @@ class RoundTouchDisplay:
                     if zoom_buttons.tick():
                         radar.invalidate_frame_layer()
                         self._safe_draw()
+                    try:
+                        from utilities import atc_audio, lofi_audio
+
+                        atc_audio.enforce_quiet_hours()
+                        lofi_audio.app_tick()
+                    except Exception:
+                        logger.debug("Audio tick failed", exc_info=True)
                     from display.round_touch import airport_tile
 
                     if airport_tile.tick():

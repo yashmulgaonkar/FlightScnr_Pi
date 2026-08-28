@@ -27,3 +27,6 @@ websockets>=12.0
 
 # Round touch display (1080×1080 FlightScnr UI)
 pygame>=2.5.0
+
+# Lofi playlist album art (ID3 APIC extraction for the web portal)
+mutagen>=1.46

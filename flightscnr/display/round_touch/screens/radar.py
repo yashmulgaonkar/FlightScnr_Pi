@@ -273,6 +273,8 @@ def _build_frame_layer(build: pygame.Surface, backdrop, flights, offset) -> bool
         zoom_buttons.draw(build)
     except Exception:
         pass
+    # lofi_controls pill is stamped per frame in rotation.present() — the
+    # marquee title animates, so it can't live in this cached layer.
     _t = _rebuild_stage("2r_status", _t)
     # HUD lives on a transparent overlay (rebuilt here) so the sweep can pass
     # under the curved frost without a rectangular clip from the bake layer.
@@ -550,6 +552,11 @@ def draw_radar(
             from display.round_touch import zoom_buttons
 
             zoom_buttons.draw(surface)
+            if layer is None:
+                # Direct draws have no rotation.present() pass to stamp it.
+                from display.round_touch import lofi_controls
+
+                lofi_controls.draw(surface)
             # Sweep under the HUD pill.
             if settings.show_sweep_line() and layer is None:
                 draw.draw_sweep_line(

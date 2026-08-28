@@ -1,0 +1,13 @@
+{
+  "default": "lofi-pack-v1",
+  "packs": [
+    {
+      "id": "lofi-pack-v1",
+      "label": "Starter playlist",
+      "description": "45 original lofi compositions by Reuben Thiessen (CC BY-NC-SA 4.0).",
+      "url": "https://github.com/yashmulgaonkar/FlightScnr_Pi/releases/download/lofi-pack-v1/lofi-pack.zip",
+      "size_mb": 190,
+      "tracks": 45
+    }
+  ]
+}
