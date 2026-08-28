@@ -64,6 +64,24 @@ def clear_reboot_in_progress() -> None:
         logger.debug("Could not clear reboot progress flag: %s", exc)
 
 
+def _progress_reason() -> str | None:
+    """Return the first-line reason from the progress flag, or None if unreadable."""
+    if not os.path.isfile(REBOOT_PROGRESS_PATH):
+        return None
+    try:
+        with open(REBOOT_PROGRESS_PATH, encoding="utf-8") as fh:
+            return (fh.read() or "user").strip().splitlines()[0].strip() or "user"
+    except OSError:
+        return None
+
+
+def discard_stale_shutdown_progress() -> None:
+    """Remove shutdown progress left on disk from a prior power-off."""
+    reason = _progress_reason()
+    if reason == "shutdown":
+        clear_reboot_in_progress()
+
+
 def reboot_progress_copy() -> tuple[str, str] | None:
     """Return (title, detail) when the display should show a reboot overlay."""
     if not os.path.isfile(REBOOT_PROGRESS_PATH):
@@ -72,14 +90,12 @@ def reboot_progress_copy() -> tuple[str, str] | None:
         age = time.time() - os.path.getmtime(REBOOT_PROGRESS_PATH)
     except OSError:
         return None
-    if age > _REBOOT_PROGRESS_MAX_AGE_S:
+    if age > _REBOOT_PROGRESS_MAX_AGE_S or age < 0:
         clear_reboot_in_progress()
         return None
-    try:
-        with open(REBOOT_PROGRESS_PATH, encoding="utf-8") as fh:
-            reason = (fh.read() or "user").strip().splitlines()[0].strip() or "user"
-    except OSError:
-        reason = "user"
+    reason = _progress_reason()
+    if reason is None:
+        return None
     return _REBOOT_COPY.get(reason, _REBOOT_COPY["user"])
 
 

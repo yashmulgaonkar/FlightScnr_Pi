@@ -114,6 +114,10 @@ OFF_HOURS_TOUCH_WAKE_S = 300
 
 class RoundTouchDisplay:
     def __init__(self):
+        from utilities import system_control
+
+        system_control.discard_stale_shutdown_progress()
+
         try:
             from config import DISPLAY_FULLSCREEN
             fullscreen = DISPLAY_FULLSCREEN
@@ -2797,6 +2801,7 @@ class RoundTouchDisplay:
         # (e.g. selecting aircraft) work normally after wake.
         if off_hours.force_clock_enabled() and self.screen == SCREEN_RADAR:
             self._open_preferred_clock()
+        self._apply_brightness()
         self._safe_draw()
 
     def _note_off_hours_override(self):
