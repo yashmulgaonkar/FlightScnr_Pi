@@ -1033,6 +1033,89 @@ def display_save():
     )
 
 
+@app.get("/targets/json")
+def targets_json():
+    from display.round_touch import settings
+
+    def _hex(rgb):
+        return "#%02x%02x%02x" % tuple(rgb) if rgb else ""
+
+    return jsonify(
+        {
+            "categories": {
+                cat: {
+                    "color": _hex(settings.target_color(cat)),
+                    "size": settings.target_size_pct(cat),
+                    "form": settings.target_form(cat),
+                }
+                for cat in settings.TARGET_CATEGORIES
+            },
+            "compass": {
+                "color": _hex(settings.compass_color()),
+                "opacity": settings.compass_opacity(),
+                "labels": settings.compass_labels(),
+            },
+            "blip": {
+                "color": _hex(settings.blip_color()),
+                "size": settings.blip_size_pct(),
+                "opacity": settings.blip_opacity(),
+            },
+        }
+    )
+
+
+@app.post("/targets")
+def targets_save():
+    from display.round_touch import settings
+
+    def _rgb(raw):
+        raw = str(raw or "").strip().lstrip("#")
+        if len(raw) != 6:
+            return None
+        try:
+            return tuple(int(raw[i : i + 2], 16) for i in (0, 2, 4))
+        except ValueError:
+            return None
+
+    data = request.get_json(silent=True) or {}
+    cats = data.get("categories") or {}
+    for cat in settings.TARGET_CATEGORIES:
+        entry = cats.get(cat) or {}
+        if "color" in entry:
+            settings.set_target_color(cat, _rgb(entry.get("color")))
+        if "size" in entry:
+            try:
+                settings.set_target_size_pct(cat, int(entry.get("size")))
+            except (TypeError, ValueError):
+                pass
+        if "form" in entry:
+            settings.set_target_form(cat, str(entry.get("form") or ""))
+    compass = data.get("compass") or {}
+    if "color" in compass:
+        settings.set_compass_color(_rgb(compass.get("color")))
+    if "opacity" in compass:
+        try:
+            settings.set_compass_opacity(int(compass.get("opacity")))
+        except (TypeError, ValueError):
+            pass
+    if "labels" in compass:
+        settings.set_compass_labels(str(compass.get("labels") or ""))
+    blip = data.get("blip") or {}
+    if "color" in blip:
+        settings.set_blip_color(_rgb(blip.get("color")))
+    if "size" in blip:
+        try:
+            settings.set_blip_size_pct(int(blip.get("size")))
+        except (TypeError, ValueError):
+            pass
+    if "opacity" in blip:
+        try:
+            settings.set_blip_opacity(int(blip.get("opacity")))
+        except (TypeError, ValueError):
+            pass
+    return jsonify({"ok": True})
+
+
 @app.get("/lofi/tracks")
 def lofi_tracks():
     from display.round_touch import settings

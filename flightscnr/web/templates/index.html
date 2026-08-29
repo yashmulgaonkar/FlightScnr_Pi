@@ -736,6 +736,16 @@
     </details>
 
     <details class="card">
+        <summary><span class="ico">&#9678;</span>Targets<span class="sum">colors, sizes, symbols</span><span class="chev">&#9656;</span></summary>
+        <div class="body">
+            <p class="hint">Per-category visibility for the radar: accent color, size, and symbol for planes, helicopters, drones, and vessels, plus compass rose and blip styling. Same as Settings &rarr; Targets on the device. Auto keeps today's default look.</p>
+            <div id="targets_body"></div>
+            <button class="btn btn-primary" id="btn-targets" type="button" style="margin-top:.7rem">Save targets</button>
+            <div id="targets-status" class="status"></div>
+        </div>
+    </details>
+
+    <details class="card">
         <summary><span class="ico">&#9729;</span>Weather<span class="sum">units</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <label for="weather_units">Units</label>
@@ -3620,6 +3630,119 @@ document.addEventListener("DOMContentLoaded", () => {
         inp.addEventListener("focus", () => { if (inp.value.trim()) render(inp.value); });
         document.addEventListener("click", (ev) => {
             if (!ev.target.closest(".search-wrap")) box.classList.add("hidden");
+        });
+    })();
+
+    // --- Targets section: per-category visibility ---
+    (function () {
+        const body = $("targets_body");
+        if (!body) return;
+        const CATS = [
+            ["plane", "Planes"], ["heli", "Helicopters"],
+            ["drone", "Drones"], ["vessel", "Vessels"],
+        ];
+        const FORMS = [["icon", "Icon"], ["triangle", "Triangle"], ["dot", "Dot"]];
+        const MODES = [["letters", "Letters"], ["degrees", "Degrees"], ["both", "Both"]];
+        function colorRow(id) {
+            return '<div class="chk"><label for="' + id + '_auto">Auto color</label>' +
+                '<span class="switch"><input id="' + id + '_auto" type="checkbox" checked><span class="track"></span></span></div>' +
+                '<label for="' + id + '_color">Custom color</label>' +
+                '<input id="' + id + '_color" type="color" value="#00ff00">';
+        }
+        function rangeRow(id, label, lo, hi, val) {
+            return '<label for="' + id + '">' + label + ' <span id="' + id + '_label">' + val + '%</span></label>' +
+                '<input id="' + id + '" type="range" min="' + lo + '" max="' + hi + '" step="5" value="' + val + '" ' +
+                'oninput="document.getElementById(\'' + id + '_label\').textContent = this.value + \'%\'">';
+        }
+        function selectRow(id, label, options) {
+            let opts = options.map(([v, t]) => '<option value="' + v + '">' + t + "</option>").join("");
+            return '<label for="' + id + '">' + label + "</label><select id=\"" + id + '">' + opts + "</select>";
+        }
+        let html = "";
+        for (const [cat, title] of CATS) {
+            html += '<p style="margin:.9rem 0 .2rem;font-weight:600">' + title + "</p>";
+            html += colorRow("tgt_" + cat);
+            html += rangeRow("tgt_" + cat + "_size", "Size", 50, 150, 100);
+            html += selectRow("tgt_" + cat + "_form", "Symbol", FORMS);
+        }
+        html += '<p style="margin:.9rem 0 .2rem;font-weight:600">Compass rose</p>';
+        html += colorRow("tgt_compass");
+        html += rangeRow("tgt_compass_opacity", "Opacity", 20, 100, 100);
+        html += selectRow("tgt_compass_labels", "Labels", MODES);
+        html += '<p style="margin:.9rem 0 .2rem;font-weight:600">Blips</p>';
+        html += colorRow("tgt_blip");
+        html += rangeRow("tgt_blip_size", "Size", 50, 150, 100);
+        html += rangeRow("tgt_blip_opacity", "Opacity", 20, 100, 100);
+        body.innerHTML = html;
+
+        function setColor(id, hex) {
+            const auto = $(id + "_auto"), color = $(id + "_color");
+            if (auto) auto.checked = !hex;
+            if (color && hex) color.value = hex;
+        }
+        function getColor(id) {
+            const auto = $(id + "_auto"), color = $(id + "_color");
+            if (auto && auto.checked) return "";
+            return color ? color.value : "";
+        }
+        function setRange(id, v) {
+            const el = $(id);
+            if (!el) return;
+            el.value = String(v);
+            const lab = $(id + "_label");
+            if (lab) lab.textContent = v + "%";
+        }
+        async function load() {
+            try {
+                const d = await jsonFetch("/targets/json");
+                for (const [cat] of CATS) {
+                    const c = (d.categories || {})[cat] || {};
+                    setColor("tgt_" + cat, c.color || "");
+                    setRange("tgt_" + cat + "_size", c.size ?? 100);
+                    if ($("tgt_" + cat + "_form")) $("tgt_" + cat + "_form").value = c.form || "icon";
+                }
+                const cp = d.compass || {};
+                setColor("tgt_compass", cp.color || "");
+                setRange("tgt_compass_opacity", cp.opacity ?? 100);
+                if ($("tgt_compass_labels")) $("tgt_compass_labels").value = cp.labels || "letters";
+                const bl = d.blip || {};
+                setColor("tgt_blip", bl.color || "");
+                setRange("tgt_blip_size", bl.size ?? 100);
+                setRange("tgt_blip_opacity", bl.opacity ?? 100);
+            } catch (_) {}
+        }
+        load();
+        const btn = $("btn-targets");
+        if (btn) btn.addEventListener("click", async () => {
+            const payload = {categories: {}, compass: {}, blip: {}};
+            for (const [cat] of CATS) {
+                payload.categories[cat] = {
+                    color: getColor("tgt_" + cat),
+                    size: Number($("tgt_" + cat + "_size").value),
+                    form: $("tgt_" + cat + "_form").value,
+                };
+            }
+            payload.compass = {
+                color: getColor("tgt_compass"),
+                opacity: Number($("tgt_compass_opacity").value),
+                labels: $("tgt_compass_labels").value,
+            };
+            payload.blip = {
+                color: getColor("tgt_blip"),
+                size: Number($("tgt_blip_size").value),
+                opacity: Number($("tgt_blip_opacity").value),
+            };
+            const st = $("targets-status");
+            try {
+                await jsonFetch("/targets", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(payload),
+                });
+                if (st) st.textContent = "Saved.";
+            } catch (_) {
+                if (st) st.textContent = "Save failed.";
+            }
         });
     })();
 </script>

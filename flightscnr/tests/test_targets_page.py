@@ -204,3 +204,48 @@ class TestDrawForms:
         aircraft.draw_plane_icon(surface, 100, 100, 0, (255, 0, 0), flight={"plane": "B738"})
         assert surface.get_at((100, 92))[:3] == (255, 0, 0)
         settings.set_target_form("plane", "icon")
+
+
+class TestTargetsWeb:
+    @staticmethod
+    def _client():
+        from web import app as web_app
+
+        return web_app.app.test_client()
+
+    def test_json_and_save_round_trip(self, monkeypatch):
+        from web import app as web_app
+
+        monkeypatch.setattr(web_app, "_wifi_portal_active", lambda: False)
+        client = self._client()
+        r = client.get("/targets/json")
+        assert r.status_code == 200
+        body = r.get_json()
+        assert set(body["categories"]) == set(settings.TARGET_CATEGORIES)
+        r = client.post("/targets", json={
+            "categories": {"plane": {"color": "#00ffff", "size": 120, "form": "dot"}},
+            "compass": {"labels": "both", "opacity": 60},
+            "blip": {"color": "", "size": 80},
+        })
+        assert r.status_code == 200
+        assert settings.target_color("plane") == (0, 255, 255)
+        assert settings.target_size_pct("plane") == 120
+        assert settings.target_form("plane") == "dot"
+        assert settings.compass_labels() == "both"
+        assert settings.compass_opacity() == 60
+        assert settings.blip_color() is None
+        assert settings.blip_size_pct() == 80
+        client.post("/targets", json={
+            "categories": {"plane": {"color": "", "size": 100, "form": "icon"}},
+            "compass": {"labels": "letters", "opacity": 100},
+            "blip": {"size": 100},
+        })
+
+    def test_index_ships_targets_section(self, monkeypatch):
+        from web import app as web_app
+
+        monkeypatch.setattr(web_app, "_wifi_portal_active", lambda: False)
+        client = self._client()
+        html = client.get("/").get_data(as_text=True)
+        assert 'id="targets_body"' in html
+        assert 'id="btn-targets"' in html
