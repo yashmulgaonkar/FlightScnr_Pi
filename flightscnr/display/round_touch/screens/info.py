@@ -746,6 +746,14 @@ _TARGETS_CATEGORY = {
     "tgt_drone": "drone",
     "tgt_vessel": "vessel",
 }
+# Representative flights so the editor preview uses the same icon art and
+# Targets settings bucket as live radar (heli/drone need real ICAO codes).
+_TARGETS_PREVIEW_FLIGHT = {
+    "tgt_plane": {"plane": "B738"},
+    "tgt_heli": {"plane": "R44"},
+    "tgt_drone": {"plane": "JAS4"},
+    "tgt_vessel": {"kind": "vessel", "speed": 12, "stationary": False},
+}
 _TGT_FORM_LABELS = (("icon", "Icon"), ("triangle", "Triangle"), ("dot", "Dot"))
 _TGT_MODE_LABELS = (("letters", "Letters"), ("degrees", "Degrees"), ("both", "Both"))
 
@@ -769,6 +777,26 @@ def _tgt_grid_origin() -> tuple[int, int, int]:
     x0 = theme.CENTER_X - (cols * cell) // 2
     y0 = theme.CENTER_Y - int(theme.VISIBLE_RADIUS * 0.52)
     return x0, y0, cell
+
+
+def _tgt_title_arc_r() -> int:
+    return int(theme.VISIBLE_RADIUS * 0.84)
+
+
+def _tgt_preview_band() -> tuple[int, int]:
+    """Vertical band (top, bottom) for the live glyph under the curved title."""
+    arc_r = _tgt_title_arc_r()
+    title_font = draw.load_font(theme.s(15), bold=True)
+    top = theme.CENTER_Y - arc_r + title_font.get_height() + theme.s(6)
+    _, grid_top, _cell = _tgt_grid_origin()
+    return int(top), int(grid_top)
+
+
+def _tgt_preview_center() -> tuple[int, int]:
+    """Center the preview in the gap between title and crayon grid."""
+    top, grid_top = _tgt_preview_band()
+    cy = (top + grid_top) // 2
+    return theme.CENTER_X, cy
 
 
 def _tgt_slider_rows(kind: str) -> list[str]:
@@ -857,6 +885,93 @@ def targets_editor_slider_drag_band(kind: str, which: str, x: int, y: int) -> bo
     return slider_drag_band_contains(geom[0], y)
 
 
+def _tgt_preview_color(kind: str) -> tuple[int, int, int]:
+    """Accent used for the live glyph preview (Auto → today's default)."""
+    custom = _tgt_editor_color(kind)
+    if kind == "tgt_compass":
+        return custom or theme.GRID
+    if kind == "tgt_blip":
+        return custom or theme.AIRCRAFT
+    if kind in _TARGETS_CATEGORY:
+        cat = _TARGETS_CATEGORY[kind]
+        if cat == "vessel":
+            return custom or theme.VESSEL_MOVING
+        return custom or theme.AIRCRAFT
+    return theme.AIRCRAFT
+
+
+def _draw_targets_compass_preview(
+    surface: pygame.Surface, cx: int, cy: int, color: tuple[int, int, int]
+) -> None:
+    import math as _math
+
+    rose_alpha = int(255 * settings.compass_opacity() / 100)
+    mode = settings.compass_labels()
+    top, grid_top = _tgt_preview_band()
+    card_r = min(theme.s(44), max(theme.s(20), (grid_top - top) // 2 - theme.s(6)))
+    font = draw.load_font(max(theme.s(8), card_r // 4), bold=True)
+    diag_font = draw.load_font(max(theme.s(7), card_r // 5), bold=True)
+
+    def _blit(text_surf: pygame.Surface, center: tuple[int, int]) -> None:
+        if rose_alpha < 255:
+            text_surf = text_surf.copy()
+            text_surf.set_alpha(rose_alpha)
+        surface.blit(text_surf, text_surf.get_rect(center=center))
+
+    if mode in ("letters", "both"):
+        for text, bearing in (("N", 0), ("E", 90), ("S", 180), ("W", 270)):
+            rad = _math.radians(bearing - 90)
+            x = cx + int(card_r * _math.cos(rad))
+            y = cy + int(card_r * _math.sin(rad))
+            _blit(font.render(text, True, color), (x, y))
+    if mode in ("degrees", "both"):
+        for bearing in range(0, 360, 30):
+            if mode == "both" and bearing % 90 == 0:
+                continue
+            rad = _math.radians(bearing - 90)
+            x = cx + int(card_r * _math.cos(rad))
+            y = cy + int(card_r * _math.sin(rad))
+            _blit(diag_font.render(f"{bearing:03d}", True, color), (x, y))
+
+
+def _draw_targets_blip_preview(
+    surface: pygame.Surface, cx: int, cy: int, color: tuple[int, int, int]
+) -> None:
+    r = max(
+        2,
+        int(round(theme.RIM_BLIP_RADIUS * settings.blip_size_pct() / 100.0)),
+    )
+    alpha = settings.blip_opacity()
+    if alpha >= 100:
+        pygame.draw.circle(surface, color, (cx, cy), r)
+        return
+    dot = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
+    pygame.draw.circle(
+        dot, (*color[:3], int(255 * alpha / 100)), (r, r), r,
+    )
+    surface.blit(dot, (cx - r, cy - r))
+
+
+def _draw_targets_editor_preview(surface: pygame.Surface, kind: str) -> None:
+    """Live glyph under the curved title — mirrors radar rendering."""
+    cx, cy = _tgt_preview_center()
+    color = _tgt_preview_color(kind)
+    if kind == "tgt_compass":
+        _draw_targets_compass_preview(surface, cx, cy, color)
+        return
+    if kind == "tgt_blip":
+        _draw_targets_blip_preview(surface, cx, cy, color)
+        return
+    flight = _TARGETS_PREVIEW_FLIGHT.get(kind)
+    if not flight:
+        return
+    from display.round_touch import aircraft
+
+    aircraft.draw_plane_icon(
+        surface, cx, cy, 45.0, color, compact=True, flight=flight,
+    )
+
+
 def _draw_targets_editor(surface, kind: str) -> int:
     """Modal editor for one Targets section; registers picker-style hits."""
     global _atc_picker_hits, _atc_picker_list_rect
@@ -873,7 +988,7 @@ def _draw_targets_editor(surface, kind: str) -> int:
     small_font = draw.load_font(theme.s(11), bold=True)
 
     # Curved title.
-    arc_r = int(theme.VISIBLE_RADIUS * 0.84)
+    arc_r = _tgt_title_arc_r()
     title_items = [
         title_font.render(ch, True, theme.LABEL)
         for ch in _TARGETS_TITLES.get(kind, "Targets")
@@ -882,6 +997,8 @@ def _draw_targets_editor(surface, kind: str) -> int:
         surface, title_items, r=arc_r, mid=-_math.pi / 2, bottom=False,
         cx=theme.CENTER_X, cy=theme.CENTER_Y,
     )
+
+    _draw_targets_editor_preview(surface, kind)
 
     # Swatch grid: Auto cell + the crayon palette.
     current = _tgt_editor_color(kind)

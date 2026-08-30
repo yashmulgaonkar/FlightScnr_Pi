@@ -1876,10 +1876,15 @@ class RoundTouchDisplay:
             self._open_atc_picker("output")
         elif action == "status":
             return
+        elif action in info.TARGETS_EDITOR_KINDS:
+            self._open_atc_picker(action)
 
     def _open_atc_picker(self, kind: str) -> None:
         kind = str(kind or "").strip().lower()
-        if kind not in info.LIST_PICKER_KINDS:
+        if (
+            kind not in info.LIST_PICKER_KINDS
+            and kind not in info.TARGETS_EDITOR_KINDS
+        ):
             return
         if kind == "channel" and not settings.atc_airport():
             return
@@ -1995,6 +2000,22 @@ class RoundTouchDisplay:
         action, value = hit
         if action in ("close", "outside"):
             self._close_atc_picker()
+            return
+        if action == "tgt_swatch":
+            kind = self._atc_picker
+            if kind in info.TARGETS_EDITOR_KINDS:
+                info.targets_apply_swatch(kind, value)
+                radar.invalidate_frame_layer()
+                self._note_activity()
+                self._safe_draw()
+            return
+        if action == "tgt_segment":
+            kind = self._atc_picker
+            if kind in info.TARGETS_EDITOR_KINDS:
+                info.targets_apply_segment(kind, value)
+                radar.invalidate_frame_layer()
+                self._note_activity()
+                self._safe_draw()
             return
         if action == "time_num":
             try:
@@ -4013,6 +4034,7 @@ class RoundTouchDisplay:
                 info.PAGE_LAYERS,
                 info.PAGE_ATC,
                 info.PAGE_ATC_QUIET,
+                info.PAGE_TARGETS,
             )
             and x is not None
             and y is not None

@@ -93,6 +93,17 @@ class TestTargetsPage:
         assert len(labels) == len(info.TARGETS_ACTIONS)
         assert any("Compass" in t for t in labels)
 
+    def test_row_tap_opens_editor(self):
+        from display.round_touch import app as app_mod
+
+        opened = []
+        d = object.__new__(app_mod.RoundTouchDisplay)
+        d._open_atc_picker = lambda kind: opened.append(kind)
+        d._display_focus = -1
+        row = info.TARGETS_ACTIONS.index("tgt_plane")
+        d._apply_display_row(info.PAGE_TARGETS, row)
+        assert opened == ["tgt_plane"]
+
     def test_page_order(self):
         assert info.PAGE_TARGETS == info.PAGE_COLORS + 1
         assert info.PAGE_SYSTEM == info.PAGE_TARGETS + 1
@@ -155,6 +166,31 @@ class TestTargetsEditor:
         assert settings.compass_opacity() == 55
         info.targets_apply_slider("tgt_blip", "size", 100, persist=False)
         info.targets_apply_slider("tgt_compass", "opacity", 100, persist=False)
+
+
+class TestTargetsPreview:
+    def test_preview_flights_match_categories(self):
+        for kind, cat in info._TARGETS_CATEGORY.items():
+            flight = info._TARGETS_PREVIEW_FLIGHT[kind]
+            assert aircraft.target_category(flight) == cat
+
+    def test_preview_color_auto_defaults(self):
+        settings.set_target_color("heli", None)
+        assert info._tgt_preview_color("tgt_heli") == theme.AIRCRAFT
+        settings.set_compass_color(None)
+        assert info._tgt_preview_color("tgt_compass") == theme.GRID
+
+    def test_preview_center_sits_above_crayon_grid(self):
+        _top, grid_top = info._tgt_preview_band()
+        _cx, cy = info._tgt_preview_center()
+        assert _top < cy < grid_top
+
+    def test_preview_draws_without_error(self):
+        if not pygame.font.get_init():
+            return
+        surface = pygame.Surface((theme.SIZE, theme.SIZE))
+        for kind in info.TARGETS_ACTIONS:
+            info._draw_targets_editor_preview(surface, kind)
 
 
 class TestDrawForms:
