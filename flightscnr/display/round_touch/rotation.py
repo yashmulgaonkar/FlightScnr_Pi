@@ -28,6 +28,7 @@ _prev_bubble_rect: pygame.Rect | None = None
 _prev_airport_callout_rect: pygame.Rect | None = None
 _prev_airport_tile_rect: pygame.Rect | None = None
 _prev_lofi_rect: pygame.Rect | None = None
+_prev_radial_rect: pygame.Rect | None = None
 _prev_location_toast_rect: pygame.Rect | None = None
 # Radar layer generation seen but not yet rotated/swapped (one-frame pipeline).
 _pending_key = None
@@ -148,7 +149,7 @@ def present_radar_sweep(
     global _rot_base, _rot_base_key, _prev_sweep_rect, _pending_key, _needs_full
     global _next_base, _next_base_key, _prev_hud_rect, _prev_bubble_rect
     global _prev_airport_callout_rect, _prev_location_toast_rect
-    global _prev_airport_tile_rect, _prev_lofi_rect
+    global _prev_airport_tile_rect, _prev_lofi_rect, _prev_radial_rect
     from display.round_touch import draw
 
     rotation = rotation_degrees()
@@ -216,6 +217,7 @@ def present_radar_sweep(
         _prev_airport_callout_rect = None
         _prev_airport_tile_rect = None
         _prev_lofi_rect = None
+        _prev_radial_rect = None
         _prev_location_toast_rect = None
         full_refresh = True
         _needs_full = False
@@ -278,6 +280,15 @@ def present_radar_sweep(
                 r.h,
             )
             display.blit(_rot_base, r.topleft, src)
+        if _prev_radial_rect is not None:
+            r = _prev_radial_rect
+            src = pygame.Rect(
+                r.x - origin_off[0],
+                r.y - origin_off[1],
+                r.w,
+                r.h,
+            )
+            display.blit(_rot_base, r.topleft, src)
         if _prev_location_toast_rect is not None:
             r = _prev_location_toast_rect
             src = pygame.Rect(
@@ -294,6 +305,7 @@ def present_radar_sweep(
     old_airport = _prev_airport_callout_rect
     old_tile = _prev_airport_tile_rect
     old_lofi = _prev_lofi_rect
+    old_radial = _prev_radial_rect
     old_location = _prev_location_toast_rect
     new_rect = None
     if draw_sweep:
@@ -324,9 +336,12 @@ def present_radar_sweep(
     # Lofi track pill (marquee title animates, so it stamps every frame).
     lofi_dirty = _blit_lofi_controls(display, origin_off, rotation)
     _prev_lofi_rect = lofi_dirty
-    # Airport METAR tile rides above everything, HUD included.
+    # Airport METAR tile rides above the HUD.
     tile_dirty = _blit_airport_tile(display, origin_off, rotation)
     _prev_airport_tile_rect = tile_dirty
+    # Radial target menu is modal — topmost.
+    radial_dirty = _blit_radial_menu(display, origin_off, rotation)
+    _prev_radial_rect = radial_dirty
 
     _t = time.perf_counter()
     if full_refresh:
@@ -349,6 +364,8 @@ def present_radar_sweep(
                 lofi_dirty,
                 old_tile,
                 tile_dirty,
+                old_radial,
+                radial_dirty,
             )
             if r is not None
         ]
@@ -527,6 +544,58 @@ def _blit_airport_callout(
 
     logical = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
     dirty = airport_overlay.draw_callout(logical, pan_offset=None)
+    if dirty is None or dirty.width <= 0 or dirty.height <= 0:
+        return None
+
+    if rotation % 360 == 0:
+        dst = pygame.Rect(
+            dirty.x + origin_off[0],
+            dirty.y + origin_off[1],
+            dirty.w,
+            dirty.h,
+        )
+        display.blit(logical, dst.topleft, dirty)
+        return dst
+
+    try:
+        rotated = pygame.transform.rotate(logical, -rotation)
+    except pygame.error:
+        return None
+    src = _rotate_rect_aabb(dirty.inflate(2, 2), rotation, theme.SIZE)
+    rw, rh = rotated.get_width(), rotated.get_height()
+    pad_x = (rw - theme.SIZE) // 2
+    pad_y = (rh - theme.SIZE) // 2
+    src = pygame.Rect(src.x + pad_x, src.y + pad_y, src.w, src.h)
+    src = src.clip(pygame.Rect(0, 0, rw, rh))
+    if src.width <= 0 or src.height <= 0:
+        return None
+    rot_off = (
+        origin_off[0] + (theme.SIZE - rw) // 2,
+        origin_off[1] + (theme.SIZE - rh) // 2,
+    )
+    dst = pygame.Rect(src.x + rot_off[0], src.y + rot_off[1], src.w, src.h)
+    display.blit(rotated, dst.topleft, src)
+    return dst
+
+
+def _blit_radial_menu(
+    display: pygame.Surface,
+    origin_off: tuple[int, int],
+    rotation: int,
+) -> pygame.Rect | None:
+    """Stamp the radial target menu above everything (logical → display)."""
+    try:
+        from display.round_touch import radial_menu
+    except ImportError:
+        return None
+    if not radial_menu.is_open():
+        return None
+
+    logical = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
+    try:
+        dirty = radial_menu.draw(logical)
+    except Exception:
+        return None
     if dirty is None or dirty.width <= 0 or dirty.height <= 0:
         return None
 

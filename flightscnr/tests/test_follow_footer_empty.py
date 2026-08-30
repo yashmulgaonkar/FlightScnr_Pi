@@ -38,6 +38,12 @@ class TestFooterLayoutConsistency:
         assert tracked.footer_button_kinds(None) == ("radar",)
         assert tracked.footer_button_kinds({"callsign": "N12345"}) == ("pin", "radar")
 
+    def test_tracked_page_uses_contour_background(self):
+        import inspect
+
+        src = inspect.getsource(tracked.draw_tracked)
+        assert "fill_background_textured" in src
+
     def test_tap_handlers_resolve_display_data(self):
         import inspect
 

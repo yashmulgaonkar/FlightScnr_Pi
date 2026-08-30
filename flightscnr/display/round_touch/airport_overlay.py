@@ -487,6 +487,29 @@ def pick_airport_at(
     return best, best_d2
 
 
+def airports_near(
+    tap_x: int, tap_y: int, radius_px: int
+) -> list[tuple[dict[str, Any], float]]:
+    """All airport pins within ``radius_px`` — [(airport, d2)] nearest-first."""
+    if not _icons_on():
+        return []
+    airports, _ = _ensure_cached()
+    r2 = float(radius_px) ** 2
+    out = []
+    for airport in airports or []:
+        try:
+            pos = _screen_xy(float(airport["lat"]), float(airport["lon"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if pos is None:
+            continue
+        d2 = (pos[0] - tap_x) ** 2 + (pos[1] - tap_y) ** 2
+        if d2 <= r2:
+            out.append((airport, d2))
+    out.sort(key=lambda item: item[1])
+    return out
+
+
 def show_callout(airport: dict[str, Any]) -> None:
     """Show a short-lived ICAO/name toast for ``airport`` on the radar."""
     global _callout_airport, _callout_until

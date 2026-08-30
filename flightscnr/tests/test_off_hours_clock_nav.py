@@ -28,6 +28,8 @@ def _bare_display() -> app_mod.RoundTouchDisplay:
     d._boot_until = 0.0
     d._off_hours_force_clock_active = False
     d._off_hours_wake_until = 0.0
+    d._quiet_dim_preview = None
+    d._radar_peek_until = 0.0
     d.screen = app_mod.SCREEN_RADAR
     d._opened: list[str] = []
     d._open_screen = lambda screen: d._opened.append(screen)
@@ -103,7 +105,8 @@ class TestOffHoursClockNav(unittest.TestCase):
         self.assertEqual(d._opened, [])
         self.assertFalse(d._off_hours_force_clock_active)
 
-    def test_radar_uses_day_brightness_in_off_hours(self):
+    def test_off_hours_does_not_change_brightness(self):
+        """Night dimming lives on Quiet Hours; off-hours only drives the clock."""
         d = _bare_display()
         d.screen = app_mod.SCREEN_RADAR
         applied = []
@@ -112,12 +115,14 @@ class TestOffHoursClockNav(unittest.TestCase):
             "display.round_touch.off_hours.in_off_hours", return_value=True
         ), mock.patch(
             "display.round_touch.off_hours.effective_brightness_percent",
-            return_value=20,
+            side_effect=lambda day: day,
         ), mock.patch(
             "display.round_touch.off_hours.prefs",
             return_value={"mode": "clock"},
         ), mock.patch(
             "display.round_touch.settings.brightness_percent", return_value=80
+        ), mock.patch(
+            "display.round_touch.settings.quiet_dim_enabled", return_value=False
         ), mock.patch(
             "display.round_touch.backlight.apply_percent", side_effect=applied.append
         ):
@@ -130,17 +135,19 @@ class TestOffHoursClockNav(unittest.TestCase):
             "display.round_touch.off_hours.in_off_hours", return_value=True
         ), mock.patch(
             "display.round_touch.off_hours.effective_brightness_percent",
-            return_value=20,
+            side_effect=lambda day: day,
         ), mock.patch(
             "display.round_touch.off_hours.prefs",
             return_value={"mode": "clock"},
         ), mock.patch(
             "display.round_touch.settings.brightness_percent", return_value=80
         ), mock.patch(
+            "display.round_touch.settings.quiet_dim_enabled", return_value=False
+        ), mock.patch(
             "display.round_touch.backlight.apply_percent", side_effect=applied.append
         ):
             d._apply_brightness()
-        self.assertEqual(applied, [20])
+        self.assertEqual(applied, [80])
 
 
 if __name__ == "__main__":

@@ -158,6 +158,37 @@ def display_value_for_index(index: int, units: str = "mi") -> float:
     return bands(u)[idx]["value"]
 
 
+def ring_values(index: int, units: str | None = None) -> list[float]:
+    """Three ring distances for a band: two round inner rings + the range.
+
+    Inner rings sit near 1/3 and 2/3 of the range but snap to round
+    numbers in the display unit, so ring labels never show decimals
+    (beyond .5 at the smallest ranges). The radar draws the rings at the
+    matching fractional radii.
+    """
+    u = _resolve_units(units)
+    v = float(bands(u)[max(0, min(int(index), len(SCALE_BANDS) - 1))]["value"])
+    step = 0.5 if v < 5 else (1.0 if v < 30 else (5.0 if v < 60 else 10.0))
+
+    def snap(x: float) -> float:
+        return round(x / step) * step
+
+    d1 = snap(v / 3.0)
+    d2 = snap(2.0 * v / 3.0)
+    if d1 <= 0:
+        d1 = step
+    if d2 <= d1:
+        d2 = d1 + step
+    if d2 >= v:
+        d2 = v - step
+    if d1 >= d2:
+        d1 = d2 - step if d2 - step > 0 else d2 / 2.0
+    out = []
+    for d in (d1, d2, v):
+        out.append(int(d) if float(d).is_integer() else float(d))
+    return out
+
+
 def format_display_value(index: int, units: str = "mi") -> str:
     """Format range for the portal text box."""
     value = display_value_for_index(index, units)

@@ -1264,7 +1264,7 @@ def draw_tracked(
     _marquee_active_keys = set()
     del scroll_offset  # tracked page does not scroll vertically
 
-    draw.fill_background(surface)
+    draw.fill_background_textured(surface)
     raw_callsign = (callsign or load_tracked_callsign() or "").strip().upper()
     display_id = raw_callsign
     if tracked_data:

@@ -50,6 +50,7 @@ from display.round_touch import (
     theme,
     touch_debug,
     lofi_controls,
+    radial_menu,
     video,
     wildfire_overlay,
     earthquake_overlay,
@@ -2914,6 +2915,7 @@ class RoundTouchDisplay:
         if (
             self.screen != SCREEN_RADAR
             or self._radar_modal_active()
+            or radial_menu.is_open()
             or not settings.radar_hud_enabled()
             or settings.radar_hud_arrange()
         ):
@@ -2995,6 +2997,11 @@ class RoundTouchDisplay:
             modal_active=self._radar_modal_active(),
             on_radar=self.screen == SCREEN_RADAR,
         ):
+            if radial_menu.is_open():
+                radial_menu.close()
+                radar.invalidate_frame_layer()
+                self._safe_draw()
+                return True
             self._begin_map_pan(from_long_press=True)
             return True
         return False
@@ -4207,7 +4214,12 @@ class RoundTouchDisplay:
         # Live ← Tracked ← Radar: swipe right moves leftward; swipe left returns.
         # On radar, swipe left also cycles favorite locations (Home → saved → Home).
         # Short flicks still pick aircraft / fires like a tap.
-        if swipe == input_handler.SWIPE_RIGHT and self.screen == SCREEN_RADAR:
+        if swipe and self.screen == SCREEN_RADAR and radial_menu.is_open():
+            radial_menu.close()
+            radar.invalidate_frame_layer()
+            self._note_activity()
+            self._safe_draw()
+        elif swipe == input_handler.SWIPE_RIGHT and self.screen == SCREEN_RADAR:
             if self._radar_swipe_committed(swipe_start, swipe_end):
                 self._open_screen(SCREEN_TRACKED)
                 self._scroll.reset()
@@ -4369,8 +4381,17 @@ class RoundTouchDisplay:
             if tap and self.pinch.should_suppress_tap():
                 tap = None
             if tap and not self._radar_modal_active():
+                # Open radial menu is modal — it takes the tap before anything.
+                if radial_menu.is_open():
+                    kind, idx = radial_menu.hit(tap[0], tap[1])
+                    if kind == "select":
+                        self._radial_menu_select(radial_menu.entries()[idx])
+                    radial_menu.close()
+                    radar.invalidate_frame_layer()
+                    self._note_activity()
+                    self._safe_draw()
                 # Arrange mode: consume taps on HUD items so they don't open flights.
-                if (
+                elif (
                     settings.radar_hud_arrange()
                     and settings.radar_hud_enabled()
                     and radar_hud.handle_layout_drag_start(tap[0], tap[1]) is not None
@@ -4760,7 +4781,7 @@ class RoundTouchDisplay:
             logger.debug("Scheduled weather refresh tick failed", exc_info=True)
 
     def _tick_auto_idle_clock(self):
-        if self._radar_modal_active():
+        if self._radar_modal_active() or radial_menu.is_open():
             return
         if not settings.auto_idle_clock_enabled():
             return
@@ -5158,6 +5179,37 @@ class RoundTouchDisplay:
             if airport is None or quake_d2 is None or airport_d2 is None or quake_d2 <= airport_d2:
                 airport_overlay.clear_callout()
                 return self._open_picked_quake(quake)
+        # Several targets under the finger? Open the radial menu instead of
+        # guessing (aircraft + airports only; a winning fire/quake was
+        # handled above).
+        pick_r = theme.s(24)
+        near_flights = radar.flights_near(self._radar_flights(), x, y, pick_r)
+        near_airports = airport_overlay.airports_near(x, y, pick_r)
+        if len(near_flights) + len(near_airports) >= 2:
+            from utilities.airline_branding import display_flight_id_for_flight
+
+            cands = [
+                (d2, {
+                    "kind": "flight",
+                    "label": display_flight_id_for_flight(f)
+                    or (f.get("callsign") or "?"),
+                    "flight": f,
+                })
+                for f, d2 in near_flights
+            ] + [
+                (d2, {
+                    "kind": "airport",
+                    "label": str(a.get("ident") or "?"),
+                    "airport": a,
+                })
+                for a, d2 in near_airports
+            ]
+            cands.sort(key=lambda item: item[0])
+            airport_overlay.clear_callout()
+            radial_menu.open_menu(x, y, [c[1] for c in cands])
+            radar.invalidate_frame_layer()
+            self._note_activity()
+            return True
         # Prefer aircraft over airports when distances are close.
         flight_bias = theme.s(12) ** 2
         if flight is not None and (
@@ -5184,6 +5236,23 @@ class RoundTouchDisplay:
             self._note_activity()
             return True
         return False
+
+    def _radial_menu_select(self, entry: dict) -> None:
+        """Open the target picked from the radial menu."""
+        if entry.get("kind") == "flight" and entry.get("flight") is not None:
+            self._open_picked_flight(entry["flight"])
+            return
+        airport = entry.get("airport")
+        if airport is None:
+            return
+        try:
+            from display.round_touch import airport_tile
+
+            airport_tile.open_tile(airport)
+        except ImportError:
+            # METAR tile not merged here — fall back to the callout toast.
+            airport_overlay.show_callout(airport)
+        radar.invalidate_frame_layer()
 
     def _tick_ais(self):
         if self._radar_modal_active():
@@ -5411,7 +5480,8 @@ class RoundTouchDisplay:
                                 self._long_press_pan.clear_candidate()
                                 self._clear_hud_mute_hold()
                             scale_delta = self.gestures.handle_finger_event(event)
-                            if scale_delta:
+                            if scale_delta and not radial_menu.is_open():
+                                # Range must not change under a frozen menu.
                                 self._apply_scale_step(scale_delta)
                         self._handle_navigation()
                 _lt = self._loop_stage("loop_events", _lt)
@@ -5757,6 +5827,9 @@ class RoundTouchDisplay:
                     from display.round_touch import airport_tile
 
                     if airport_tile.tick():
+                        radar.invalidate_frame_layer()
+                        self._safe_draw()
+                    if radial_menu.tick():
                         radar.invalidate_frame_layer()
                         self._safe_draw()
                     try:

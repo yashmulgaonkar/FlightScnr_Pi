@@ -81,5 +81,36 @@ class TestRoundUnitBands(unittest.TestCase):
             self.assertEqual(scale.format_scale_tag(outer_km, "nm"), "10nm")
 
 
+class TestRoundRingValues(unittest.TestCase):
+    """Inner rings sit at round distances, not exact thirds."""
+
+    def test_ring_values_are_round_and_increasing(self):
+        for units in ("mi", "km", "nm"):
+            for i in range(8):
+                vals = scale.ring_values(i, units)
+                v = scale.display_value_for_index(i, units)
+                self.assertEqual(len(vals), 3)
+                self.assertEqual(vals[-1], v)
+                self.assertTrue(0 < vals[0] < vals[1] < vals[2])
+                step = 0.5 if v < 5 else (1 if v < 30 else (5 if v < 60 else 10))
+                for d in vals[:2]:
+                    self.assertAlmostEqual((d / step) % 1.0, 0.0, places=6,
+                                           msg=f"{units} range {v}: ring {d}")
+
+    def test_known_examples(self):
+        self.assertEqual(scale.ring_values(4, "mi"), [3, 7, 10])
+        self.assertEqual(scale.ring_values(4, "km"), [5, 10, 15])
+        self.assertEqual(scale.ring_values(7, "nm"), [15, 25, 40])
+        self.assertEqual(scale.ring_values(0, "mi"), [0.5, 1.5, 2])
+
+    def test_radar_uses_ring_values(self):
+        import inspect
+
+        from display.round_touch.screens import radar
+
+        src = inspect.getsource(radar)
+        self.assertIn("scale.ring_values", src)
+
+
 if __name__ == "__main__":
     unittest.main()
