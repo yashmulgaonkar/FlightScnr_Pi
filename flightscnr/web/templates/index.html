@@ -931,7 +931,15 @@
                 <label for="auto_off_hours">Auto-install during off-hours</label>
                 <span class="switch"><input id="auto_off_hours" type="checkbox"><span class="track"></span></span>
             </div>
-            <p class="hint">When on, an available update installs in the night window (Off Hours start/end, or 22:00–06:00) after the panel has been idle for 5 minutes. Dismissing the radar bubble skips that version. ATC playing also delays the install.</p>
+            <div class="chk" id="auto-update-time-row">
+                <label for="auto_update_time">Auto-update time (optional)</label>
+                <input id="auto_update_time" type="time" step="60">
+            </div>
+            <div class="chk">
+                <label for="hide_update_banner">Hide update banner on device</label>
+                <span class="switch"><input id="hide_update_banner" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">When Auto-install is on, the update banner stays hidden on the radar/clock screen entirely; it installs silently. By default it installs in the Off Hours window (start/end above, or 22:00–06:00) once the panel has been idle for 5 minutes. Set a specific Auto-update time instead if you want updates to run at a fixed time independent of your Off Hours schedule (a window of about an hour after that time). Dismissing the radar bubble skips that version. ATC playing also delays the install. Hide update banner works on its own too: turn it on to stop the on-screen banner without enabling auto-install, so updates only happen when you tap Update Now here in the portal.</p>
             <p class="hint" id="update-repair-hint">If you are stuck on an old version and <strong>Repair &amp; Update</strong> is missing, on the Pi open <strong>Menu → Accessories → Terminal</strong> and paste:<br><code>curl -fsSL https://raw.githubusercontent.com/yashmulgaonkar/FlightScnr_Pi/main/scripts/repair-ota.sh | bash</code></p>
             <div class="track-row" style="margin-top:.55rem">
                 <button class="btn" id="btn-check-updates" type="button">Check Updates</button>
@@ -1245,6 +1253,8 @@ function applyUpdateInfo(data) {
             : "Later tonight";
     }
     if ($("auto_off_hours")) $("auto_off_hours").checked = !!data.auto_off_hours;
+    if ($("auto_update_time")) $("auto_update_time").value = data.auto_update_time || "";
+    if ($("hide_update_banner")) $("hide_update_banner").checked = !!data.hide_banner;
     $("btn-repair-update").classList.toggle("hidden", !repair);
     $("btn-resync-install").classList.toggle("hidden", !resync);
     $("btn-check-updates").disabled = running;
@@ -2872,26 +2882,47 @@ $("btn-update-now").addEventListener("click", applyUpdate);
 if ($("btn-update-tonight")) {
     $("btn-update-tonight").addEventListener("click", applyUpdateTonight);
 }
-if ($("auto_off_hours")) {
-    $("auto_off_hours").addEventListener("change", async () => {
-        try {
-            const data = await jsonFetch("/updates/auto", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ auto_off_hours: $("auto_off_hours").checked }),
-            });
-            applyUpdateInfo(data);
-            showStatus(
-                "updates-status",
-                data.auto_off_hours
-                    ? "Will auto-install during off-hours when idle."
-                    : "Auto-install during off-hours is off."
-            );
-        } catch (e) {
-            showStatus("updates-status", e.message, true);
-            $("auto_off_hours").checked = !$("auto_off_hours").checked;
+async function saveAutoUpdatePrefs() {
+    const prevChecked = $("auto_off_hours") ? $("auto_off_hours").checked : false;
+    const prevTime = $("auto_update_time") ? $("auto_update_time").value : "";
+    const prevHide = $("hide_update_banner") ? $("hide_update_banner").checked : false;
+    try {
+        const data = await jsonFetch("/updates/auto", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                auto_off_hours: $("auto_off_hours") ? $("auto_off_hours").checked : false,
+                auto_update_time: $("auto_update_time") ? $("auto_update_time").value : "",
+                hide_banner: $("hide_update_banner") ? $("hide_update_banner").checked : false,
+            }),
+        });
+        applyUpdateInfo(data);
+        if ($("auto_update_time")) $("auto_update_time").value = data.auto_update_time || "";
+        if ($("hide_update_banner")) $("hide_update_banner").checked = !!data.hide_banner;
+        let msg = "Auto-install is off. Updates only happen when you tap Update Now.";
+        if (data.auto_off_hours) {
+            msg = data.auto_update_time
+                ? `Will auto-install silently around ${data.auto_update_time}.`
+                : "Will auto-install silently during off-hours when idle.";
+        } else if (data.hide_banner) {
+            msg = "Update banner hidden on device. Check here to install manually.";
         }
-    });
+        showStatus("updates-status", msg);
+    } catch (e) {
+        showStatus("updates-status", e.message, true);
+        if ($("auto_off_hours")) $("auto_off_hours").checked = prevChecked;
+        if ($("auto_update_time")) $("auto_update_time").value = prevTime;
+        if ($("hide_update_banner")) $("hide_update_banner").checked = prevHide;
+    }
+}
+if ($("auto_off_hours")) {
+    $("auto_off_hours").addEventListener("change", saveAutoUpdatePrefs);
+}
+if ($("hide_update_banner")) {
+    $("hide_update_banner").addEventListener("change", saveAutoUpdatePrefs);
+}
+if ($("auto_update_time")) {
+    $("auto_update_time").addEventListener("change", saveAutoUpdatePrefs);
 }
 $("btn-repair-update").addEventListener("click", applyRepairConfirmed);
 $("btn-resync-install").addEventListener("click", applyResyncConfirmed);

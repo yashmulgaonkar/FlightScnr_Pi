@@ -775,6 +775,8 @@ def _default_notify() -> dict:
         "dismissed_for": "",
         "scheduled_for": "",
         "auto_off_hours": False,
+        "auto_update_time": "",
+        "hide_banner": False,
     }
 
 
@@ -800,6 +802,8 @@ def _read_notify() -> dict:
         state["dismissed_for"] = str(data.get("dismissed_for") or "")
         state["scheduled_for"] = str(data.get("scheduled_for") or "")
         state["auto_off_hours"] = bool(data.get("auto_off_hours"))
+        state["auto_update_time"] = str(data.get("auto_update_time") or "").strip()
+        state["hide_banner"] = bool(data.get("hide_banner"))
         return state
     except (OSError, json.JSONDecodeError, TypeError):
         return state
@@ -834,6 +838,8 @@ def refresh_notify_from_check(result: dict) -> dict:
     dismissed_for = str(prev.get("dismissed_for") or "")
     scheduled_for = str(prev.get("scheduled_for") or "")
     auto_off_hours = bool(prev.get("auto_off_hours"))
+    auto_update_time = str(prev.get("auto_update_time") or "").strip()
+    hide_banner = bool(prev.get("hide_banner"))
     if not available:
         dismissed_for = ""
         scheduled_for = ""
@@ -858,6 +864,8 @@ def refresh_notify_from_check(result: dict) -> dict:
         "dismissed_for": dismissed_for if available else "",
         "scheduled_for": scheduled_for if available else "",
         "auto_off_hours": auto_off_hours,
+        "auto_update_time": auto_update_time,
+        "hide_banner": hide_banner,
     }
     if available and not state["remote_release"] and remote_id:
         state["remote_release"] = remote_id.split("@", 1)[0]
@@ -919,6 +927,15 @@ def should_show_update_banner() -> bool:
     state = _read_notify()
     if not state.get("update_available"):
         return False
+    if state.get("auto_off_hours"):
+        # Silent auto-update is on: the whole point is not to nag about it.
+        # should_auto_install()/maybe_start_scheduled_update() still handle
+        # the actual install without any on-device notification.
+        return False
+    if state.get("hide_banner"):
+        # Independent of auto-install: the user wants full manual control
+        # (Update Now in the portal only) but no on-screen nagging either.
+        return False
     remote_id = str(state.get("remote_id") or "")
     dismissed = str(state.get("dismissed_for") or "")
     if remote_id and dismissed == remote_id:
@@ -974,11 +991,79 @@ def set_auto_off_hours(enabled: bool) -> dict:
     return state
 
 
+def auto_update_time() -> str:
+    """Optional dedicated HH:MM auto-update time, independent of the Off
+    Hours dim schedule. Empty string means: use the Off Hours window."""
+    return str(_read_notify().get("auto_update_time") or "").strip()
+
+
+def set_auto_update_time(value: str) -> dict:
+    """Portal setter for the dedicated auto-update time. Pass "" to clear
+    it and fall back to the Off Hours window instead."""
+    value = str(value or "").strip()
+    if value and not _parse_hhmm(value):
+        value = ""
+    state = _read_notify()
+    state["auto_update_time"] = value
+    _write_notify(state)
+    return state
+
+
+def banner_hidden() -> bool:
+    """True when the on-device update banner is suppressed regardless of
+    auto-install state. Independent of auto_off_hours: this lets someone
+    keep full manual control over installs (Update Now in the portal only)
+    while still not being nagged by the on-screen banner."""
+    return bool(_read_notify().get("hide_banner"))
+
+
+def set_hide_banner(enabled: bool) -> dict:
+    """Portal toggle: never show the on-device update banner, independent
+    of whether auto-install during off-hours is also enabled."""
+    state = _read_notify()
+    state["hide_banner"] = bool(enabled)
+    _write_notify(state)
+    return state
+
+
+def _parse_hhmm(value: str) -> tuple[int, int] | None:
+    parts = str(value or "").split(":")
+    if len(parts) != 2:
+        return None
+    try:
+        hh, mm = int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        return None
+    return hh, mm
+
+
 AUTO_IDLE_S = 5 * 60
 _last_auto_attempt_ts = 0.0
+# How long, after the configured auto-update time, the window stays open.
+# Generous on purpose: idle/ATC/reachability conditions may not line up
+# right at the exact minute, so this gives them room to align.
+_AUTO_UPDATE_TIME_WINDOW_MIN = 60
+
+
+def _in_auto_update_time_window(now: datetime | None = None) -> bool:
+    parsed = _parse_hhmm(auto_update_time())
+    if not parsed:
+        return False
+    hh, mm = parsed
+    now = now or datetime.now()
+    cur = now.hour * 60 + now.minute
+    start = hh * 60 + mm
+    end = (start + _AUTO_UPDATE_TIME_WINDOW_MIN) % (24 * 60)
+    if start <= end:
+        return start <= cur < end
+    return cur >= start or cur < end
 
 
 def _in_ota_night_window() -> bool:
+    if auto_update_time():
+        return _in_auto_update_time_window()
     try:
         from display.round_touch import off_hours
 
@@ -1153,6 +1238,8 @@ def check_for_update(*, force: bool = False) -> dict:
         "update_running": running,
         "scheduled_tonight": update_is_scheduled(),
         "auto_off_hours": auto_off_hours_enabled(),
+        "auto_update_time": auto_update_time(),
+        "hide_banner": banner_hidden(),
         "message": message,
         "local": local,
         "remote": remote,

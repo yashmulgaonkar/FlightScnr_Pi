@@ -1826,6 +1826,10 @@ def updates_auto():
 
     data = request.get_json(silent=True) or {}
     updater.set_auto_off_hours(bool(data.get("auto_off_hours")))
+    if "auto_update_time" in data:
+        updater.set_auto_update_time(str(data.get("auto_update_time") or ""))
+    if "hide_banner" in data:
+        updater.set_hide_banner(bool(data.get("hide_banner")))
     return jsonify(updater.check_for_update())
 
 
