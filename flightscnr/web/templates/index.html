@@ -30,6 +30,8 @@
         input,select,button{font-family:inherit;}
         input,select{width:100%;padding:.6rem .65rem;border-radius:9px;border:1px solid var(--fline);
         background:var(--field);color:#fff;font-size:1rem;outline:none;}
+        input[type=color]{width:2.6rem;height:2.4rem;padding:.15rem;flex:none;cursor:pointer;}
+        input[type=color]:disabled{opacity:.4;cursor:not-allowed;}
         input:focus,select:focus{border-color:var(--accent2);box-shadow:0 0 0 2px rgba(34,194,76,.2);}
         input::placeholder{color:#777;}
         .hint,.note{color:var(--muted);font-size:.78rem;margin:.4rem 0 0;}
@@ -42,6 +44,7 @@
         .rgb-row label{margin:0;font-size:.75rem;color:var(--muted);}
         .rgb-row input[type=number]{width:100%;padding:.45rem .4rem;font-size:.9rem;}
         .rgb-row input[type=color]{width:2.6rem;height:2.4rem;padding:.15rem;border-radius:9px;border:1px solid var(--fline);background:var(--field);cursor:pointer;}
+        .chk input[type=color]{width:2.6rem;height:2.4rem;padding:.15rem;margin:0;}
         @media(max-width:24rem){.row2,.row3{grid-template-columns:1fr;}.rgb-row{grid-template-columns:1fr 1fr;}}
         .track-row{display:flex;gap:.5rem;align-items:center}
         .track-row input{flex:1}
@@ -3643,11 +3646,12 @@ document.addEventListener("DOMContentLoaded", () => {
         ];
         const FORMS = [["icon", "Icon"], ["triangle", "Triangle"], ["dot", "Dot"]];
         const MODES = [["letters", "Letters"], ["degrees", "Degrees"], ["both", "Both"]];
+        const COLOR_IDS = CATS.map(([cat]) => "tgt_" + cat).concat(["tgt_compass", "tgt_blip"]);
         function colorRow(id) {
             return '<div class="chk"><label for="' + id + '_auto">Auto color</label>' +
                 '<span class="switch"><input id="' + id + '_auto" type="checkbox" checked><span class="track"></span></span></div>' +
-                '<label for="' + id + '_color">Custom color</label>' +
-                '<input id="' + id + '_color" type="color" value="#00ff00">';
+                '<div class="chk"><label for="' + id + '_color">Custom color</label>' +
+                '<input id="' + id + '_color" type="color" value="#ffb428" disabled></div>';
         }
         function rangeRow(id, label, lo, hi, val) {
             return '<label for="' + id + '">' + label + ' <span id="' + id + '_label">' + val + '%</span></label>' +
@@ -3675,10 +3679,25 @@ document.addEventListener("DOMContentLoaded", () => {
         html += rangeRow("tgt_blip_opacity", "Opacity", 20, 100, 100);
         body.innerHTML = html;
 
+        function syncColorEnabled(id) {
+            const auto = $(id + "_auto"), color = $(id + "_color");
+            if (!auto || !color) return;
+            color.disabled = auto.checked;
+        }
+        function wireColorRow(id) {
+            syncColorEnabled(id);
+            const auto = $(id + "_auto");
+            if (auto) auto.addEventListener("change", () => syncColorEnabled(id));
+        }
+        for (const id of COLOR_IDS) wireColorRow(id);
+
         function setColor(id, hex) {
             const auto = $(id + "_auto"), color = $(id + "_color");
             if (auto) auto.checked = !hex;
-            if (color && hex) color.value = hex;
+            if (color) {
+                if (hex) color.value = hex;
+                color.disabled = !!(auto && auto.checked);
+            }
         }
         function getColor(id) {
             const auto = $(id + "_auto"), color = $(id + "_color");
