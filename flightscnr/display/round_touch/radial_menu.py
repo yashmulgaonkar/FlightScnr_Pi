@@ -93,8 +93,13 @@ def open_menu(x: int, y: int, items: list[dict]) -> None:
     global _entries, _tap, _center, _opened_at, _closed_reported, _stamp
     _stamp = None
     _entries = list(items[:MAX_ENTRIES])
+    chart_style = settings.airport_icon_style() == "chart"
     for entry in _entries:
-        if entry.get("kind") == "airport" and "chart" not in entry:
+        if (
+            chart_style
+            and entry.get("kind") == "airport"
+            and "chart" not in entry
+        ):
             try:
                 from display.round_touch.airport_overlay import chart_icon_flags
 
@@ -259,6 +264,26 @@ def _chart_glyph(size: int, chart) -> pygame.Surface:
             surf, (big // 2, big // 2), max(5, int(big * 0.26)),
             towered=towered, fuel=fuel, beacon=beacon,
         )
+    except Exception:
+        pygame.draw.circle(surf, (*_LABEL, 255), (big // 2, big // 2),
+                           max(3, big // 3), 2)
+    return _fit_glyph(surf, size)
+
+
+def _classic_pin_glyph(size: int, airport: dict | None) -> pygame.Surface:
+    """Classic airport.png pin for a wedge (matches radar icon style)."""
+    big = size * 2
+    surf = pygame.Surface((big, big), pygame.SRCALPHA)
+    try:
+        from display.round_touch import airport_overlay as ao
+
+        icon = ao.airport_icon(ao._icon_height(airport or {}))
+        if icon is None:
+            raise ValueError("airport icon unavailable")
+        cx, cy = big // 2, big // 2
+        ax = int(round(icon.get_width() * ao._ICON_ANCHOR_X))
+        ay = int(round(icon.get_height() * ao._ICON_ANCHOR_Y))
+        surf.blit(icon, (cx - ax, cy - ay))
     except Exception:
         pygame.draw.circle(surf, (*_LABEL, 255), (big // 2, big // 2),
                            max(3, big // 3), 2)
@@ -432,7 +457,10 @@ def _draw_uncached(surface: pygame.Surface) -> pygame.Rect | None:
                 while len(label) > 3 and not _fits():
                     label = label[:-1]
         if entry.get("kind") == "airport":
-            lead = _chart_glyph(icon_px, entry.get("chart"))
+            if settings.airport_icon_style() == "chart":
+                lead = _chart_glyph(icon_px, entry.get("chart"))
+            else:
+                lead = _classic_pin_glyph(icon_px, entry.get("airport"))
         else:
             lead = _plane_glyph(icon_px, entry.get("flight"))
         label_a = int(255 * max(0.0, wedge_ps[i] - 0.55) / 0.45)

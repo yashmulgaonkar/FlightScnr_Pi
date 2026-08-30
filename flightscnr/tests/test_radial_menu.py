@@ -194,3 +194,54 @@ class TestPostAnimationStamp:
         radial_menu.draw(surface)
         assert radial_menu._stamp is None
         radial_menu.close()
+
+
+class TestAirportGlyphs:
+    _AIRPORT = [
+        {"kind": "airport", "label": "KHMT", "airport": {"ident": "KHMT", "type": "small_airport"}},
+        {"kind": "flight", "label": "N1", "flight": {"callsign": "N1"}},
+    ]
+
+    def test_classic_style_uses_pin_glyph(self, monkeypatch):
+        from display.round_touch import settings
+
+        chart_calls = []
+        pin_calls = []
+
+        monkeypatch.setattr(settings, "airport_icon_style", lambda: "classic")
+        monkeypatch.setattr(
+            radial_menu, "_chart_glyph",
+            lambda *a, **k: chart_calls.append(1) or pygame.Surface((8, 8)),
+        )
+        monkeypatch.setattr(
+            radial_menu, "_classic_pin_glyph",
+            lambda *a, **k: pin_calls.append(1) or pygame.Surface((8, 8)),
+        )
+        radial_menu.open_menu(theme.CENTER_X, theme.CENTER_Y, list(self._AIRPORT))
+        assert "chart" not in radial_menu.entries()[0]
+        surface = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
+        radial_menu.draw(surface)
+        assert not chart_calls
+        assert pin_calls
+
+    def test_chart_style_uses_chart_glyph(self, monkeypatch):
+        from display.round_touch import settings
+
+        chart_calls = []
+        pin_calls = []
+
+        monkeypatch.setattr(settings, "airport_icon_style", lambda: "chart")
+        monkeypatch.setattr(
+            radial_menu, "_chart_glyph",
+            lambda *a, **k: chart_calls.append(1) or pygame.Surface((8, 8)),
+        )
+        monkeypatch.setattr(
+            radial_menu, "_classic_pin_glyph",
+            lambda *a, **k: pin_calls.append(1) or pygame.Surface((8, 8)),
+        )
+        radial_menu.open_menu(theme.CENTER_X, theme.CENTER_Y, list(self._AIRPORT))
+        assert radial_menu.entries()[0].get("chart") is not None
+        surface = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
+        radial_menu.draw(surface)
+        assert chart_calls
+        assert not pin_calls
