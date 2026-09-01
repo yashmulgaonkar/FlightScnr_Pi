@@ -1000,11 +1000,10 @@ def auto_update_time() -> str:
 def set_auto_update_time(value: str) -> dict:
     """Portal setter for the dedicated auto-update time. Pass "" to clear
     it and fall back to the Off Hours window instead."""
-    value = str(value or "").strip()
-    if value and not _parse_hhmm(value):
-        value = ""
+    parsed = _parse_hhmm(value)
+    stored = "" if parsed is None else f"{parsed[0]:02d}:{parsed[1]:02d}"
     state = _read_notify()
-    state["auto_update_time"] = value
+    state["auto_update_time"] = stored
     _write_notify(state)
     return state
 
@@ -1027,8 +1026,9 @@ def set_hide_banner(enabled: bool) -> dict:
 
 
 def _parse_hhmm(value: str) -> tuple[int, int] | None:
-    parts = str(value or "").split(":")
-    if len(parts) != 2:
+    """Accept HH:MM or HH:MM:SS from an HTML ``type=time`` input."""
+    parts = str(value or "").strip().split(":")
+    if len(parts) not in (2, 3):
         return None
     try:
         hh, mm = int(parts[0]), int(parts[1])
@@ -1036,6 +1036,13 @@ def _parse_hhmm(value: str) -> tuple[int, int] | None:
         return None
     if not (0 <= hh <= 23 and 0 <= mm <= 59):
         return None
+    if len(parts) == 3:
+        try:
+            ss = int(float(parts[2]))
+        except ValueError:
+            return None
+        if not (0 <= ss <= 59):
+            return None
     return hh, mm
 
 

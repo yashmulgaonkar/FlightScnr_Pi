@@ -15,6 +15,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime
 from unittest import mock
 
 
@@ -411,6 +412,145 @@ class TestUpdateNotify(unittest.TestCase):
         self.assertTrue(remote["release_html_url"].endswith("2026.9.1.1"))
         cached, _ = self.updater._read_remote_cache()
         self.assertEqual(cached.get("release_notes"), remote["release_notes"])
+
+
+class TestAutoUpdatePrefs(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.data_dir = self._tmpdir.name
+        import utilities.updater as updater
+
+        self.updater = updater
+        self._patches = [
+            mock.patch.object(updater, "DATA_DIR", self.data_dir),
+            mock.patch.object(
+                updater, "NOTIFY_PATH", os.path.join(self.data_dir, "update-notify.json")
+            ),
+            mock.patch.object(
+                updater, "STATUS_PATH", os.path.join(self.data_dir, "update-status.json")
+            ),
+            mock.patch.object(
+                updater, "LOCK_PATH", os.path.join(self.data_dir, "update.lock")
+            ),
+            mock.patch.object(
+                updater,
+                "_REMOTE_CACHE_PATH",
+                os.path.join(self.data_dir, "github-remote-cache.json"),
+            ),
+            mock.patch.object(updater, "update_running", return_value=False),
+        ]
+        for p in self._patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self._patches:
+            p.stop()
+        self._tmpdir.cleanup()
+
+    def _available(self):
+        return self.updater.refresh_notify_from_check(
+            {
+                "update_available": True,
+                "update_running": False,
+                "remote": {"release_tag": "2026.8.5.1", "commit": "abcdef123456"},
+            }
+        )
+
+    def test_hide_banner_round_trip(self):
+        self.updater.set_hide_banner(True)
+        self.assertTrue(self.updater.banner_hidden())
+        self.updater.set_hide_banner(False)
+        self.assertFalse(self.updater.banner_hidden())
+
+    def test_hide_banner_alone_does_not_auto_install(self):
+        self._available()
+        self.updater.set_hide_banner(True)
+        self.assertFalse(self.updater.should_show_update_banner())
+        self.assertFalse(self.updater.should_auto_install())
+
+    def test_banner_hidden_for_every_auto_and_hide_combo(self):
+        self._available()
+        cases = (
+            (False, False, True),
+            (True, False, False),
+            (False, True, False),
+            (True, True, False),
+        )
+        for auto, hide, expect_banner in cases:
+            self.updater.set_auto_off_hours(auto)
+            self.updater.set_hide_banner(hide)
+            self.assertEqual(
+                self.updater.should_show_update_banner(),
+                expect_banner,
+                f"auto={auto} hide={hide}",
+            )
+
+    def test_auto_update_time_round_trip(self):
+        self.updater.set_auto_update_time("22:15")
+        self.assertEqual(self.updater.auto_update_time(), "22:15")
+
+    def test_html_time_input_with_seconds_is_kept(self):
+        """``<input type=time>`` may submit HH:MM:SS; that must not clear the field."""
+        self.updater.set_auto_update_time("22:00:00")
+        self.assertEqual(self.updater.auto_update_time(), "22:00")
+        self.updater.set_auto_update_time("07:05:30")
+        self.assertEqual(self.updater.auto_update_time(), "07:05")
+
+    def test_invalid_times_are_stored_empty(self):
+        for junk in ("25:99", "not-a-time", "22", "22:00:00:00", "-1:00"):
+            self.updater.set_auto_update_time("14:00")
+            self.updater.set_auto_update_time(junk)
+            self.assertEqual(self.updater.auto_update_time(), "", junk)
+
+    def test_window_is_inclusive_start_exclusive_end(self):
+        self.updater.set_auto_update_time("14:00")
+        self.assertTrue(
+            self.updater._in_auto_update_time_window(datetime(2026, 1, 1, 14, 0))
+        )
+        self.assertTrue(
+            self.updater._in_auto_update_time_window(datetime(2026, 1, 1, 14, 59))
+        )
+        self.assertFalse(
+            self.updater._in_auto_update_time_window(datetime(2026, 1, 1, 15, 0))
+        )
+        self.assertFalse(
+            self.updater._in_auto_update_time_window(datetime(2026, 1, 1, 13, 59))
+        )
+
+    def test_midnight_wrap(self):
+        self.updater.set_auto_update_time("23:45")
+        self.assertTrue(
+            self.updater._in_auto_update_time_window(datetime(2026, 1, 1, 23, 50))
+        )
+        self.assertTrue(
+            self.updater._in_auto_update_time_window(datetime(2026, 1, 2, 0, 30))
+        )
+        self.assertFalse(
+            self.updater._in_auto_update_time_window(datetime(2026, 1, 2, 0, 45))
+        )
+        self.assertFalse(
+            self.updater._in_auto_update_time_window(datetime(2026, 1, 1, 22, 0))
+        )
+
+    def test_clearing_the_time_falls_through_to_off_hours(self):
+        self.updater.set_auto_update_time("14:00")
+        self.updater.set_auto_update_time("")
+        self.assertEqual(self.updater.auto_update_time(), "")
+        with mock.patch.object(
+            self.updater, "_in_auto_update_time_window"
+        ) as dedicated:
+            with mock.patch(
+                "display.round_touch.off_hours.in_night_window", return_value=True
+            ):
+                self.assertTrue(self.updater._in_ota_night_window())
+            dedicated.assert_not_called()
+
+    def test_prefs_survive_a_refresh(self):
+        self.updater.set_hide_banner(True)
+        self.updater.set_auto_update_time("03:30")
+        self._available()
+        self.assertTrue(self.updater.banner_hidden())
+        self.assertEqual(self.updater.auto_update_time(), "03:30")
 
 
 if __name__ == "__main__":
