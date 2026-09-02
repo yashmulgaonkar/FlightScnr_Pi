@@ -156,6 +156,21 @@ def draw_follow_loading(surface: pygame.Surface, callsign: str) -> None:
         center=(theme.CENTER_X, theme.CENTER_Y + theme.s(16))))
 
 
+def draw_follow_not_found(surface: pygame.Surface, callsign: str) -> None:
+    """Tracked pin kept after landing — waiting for the flight to reappear."""
+    title_font = draw.load_font(theme.s(20), bold=True)
+    hint_font = draw.load_font(theme.s(13))
+    title = title_font.render(callsign or "Tracked", True, theme.MUTED)
+    body = hint_font.render("Live flight not found", True, theme.LABEL)
+    hint = hint_font.render("Radar highlights when it returns", True, theme.HINT)
+    surface.blit(title, title.get_rect(
+        center=(theme.CENTER_X, theme.CENTER_Y - theme.s(28))))
+    surface.blit(body, body.get_rect(
+        center=(theme.CENTER_X, theme.CENTER_Y)))
+    surface.blit(hint, hint.get_rect(
+        center=(theme.CENTER_X, theme.CENTER_Y + theme.s(24))))
+
+
 def draw_footer(surface: pygame.Surface, tracked_data=None) -> None:
     """Draw the shared Tracked footer, including the pin state."""
     nav.draw_footer_buttons(
@@ -1245,6 +1260,30 @@ def _draw_pending(surface, callsign: str, top: int, bottom: int):
         y = draw.draw_center_line(surface, "Starts when flight goes live", y, detail_font, theme.HINT)
 
 
+def _draw_not_found(surface, callsign: str, top: int, bottom: int):
+    title_font = draw.load_font(theme.FONT_TITLE, bold=True)
+    body_font = draw.load_font(theme.FONT_BODY)
+    detail_font = draw.load_font(theme.FONT_DETAIL)
+
+    y = top + theme.s(8)
+    y = common.draw_logo(surface, {"callsign": callsign}, y)
+    y = draw.draw_center_line(surface, callsign, y, title_font, theme.LABEL)
+    y += theme.s(10)
+    if y + body_font.get_height() <= bottom:
+        y = draw.draw_center_line(
+            surface, "Live flight not found", y, body_font, theme.MUTED
+        )
+        y += theme.s(8)
+    if y + detail_font.get_height() <= bottom:
+        y = draw.draw_center_line(
+            surface,
+            "Radar highlights when it returns",
+            y,
+            detail_font,
+            theme.HINT,
+        )
+
+
 def _finish_marquee_frame():
     global _marquee_animating
     for key in list(_marquee_states):
@@ -1259,6 +1298,8 @@ def draw_tracked(
     tracked_data,
     callsign: str | None = None,
     scroll_offset: int = 0,
+    *,
+    inactive: bool = False,
 ) -> int:
     global _marquee_active_keys
     _marquee_active_keys = set()
@@ -1295,7 +1336,10 @@ def draw_tracked(
         return 0
 
     if not tracked_data:
-        _draw_pending(surface, raw_callsign, top, content_bottom)
+        if inactive:
+            _draw_not_found(surface, raw_callsign, top, content_bottom)
+        else:
+            _draw_pending(surface, raw_callsign, top, content_bottom)
         nav.draw_footer_buttons(surface, footer, **footer_kw)
         _finish_marquee_frame()
         return 0

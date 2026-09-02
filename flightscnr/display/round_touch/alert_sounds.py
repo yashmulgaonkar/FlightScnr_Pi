@@ -136,21 +136,38 @@ def _identity_hash(token: str) -> int:
     return h
 
 
-def check_tracked_enter_range(tracked_data: dict | None) -> bool:
-    """True once when the live tracked flight crosses into radar range."""
+def check_tracked_enter_range(
+    tracked_data: dict | None,
+    flights: list[dict] | None = None,
+) -> bool:
+    """True once when the tracked flight crosses into radar range.
+
+    Prefers live ``tracked_data``. When the pin is inactive / FR24 has not
+    rebuilt yet, also matches the tracked callsign against zone ``flights``
+    so ADS-B reappear still plays the enter-range alert.
+    """
     global _tracked_id, _tracked_was_in_range
-    if not tracked_data or not tracked_data.get("is_live"):
+
+    candidate = None
+    if tracked_data and tracked_data.get("is_live"):
+        candidate = tracked_data
+    else:
+        candidate = _matching_zone_flight(flights)
+
+    if not candidate:
         _tracked_was_in_range = False
         if not tracked_data:
-            _tracked_id = None
+            # Keep id if we only lost live data but still have a callsign pin —
+            # identity reset happens when the callsign token changes.
+            pass
         return False
 
-    tid = _tracked_identity(tracked_data)
+    tid = _tracked_identity(candidate)
     if tid != _tracked_id:
         _tracked_id = tid
         _tracked_was_in_range = False
 
-    now_in = aircraft_alert.is_in_range(_as_flight_for_range(tracked_data))
+    now_in = aircraft_alert.is_in_range(_as_flight_for_range(candidate))
     entered = bool(now_in and not _tracked_was_in_range)
     _tracked_was_in_range = now_in
     if entered and settings.traffic_sfx_enabled():
@@ -161,6 +178,28 @@ def check_tracked_enter_range(tracked_data: dict | None) -> bool:
             thread_name="sfx-traffic",
         )
     return entered
+
+
+def _matching_zone_flight(flights: list[dict] | None) -> dict | None:
+    """Return the zone flight that matches the saved tracked callsign, if any."""
+    try:
+        from utilities.overhead import load_tracked_callsign
+    except Exception:
+        return None
+    tracked = (load_tracked_callsign() or "").strip().upper()
+    if not tracked or not flights:
+        return None
+    tracked_keys = aircraft_alert.flight_identity_keys(
+        {"callsign": tracked, "registration": tracked}
+    )
+    if not tracked_keys:
+        return None
+    for flight in flights:
+        if flight.get("kind") == "vessel":
+            continue
+        if tracked_keys & aircraft_alert.flight_identity_keys(flight):
+            return flight
+    return None
 
 
 def check_military_sightings(flights: list[dict]) -> bool:
@@ -207,5 +246,5 @@ def check_military_sightings(flights: list[dict]) -> bool:
 
 def tick(flights: list[dict], tracked_data: dict | None) -> None:
     """Run enter-range + military SFX checks (call from the data poll)."""
-    check_tracked_enter_range(tracked_data)
+    check_tracked_enter_range(tracked_data, flights)
     check_military_sightings(flights)

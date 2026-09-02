@@ -900,6 +900,7 @@ class Overhead:
         self._processing = False
         self._grab_seq = 0
         self._tracked_was_live = False       # was the flight live last poll?
+        self._tracked_inactive = False       # was live, now gone — keep callsign
         self._tracked_miss_count = 0         # consecutive polls with no result
         self._TRACKED_MISS_THRESHOLD = 3     # fallback miss threshold (no ETA)
         # Full FR24 find+details every DATA_REFRESH (~2s) starved radar prewarm;
@@ -1657,6 +1658,7 @@ class Overhead:
                 if tracked_callsign != self._tracked_last_callsign:
                     self._tracked_last_callsign = tracked_callsign
                     self._tracked_was_live = False
+                    self._tracked_inactive = False
                     self._tracked_miss_count = 0
                     self._tracked_last_eta = None
                     self._tracked_last_data = None
@@ -1667,6 +1669,7 @@ class Overhead:
                 if tracked_data:
                     # Flight found — reset miss counter, store latest ETA and data
                     self._tracked_was_live = True
+                    self._tracked_inactive = False
                     self._tracked_miss_count = 0
                     self._tracked_last_eta = tracked_data.get("time_estimated_arrival")
                     self._tracked_last_data = tracked_data
@@ -1680,10 +1683,10 @@ class Overhead:
                             mins_since_eta = (now_ts - eta) / 60
                             if mins_since_eta > 0:
                                 # ETA has passed — use miss counter to confirm
-                                # before wiping (avoids false wipe on brief API hiccup)
+                                # before marking inactive (brief API hiccups).
                                 self._tracked_miss_count += 1
                                 if self._tracked_miss_count >= self._TRACKED_MISS_THRESHOLD:
-                                    self._do_auto_wipe()
+                                    self._mark_tracked_inactive()
                                 elif self._tracked_last_data:
                                     tracked_data = estimate_stale_data(self._tracked_last_data)
                             else:
@@ -1695,7 +1698,7 @@ class Overhead:
                             # No ETA data — fall back to miss counter
                             self._tracked_miss_count += 1
                             if self._tracked_miss_count >= self._TRACKED_MISS_THRESHOLD:
-                                self._do_auto_wipe()
+                                self._mark_tracked_inactive()
                             elif self._tracked_last_data:
                                 tracked_data = estimate_stale_data(self._tracked_last_data)
                     else:
@@ -1776,7 +1779,10 @@ class Overhead:
                 else:
                     stats["tracked_status"] = "ESTIMATED (stale)"
             elif stats.get("tracked_callsign"):
-                stats["tracked_status"] = "NOT FOUND"
+                if self._tracked_inactive:
+                    stats["tracked_status"] = "INACTIVE"
+                else:
+                    stats["tracked_status"] = "NOT FOUND"
             else:
                 stats["tracked_status"] = ""
 
@@ -1837,16 +1843,34 @@ class Overhead:
                 self._processing = False
                 self._grab_seq += 1
 
+    def _mark_tracked_inactive(self):
+        """Clear live pin state but keep tracked_flight.json callsign.
+
+        After landing / feed loss the Tracked and Follow screens show
+        "Live flight not found". Radar still highlights the callsign when
+        the aircraft reappears, and enter-range SFX can fire again.
+        """
+        self._tracked_was_live = False
+        self._tracked_inactive = True
+        self._tracked_miss_count = 0
+        self._tracked_last_eta = None
+        self._tracked_last_data = None
+        # Keep _tracked_last_callsign and schedule cache — same pin.
+        with self._lock:
+            self._tracked_data = None
+        print("Tracked flight inactive — keeping callsign for reappear.")
+
     def _do_auto_wipe(self):
         """Wipe tracked_flight.json and reset all tracking state."""
         try:
             with open(TRACKED_FILE, "w", encoding="utf-8") as f:
                 json.dump({"callsign": ""}, f)
-            _tracked_cache["at"] = 0.0
+            _tracked_cache.update({"at": 0.0, "mtime": None, "value": ""})
             print("Tracked flight ended - auto-cleared.")
         except Exception as e:
             print(f"Failed to auto-clear tracked flight: {e}")
         self._tracked_was_live = False
+        self._tracked_inactive = False
         self._tracked_miss_count = 0
         self._tracked_last_eta = None
         self._tracked_last_data = None
@@ -1862,6 +1886,12 @@ class Overhead:
             notice = self._tracking_cleared_notice
             self._tracking_cleared_notice = None
             return notice
+
+    @property
+    def tracked_inactive(self) -> bool:
+        """True when the pin is set but the live flight has gone inactive."""
+        with self._lock:
+            return bool(self._tracked_inactive)
 
     def _grab_tracked(self, flight_input, zone_flights=None):
         from utilities.aircraft_alert import looks_like_registration

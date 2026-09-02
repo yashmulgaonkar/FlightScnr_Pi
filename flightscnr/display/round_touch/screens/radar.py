@@ -1310,7 +1310,7 @@ def _draw_flights(surface, flights):
         for flight in flights:
             if not _above_min_height(flight):
                 continue
-            if not aircraft_alert.is_shown_on_radar(flight):
+            if not aircraft_alert.is_shown_on_radar(flight) and not _is_tracked(flight):
                 continue
             lat = flight.get("plane_latitude")
             lon = flight.get("plane_longitude")
@@ -1396,7 +1396,7 @@ def visible_in_range_count(flights) -> int:
     """In-range aircraft on radar (excludes rim blips), matching FlightScnr idle-clock logic."""
     count = 0
     for flight in _visible_flights(flights):
-        if not aircraft_alert.is_shown_on_radar(flight):
+        if not aircraft_alert.is_shown_on_radar(flight) and not _is_tracked(flight):
             continue
         lat = flight.get("plane_latitude")
         lon = flight.get("plane_longitude")
@@ -1708,7 +1708,7 @@ def pick_flight_at(flights, tap_x, tap_y, alt_x=None, alt_y=None):
     # Prefer aircraft when icons overlap — matches vessels-under-aircraft draw order.
     vessel_bias = theme.s(10) ** 2
     for flight in _visible_flights(flights):
-        if not aircraft_alert.is_shown_on_radar(flight):
+        if not aircraft_alert.is_shown_on_radar(flight) and not _is_tracked(flight):
             continue
         pos = _flight_screen_xy(flight)
         if not pos:
@@ -1732,7 +1732,7 @@ def flights_near(flights, tap_x, tap_y, radius_px):
     r2 = float(radius_px) ** 2
     out = []
     for flight in _visible_flights(flights):
-        if not aircraft_alert.is_shown_on_radar(flight):
+        if not aircraft_alert.is_shown_on_radar(flight) and not _is_tracked(flight):
             continue
         pos = _flight_screen_xy(flight)
         if not pos:

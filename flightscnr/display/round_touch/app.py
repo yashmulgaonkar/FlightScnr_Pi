@@ -1083,6 +1083,7 @@ class RoundTouchDisplay:
                 self.surface,
                 display_data,
                 scroll_offset=self._scroll.offset,
+                inactive=bool(self.overhead.tracked_inactive),
             )
         elif self.screen == SCREEN_LIVE:
             if not self.overhead.processing:
@@ -1105,7 +1106,10 @@ class RoundTouchDisplay:
 
                 pending = _ltc()
                 if pending:
-                    tracked.draw_follow_loading(self.surface, pending)
+                    if self.overhead.tracked_inactive:
+                        tracked.draw_follow_not_found(self.surface, pending)
+                    else:
+                        tracked.draw_follow_loading(self.surface, pending)
             self._scroll.max_offset = 0
         self._scroll.clamp()
         remaining = self._timeout_remaining_fraction()

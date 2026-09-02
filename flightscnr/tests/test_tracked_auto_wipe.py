@@ -93,8 +93,8 @@ class TestNeverLiveAutoWipe:
         assert data.get("is_scheduled") is True
 
 
-class TestWasLiveAutoWipe:
-    def test_wipes_after_misses_when_no_eta(self, monkeypatch):
+class TestWasLiveGoesInactive:
+    def test_keeps_callsign_after_misses_when_no_eta(self, monkeypatch):
         o = Overhead()
         o._TRACKED_MISS_THRESHOLD = 3
         set_tracked_callsign("SWA3755")
@@ -113,8 +113,20 @@ class TestWasLiveAutoWipe:
         for _ in range(3):
             o._grab()
 
-        assert load_tracked_callsign() == ""
-        assert o.take_tracking_cleared_notice() == TRACKING_CLEARED_NOTICE
+        assert load_tracked_callsign() == "SWA3755"
+        assert o.tracked_inactive is True
+        assert o.tracked_data is None
+        assert o.take_tracking_cleared_notice() is None
+
+    def test_mark_inactive_does_not_set_cleared_notice(self):
+        o = Overhead()
+        set_tracked_callsign("AAL123")
+        o._tracked_was_live = True
+        o._tracked_last_callsign = "AAL123"
+        o._mark_tracked_inactive()
+        assert load_tracked_callsign() == "AAL123"
+        assert o.tracked_inactive is True
+        assert o.take_tracking_cleared_notice() is None
 
 
 class TestTrackingClearedPopup:
@@ -136,3 +148,22 @@ class TestTrackingClearedPopup:
         assert tracked.tracking_cleared_ok_hit(theme.CENTER_X, theme.CENTER_Y + theme.s(40))
         assert tracked.tracking_cleared_ok_hit(0, 0)
         tracked.clear_tracking_cleared_popup()
+
+
+class TestInactiveNotFoundUi:
+    def test_draw_tracked_shows_not_found_when_inactive(self):
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        import pygame
+
+        pygame.init()
+        try:
+            pygame.display.set_mode((1, 1))
+        except pygame.error:
+            pass
+        from display.round_touch import theme
+        from display.round_touch.screens import tracked
+
+        set_tracked_callsign("AAL123")
+        surf = pygame.Surface((theme.SIZE, theme.SIZE))
+        tracked.draw_tracked(surf, None, inactive=True)
+        tracked.draw_follow_not_found(surf, "AAL123")
