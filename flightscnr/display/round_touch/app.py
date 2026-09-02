@@ -4454,23 +4454,32 @@ class RoundTouchDisplay:
                             zoom_action := zoom_buttons.hit_button(tap[0], tap[1])
                         ) is not None:
                             self._apply_zoom_button(zoom_action)
-                        elif lofi_tile.is_open():
-                            # While the tile is up it owns the tap: a button
-                            # on it, or anywhere else to dismiss.
-                            button = lofi_tile.hit_button(tap[0], tap[1])
-                            if button is not None:
-                                lofi_tile.apply(button)
-                            else:
-                                lofi_tile.dismiss()
+                        elif (
+                            lofi_btn := (
+                                lofi_tile.hit_button(tap[0], tap[1])
+                                if lofi_tile.is_open()
+                                else None
+                            )
+                        ) is not None:
+                            lofi_tile.apply(lofi_btn)
+                            self._safe_draw()
+                        elif lofi_tile.is_open() and lofi_tile.hit(tap[0], tap[1]):
+                            # Tap on the panel chrome, not a button: dismiss.
+                            lofi_tile.dismiss()
                             self._safe_draw()
                         elif (
                             lofi_action := lofi_controls.hit_button(tap[0], tap[1])
                         ) is not None:
+                            if lofi_tile.is_open():
+                                lofi_tile.dismiss()
                             self._apply_lofi_skip(lofi_action)
                         elif lofi_controls.hit_title(tap[0], tap[1]):
                             lofi_tile.open_tile()
                             self._safe_draw()
                         elif self._open_flight_or_fire_at(tap[0], tap[1]):
+                            self._safe_draw()
+                        elif lofi_tile.is_open():
+                            lofi_tile.dismiss()
                             self._safe_draw()
         elif tap and self.screen == SCREEN_FLIGHT:
             # Any tap (content or footer) restarts the idle countdown.
@@ -5258,6 +5267,7 @@ class RoundTouchDisplay:
         if airport is not None:
             from display.round_touch import airport_tile
 
+            lofi_tile.dismiss()
             airport_tile.open_tile(airport)
             radar.invalidate_frame_layer()
             self._note_activity()
@@ -5283,6 +5293,7 @@ class RoundTouchDisplay:
         try:
             from display.round_touch import airport_tile
 
+            lofi_tile.dismiss()
             airport_tile.open_tile(airport)
         except ImportError:
             # METAR tile not merged here — fall back to the callout toast.

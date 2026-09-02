@@ -720,6 +720,13 @@ def _blit_lofi_tile(
         return None
     if not lofi_tile.is_open():
         return None
+    try:
+        from display.round_touch import airport_tile
+
+        if airport_tile.is_open():
+            return None
+    except ImportError:
+        pass
 
     global _lofi_tile_stamp, _lofi_tile_stamp_key
     key = (lofi_tile.stamp_key(), rotation, theme.SIZE)

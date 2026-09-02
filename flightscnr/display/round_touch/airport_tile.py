@@ -92,6 +92,9 @@ def open_tile(airport: dict) -> None:
     if _airport is not None and str(_airport.get("ident") or "").upper() == ident:
         dismiss()
         return
+    import display.round_touch.lofi_tile as lofi_tile
+
+    lofi_tile.dismiss()
     _airport = dict(airport)
     _metar = None
     _fetch_done = False

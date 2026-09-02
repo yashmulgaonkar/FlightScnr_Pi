@@ -232,6 +232,22 @@ class TestDisablingATrack:
         lofi_audio.disable_track("a.mp3", skip=True)
         assert skipped == [1], "the disabled track kept playing"
 
+    def test_skip_while_paused_clears_the_hold(self, monkeypatch):
+        skipped = []
+        monkeypatch.setattr(lofi_audio, "next_track", lambda: skipped.append(1))
+        lofi_audio.pause()
+        lofi_audio.disable_track("a.mp3", skip=True)
+        assert skipped == [1]
+        assert lofi_audio.is_paused() is False
+
+    def test_skip_false_does_not_resume(self, monkeypatch):
+        skipped = []
+        monkeypatch.setattr(lofi_audio, "next_track", lambda: skipped.append(1))
+        lofi_audio.pause()
+        lofi_audio.disable_track("a.mp3", skip=False)
+        assert skipped == []
+        assert lofi_audio.is_paused() is True
+
     def test_it_does_not_skip_when_not_asked(self, monkeypatch):
         skipped = []
         monkeypatch.setattr(lofi_audio, "next_track", lambda: skipped.append(1))

@@ -728,6 +728,10 @@ def disable_track(name, *, skip: bool = False) -> None:
         logger.debug("[Lofi] disable failed", exc_info=True)
         return
     if skip:
+        # Skip starts the next file. Leaving the hold set would freeze
+        # tick() so that track never crossfades, with Play still showing.
+        if is_paused():
+            resume()
         next_track()
 
 

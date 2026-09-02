@@ -67,6 +67,9 @@ def open_tile(track_name: str | None = None) -> None:
         _track = ""
     _open = True
     _opened_at = time.monotonic()
+    import display.round_touch.airport_tile as airport_tile
+
+    airport_tile.dismiss()
 
 
 def blocked_reason() -> str | None:
@@ -153,7 +156,7 @@ def stamp_key():
     """What the drawn tile depends on, so a stamp can be cached per frame."""
     from utilities import lofi_audio
 
-    return (_track, lofi_audio.is_paused())
+    return (_track, lofi_audio.is_paused(), lofi_audio.playback_block())
 
 
 def display_name(filename: str | None) -> str:

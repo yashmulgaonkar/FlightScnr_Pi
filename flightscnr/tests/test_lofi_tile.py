@@ -267,6 +267,12 @@ class TestWiring:
         source = inspect.getsource(app_mod.RoundTouchDisplay._handle_navigation)
         assert "lofi_controls.hit_title" in source
         assert "lofi_tile.open_tile" in source
+        # Title / airport taps must run even when the other overlay is up.
+        # Owning every tap while the tile is open only dismissed METAR (or
+        # lofi) and never opened the one the finger was on.
+        assert source.find("lofi_controls.hit_title") < source.find(
+            "_open_flight_or_fire_at"
+        )
 
     def test_the_radar_screen_does_not_paint_it_to_the_draw_surface(self):
         """That surface is not what the radar presents. See TestItReachesThePanel."""
@@ -556,3 +562,72 @@ class TestWhyTheBedIsHeld:
 
         monkeypatch.setattr(settings, "lofi_enabled", lambda: False)
         assert _REAL_PLAYBACK_BLOCK()
+
+
+class TestStampKey:
+    def test_it_includes_the_block_reason(self, monkeypatch):
+        lofi_tile.open_tile()
+        monkeypatch.setattr(lofi_audio, "is_paused", lambda: False)
+        monkeypatch.setattr(lofi_audio, "playback_block", lambda: None)
+        playing = lofi_tile.stamp_key()
+        monkeypatch.setattr(lofi_audio, "playback_block", lambda: "Quiet hours")
+        blocked = lofi_tile.stamp_key()
+        assert playing != blocked
+        assert blocked[2] == "Quiet hours"
+
+
+class TestItDoesNotStackWithMetar:
+    def test_opening_lofi_closes_the_airport_tile(self, monkeypatch):
+        from display.round_touch import airport_tile
+
+        airport_tile._reset_for_tests()
+        monkeypatch.setattr(airport_tile, "_start_fetch", lambda ident: None)
+        airport_tile.open_tile({"ident": "KSAN", "name": "San Diego"})
+        assert airport_tile.is_open()
+        lofi_tile.open_tile()
+        assert lofi_tile.is_open()
+        assert not airport_tile.is_open()
+        airport_tile._reset_for_tests()
+
+    def test_opening_airport_closes_the_lofi_tile(self, monkeypatch):
+        from display.round_touch import airport_tile
+
+        airport_tile._reset_for_tests()
+        monkeypatch.setattr(airport_tile, "_start_fetch", lambda ident: None)
+        lofi_tile.open_tile()
+        assert lofi_tile.is_open()
+        airport_tile.open_tile({"ident": "KSAN", "name": "San Diego"})
+        assert airport_tile.is_open()
+        assert not lofi_tile.is_open()
+        airport_tile._reset_for_tests()
+
+    def test_the_stamp_does_not_draw_lofi_over_metar(self, monkeypatch):
+        """Even if both flags were set, METAR is the one overlay on screen."""
+        from display.round_touch import airport_tile, theme
+
+        airport_tile._reset_for_tests()
+        monkeypatch.setattr(airport_tile, "_start_fetch", lambda ident: None)
+        lofi_tile.open_tile()
+        airport_tile._airport = {"ident": "KSAN"}
+        display = pygame.Surface((theme.SIZE, theme.SIZE))
+        assert _real_rotation()._blit_lofi_tile(display, (0, 0), 0) is None
+        airport_tile._reset_for_tests()
+
+    def test_closing_lofi_does_not_dismiss_the_airport_tile(self, monkeypatch):
+        """A second title tap only closes lofi; METAR must stay if it was up."""
+        from display.round_touch import airport_tile
+
+        calls = []
+        real = airport_tile.dismiss
+
+        def spy():
+            calls.append(1)
+            real()
+
+        monkeypatch.setattr(airport_tile, "dismiss", spy)
+        lofi_tile.open_tile()
+        assert lofi_tile.is_open()
+        n = len(calls)
+        lofi_tile.open_tile()
+        assert not lofi_tile.is_open()
+        assert len(calls) == n
