@@ -376,11 +376,22 @@ class SettingsPickerUxTests(unittest.TestCase):
                 with mock.patch.object(
                     fav, "home_coords", return_value=(33.6, -117.9)
                 ):
-                    app_mod.RoundTouchDisplay._select_favourite_location(
+                    label = app_mod.RoundTouchDisplay._select_favourite_location(
                         fake, "home"
                     )
         clear.assert_called_once()
         fake._apply_favourite_center.assert_called_once_with(33.6, -117.9)
+        self.assertEqual(label, "Home")
+
+    def test_hud_home_opens_favourite_tile(self):
+        from display.round_touch import app as app_mod, favourite_tile
+
+        fake = mock.Mock()
+        with mock.patch.object(favourite_tile, "open_tile") as open_tile:
+            with mock.patch.object(app_mod, "radar") as radar_mod:
+                app_mod.RoundTouchDisplay._open_favourite_tile_from_hud(fake)
+        open_tile.assert_called_once_with()
+        radar_mod.invalidate_frame_layer.assert_called_once()
 
 
 if __name__ == "__main__":

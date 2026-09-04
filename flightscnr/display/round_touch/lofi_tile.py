@@ -68,8 +68,10 @@ def open_tile(track_name: str | None = None) -> None:
     _open = True
     _opened_at = time.monotonic()
     import display.round_touch.airport_tile as airport_tile
+    import display.round_touch.favourite_tile as favourite_tile
 
     airport_tile.dismiss()
+    favourite_tile.dismiss()
 
 
 def blocked_reason() -> str | None:

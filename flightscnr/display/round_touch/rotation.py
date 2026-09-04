@@ -29,6 +29,7 @@ _prev_airport_callout_rect: pygame.Rect | None = None
 _prev_airport_tile_rect: pygame.Rect | None = None
 _prev_lofi_rect: pygame.Rect | None = None
 _prev_lofi_tile_rect: pygame.Rect | None = None
+_prev_favourite_tile_rect: pygame.Rect | None = None
 # Rendered lofi tile stamp, kept while its content and rotation hold.
 _lofi_tile_stamp = None
 _lofi_tile_stamp_key = None
@@ -154,7 +155,7 @@ def present_radar_sweep(
     global _next_base, _next_base_key, _prev_hud_rect, _prev_bubble_rect
     global _prev_airport_callout_rect, _prev_location_toast_rect
     global _prev_airport_tile_rect, _prev_lofi_rect, _prev_radial_rect
-    global _prev_lofi_tile_rect
+    global _prev_lofi_tile_rect, _prev_favourite_tile_rect
     from display.round_touch import draw
 
     rotation = rotation_degrees()
@@ -223,6 +224,7 @@ def present_radar_sweep(
         _prev_airport_tile_rect = None
         _prev_lofi_rect = None
         _prev_lofi_tile_rect = None
+        _prev_favourite_tile_rect = None
         _prev_radial_rect = None
         _prev_location_toast_rect = None
         full_refresh = True
@@ -270,6 +272,15 @@ def present_radar_sweep(
             display.blit(_rot_base, r.topleft, src)
         if _prev_airport_tile_rect is not None:
             r = _prev_airport_tile_rect
+            src = pygame.Rect(
+                r.x - origin_off[0],
+                r.y - origin_off[1],
+                r.w,
+                r.h,
+            )
+            display.blit(_rot_base, r.topleft, src)
+        if _prev_favourite_tile_rect is not None:
+            r = _prev_favourite_tile_rect
             src = pygame.Rect(
                 r.x - origin_off[0],
                 r.y - origin_off[1],
@@ -358,6 +369,10 @@ def present_radar_sweep(
     # Airport METAR tile rides above the HUD.
     tile_dirty = _blit_airport_tile(display, origin_off, rotation)
     _prev_airport_tile_rect = tile_dirty
+    # Favorite locations picker (HUD Home icon) — same overlay layer as METAR.
+    old_fav_tile = _prev_favourite_tile_rect
+    fav_tile_dirty = _blit_favourite_tile(display, origin_off, rotation)
+    _prev_favourite_tile_rect = fav_tile_dirty
     # Radial target menu is modal — topmost.
     radial_dirty = _blit_radial_menu(display, origin_off, rotation)
     _prev_radial_rect = radial_dirty
@@ -385,6 +400,8 @@ def present_radar_sweep(
                 lofi_tile_dirty,
                 old_tile,
                 tile_dirty,
+                old_fav_tile,
+                fav_tile_dirty,
                 old_radial,
                 radial_dirty,
             )
@@ -727,6 +744,13 @@ def _blit_lofi_tile(
             return None
     except ImportError:
         pass
+    try:
+        from display.round_touch import favourite_tile
+
+        if favourite_tile.is_open():
+            return None
+    except ImportError:
+        pass
 
     global _lofi_tile_stamp, _lofi_tile_stamp_key
     key = (lofi_tile.stamp_key(), rotation, theme.SIZE)
@@ -785,6 +809,62 @@ def _blit_airport_tile(
 
     logical = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
     dirty = airport_tile.draw(logical)
+    if dirty is None or dirty.width <= 0 or dirty.height <= 0:
+        return None
+
+    if rotation % 360 == 0:
+        dst = pygame.Rect(
+            dirty.x + origin_off[0],
+            dirty.y + origin_off[1],
+            dirty.w,
+            dirty.h,
+        )
+        display.blit(logical, dst.topleft, dirty)
+        return dst
+
+    try:
+        rotated = pygame.transform.rotate(logical, -rotation)
+    except pygame.error:
+        return None
+    src = _rotate_rect_aabb(dirty.inflate(2, 2), rotation, theme.SIZE)
+    rw, rh = rotated.get_width(), rotated.get_height()
+    pad_x = (rw - theme.SIZE) // 2
+    pad_y = (rh - theme.SIZE) // 2
+    src = pygame.Rect(src.x + pad_x, src.y + pad_y, src.w, src.h)
+    src = src.clip(pygame.Rect(0, 0, rw, rh))
+    if src.width <= 0 or src.height <= 0:
+        return None
+    rot_off = (
+        origin_off[0] + (theme.SIZE - rw) // 2,
+        origin_off[1] + (theme.SIZE - rh) // 2,
+    )
+    dst = pygame.Rect(src.x + rot_off[0], src.y + rot_off[1], src.w, src.h)
+    display.blit(rotated, dst.topleft, src)
+    return dst
+
+
+def _blit_favourite_tile(
+    display: pygame.Surface,
+    origin_off: tuple[int, int],
+    rotation: int,
+) -> pygame.Rect | None:
+    """Stamp the favorite-location picker above the HUD (logical → display)."""
+    try:
+        from display.round_touch import favourite_tile
+    except ImportError:
+        return None
+    if not favourite_tile.is_open():
+        return None
+    try:
+        from display.round_touch import airport_tile
+
+        if airport_tile.is_open():
+            return None
+    except ImportError:
+        pass
+
+    logical = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
+    dirty = favourite_tile.draw(logical)
     if dirty is None or dirty.width <= 0 or dirty.height <= 0:
         return None
 

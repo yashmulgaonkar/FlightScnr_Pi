@@ -53,6 +53,7 @@ from display.round_touch import (
     touch_debug,
     lofi_controls,
     lofi_tile,
+    favourite_tile,
     radial_menu,
     video,
     wildfire_overlay,
@@ -1702,6 +1703,7 @@ class RoundTouchDisplay:
         if self._pan_commit_choice:
             self._cancel_pan_commit_choice()
         self._close_atc_picker()
+        favourite_tile.dismiss()
         self._invalidate_timeout_content_cache()
         previous = self.screen
         if self.screen == SCREEN_FLIP_BOARD:
@@ -2010,6 +2012,11 @@ class RoundTouchDisplay:
         self._atc_picker_pressed_id = None
         info.invalidate_atc_labels()
 
+    def _open_favourite_tile_from_hud(self) -> None:
+        """Home HUD icon: METAR-style location picker over the radar."""
+        favourite_tile.open_tile()
+        radar.invalidate_frame_layer()
+
     def _select_atc_airport(self, icao: str) -> None:
         from utilities import atc_audio
 
@@ -2173,7 +2180,9 @@ class RoundTouchDisplay:
         if not kind or not choice:
             return
         if kind == "favourite":
-            self._select_favourite_location(choice)
+            label = self._select_favourite_location(choice)
+            if label:
+                radar.show_location_toast(label)
             return
         if kind == "range":
             try:
@@ -2290,26 +2299,27 @@ class RoundTouchDisplay:
         earthquake_overlay.invalidate()
         earthquake_overlay.request_refresh(force=True)
 
-    def _select_favourite_location(self, value: str) -> None:
+    def _select_favourite_location(self, value: str) -> str | None:
+        """Apply a favourite picker choice. Returns the toast label, or None."""
         from utilities import favourite_locations
 
         choice = str(value or "").strip()
         if not choice or choice == "custom":
-            return
+            return None
         if choice == "home":
-            if favourite_locations.active_index() == favourite_locations.HOME_INDEX:
-                return
-            favourite_locations.clear_active()
-            lat, lon = favourite_locations.home_coords()
-            self._apply_favourite_center(lat, lon)
-            return
+            if favourite_locations.active_index() != favourite_locations.HOME_INDEX:
+                favourite_locations.clear_active()
+                lat, lon = favourite_locations.home_coords()
+                self._apply_favourite_center(lat, lon)
+            return "Home"
         current = favourite_locations.active_favorite()
         if current and str(current.get("id") or "") == choice:
-            return
+            return str(current.get("name") or "Favorite")
         entry = favourite_locations.select_location(choice)
         if not entry:
-            return
+            return None
         self._apply_favourite_center(float(entry["lat"]), float(entry["lon"]))
+        return str(entry.get("name") or "Favorite")
 
     def _slider_drag_armed(self) -> bool:
         """Any slider currently owning the finger? Others must not arm —
@@ -3086,6 +3096,14 @@ class RoundTouchDisplay:
         channel = self._hud_mute_channel
         if channel == "atc":
             self._toggle_radar_hud_atc()
+        elif channel == "lofi":
+            # LoFi cannot arm without ATC power — toast instead of a stuck "on".
+            if not settings.atc_enabled():
+                if settings.lofi_enabled():
+                    settings.set_lofi_enabled(False)
+                radar.show_location_toast("Plays under ATC audio")
+            else:
+                settings.toggle_hud_channel_mute("lofi")
         else:
             settings.toggle_hud_channel_mute(channel)
             if channel == "speaker":
@@ -4567,11 +4585,14 @@ class RoundTouchDisplay:
                             self._note_activity()
                             if hud_action == "slider":
                                 self._apply_radar_hud_volume(tap[0], persist=True)
+                            elif hud_action == "home":
+                                self._open_favourite_tile_from_hud()
                             elif hud_action in (
                                 "chime",
                                 "speaker",
                                 "alert",
                                 "atc",
+                                "lofi",
                                 "dismiss",
                             ):
                                 radar.invalidate_frame_layer()
@@ -4580,6 +4601,21 @@ class RoundTouchDisplay:
                             zoom_action := zoom_buttons.hit_button(tap[0], tap[1])
                         ) is not None:
                             self._apply_zoom_button(zoom_action)
+                        elif favourite_tile.is_open() and (
+                            (
+                                fav_id := favourite_tile.hit_item(tap[0], tap[1])
+                            )
+                            is not None
+                            or favourite_tile.hit_close(tap[0], tap[1])
+                            or favourite_tile.hit(tap[0], tap[1])
+                        ):
+                            if fav_id is not None and fav_id != "custom":
+                                label = self._select_favourite_location(fav_id)
+                                if label:
+                                    radar.show_location_toast(label)
+                            favourite_tile.dismiss()
+                            radar.invalidate_frame_layer()
+                            self._safe_draw()
                         elif (
                             lofi_btn := (
                                 lofi_tile.hit_button(tap[0], tap[1])
@@ -4603,6 +4639,10 @@ class RoundTouchDisplay:
                             lofi_tile.open_tile()
                             self._safe_draw()
                         elif self._open_flight_or_fire_at(tap[0], tap[1]):
+                            self._safe_draw()
+                        elif favourite_tile.is_open():
+                            favourite_tile.dismiss()
+                            radar.invalidate_frame_layer()
                             self._safe_draw()
                         elif lofi_tile.is_open():
                             lofi_tile.dismiss()
@@ -6102,6 +6142,9 @@ class RoundTouchDisplay:
                     from display.round_touch import airport_tile
 
                     if airport_tile.tick():
+                        radar.invalidate_frame_layer()
+                        self._safe_draw()
+                    if favourite_tile.tick():
                         radar.invalidate_frame_layer()
                         self._safe_draw()
                     if radial_menu.tick():

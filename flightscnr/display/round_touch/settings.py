@@ -173,7 +173,7 @@ SFX_VOLUME_MAX = 100
 MASTER_SOUND_VOLUME_MIN = 0
 MASTER_SOUND_VOLUME_MAX = 100
 # HUD volume-popover channel keys.
-HUD_VOLUME_CHANNELS = ("speaker", "chime", "alert", "atc")
+HUD_VOLUME_CHANNELS = ("speaker", "chime", "alert", "atc", "lofi")
 
 
 def clamp_brightness_percent(value: int) -> int:
@@ -227,11 +227,13 @@ RADAR_HUD_LAYOUT_KEYS = (
     "temp",
     "wind",
     "aqi",
+    "home",
     "clock",
     "speaker",
     "chime",
     "alert",
     "atc",
+    "lofi",
 )
 # Absolute px clamp so load works before display theme.s() is ready (~theme.s(48) @720).
 RADAR_HUD_LAYOUT_OFFSET_MAX = 96
@@ -241,12 +243,14 @@ RADAR_HUD_LAYOUT_TOP_DEFAULT = {
     "wx_icon": [-29, 31],
     "temp": [42, -29],
     "wind": [5, -5],
+    "aqi": [-4, 0],
 }
 
 # Baked bottom-pill offsets (from device arrange pass, 2026-07-31).
 RADAR_HUD_LAYOUT_BOTTOM_DEFAULT = {
     "wx_icon": [2, -6],
     "wind": [4, 0],
+    "aqi": [-4, 0],
 }
 
 # Offsets baked when the pill held three right-side icons. The HUD now spaces
@@ -1025,6 +1029,10 @@ def _load():
                 state.get("radar_hud_layout_top"), "radar_hud_layout_top"
             )
         )
+        # Inject baked AQI nudge when older saves never stored an aqi offset.
+        if "aqi" not in layout:
+            layout["aqi"] = list(RADAR_HUD_LAYOUT_TOP_DEFAULT["aqi"])
+            migrated = True
         if state.get("radar_hud_layout_top") != layout:
             state["radar_hud_layout_top"] = layout
             migrated = True
@@ -1037,6 +1045,9 @@ def _load():
                 state.get("radar_hud_layout_bottom"), "radar_hud_layout_bottom"
             )
         )
+        if "aqi" not in layout_b:
+            layout_b["aqi"] = list(RADAR_HUD_LAYOUT_BOTTOM_DEFAULT["aqi"])
+            migrated = True
         if state.get("radar_hud_layout_bottom") != layout_b:
             state["radar_hud_layout_bottom"] = layout_b
             migrated = True
@@ -1077,6 +1088,12 @@ def _load():
     ) != on:
         state["atc_enabled"] = on
         state["atc_want_playing"] = on
+        migrated = True
+    # LoFi only beds under ATC — clear stale armed state when ATC is off.
+    if not bool(state.get("atc_enabled", False)) and bool(
+        state.get("lofi_enabled", False)
+    ):
+        state["lofi_enabled"] = False
         migrated = True
     # Soft-mute layer removed — keep legacy key frozen unmuted.
     if not bool(state.get("atc_sound_enabled", True)):
@@ -2769,7 +2786,15 @@ def atc_enabled() -> bool:
 
 
 def set_atc_enabled(enabled: bool) -> None:
-    _rmw_save({"atc_enabled": bool(enabled)})
+    on = bool(enabled)
+    if on:
+        _rmw_save({"atc_enabled": True})
+        return
+    # LoFi only beds under ATC — turning ATC off also disarms LoFi.
+    updates = {"atc_enabled": False}
+    if bool(_state.get("lofi_enabled", False)):
+        updates["lofi_enabled"] = False
+    _rmw_save(updates)
 
 
 def atc_airport() -> str:
@@ -2992,7 +3017,11 @@ def lofi_enabled() -> bool:
 
 
 def set_lofi_enabled(enabled: bool) -> None:
-    _state["lofi_enabled"] = bool(enabled)
+    """Enable the LoFi bed. Refuses to arm when ATC power is off."""
+    on = bool(enabled)
+    if on and not atc_enabled():
+        on = False
+    _state["lofi_enabled"] = on
     _save(_state)
 
 
@@ -3411,6 +3440,8 @@ def hud_channel_volume(channel: str) -> int:
         return alert_sfx_volume()
     if key == "atc":
         return atc_volume()
+    if key == "lofi":
+        return lofi_volume()
     return 0
 
 
@@ -3427,6 +3458,8 @@ def set_hud_channel_volume(
         return set_alert_sfx_volume(value, persist=persist)
     if key == "atc":
         return set_atc_volume(value, persist=persist)
+    if key == "lofi":
+        return set_lofi_volume(value, persist=persist)
     return 0
 
 
@@ -3441,6 +3474,8 @@ def hud_channel_muted(channel: str) -> bool:
         return not alert_sfx_enabled()
     if key == "atc":
         return not atc_enabled() or atc_volume() <= 0
+    if key == "lofi":
+        return not lofi_enabled()
     return True
 
 
@@ -3459,6 +3494,8 @@ def toggle_hud_channel_mute(channel: str) -> bool:
 
         atc_audio.toggle_power()
         return atc_enabled()
+    if key == "lofi":
+        return toggle_lofi_enabled()
     return False
 
 

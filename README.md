@@ -281,6 +281,6 @@ That content is published under a **Standard Digital File License**, which inclu
 
 Always read the full license on MakerWorld before downloading, printing, or sharing the enclosure design.
 
-[![Repo analytics](https://raw.githubusercontent.com/yashmulgaonkar/repo-analytics/main/out/FlightScnr_Pi/analytics.svg)](https://github.com/yashmulgaonkar/repo-analytics)
+[![Repo analytics](https://raw.githubusercontent.com/yashmulgaonkar/repo-analytics/main/out/FlightScnr_Pi/analytics.svg)](https://raw.githubusercontent.com/yashmulgaonkar/repo-analytics/main/out/FlightScnr_Pi/analytics.svg)
 
-![Alt](https://repobeats.axiom.co/api/embed/6bd14456b07026f3f6c45288bf9debf905b9898e.svg "Repobeats analytics image")
+If you want to make your own analytics for your repos, [click here](https://github.com/yashmulgaonkar/repo-analytics).

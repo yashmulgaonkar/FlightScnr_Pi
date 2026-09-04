@@ -96,8 +96,10 @@ def open_tile(airport: dict) -> None:
         dismiss()
         return
     import display.round_touch.lofi_tile as lofi_tile
+    import display.round_touch.favourite_tile as favourite_tile
 
     lofi_tile.dismiss()
+    favourite_tile.dismiss()
     _airport = dict(airport)
     _metar = None
     _fetch_done = False

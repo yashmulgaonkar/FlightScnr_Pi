@@ -86,7 +86,7 @@ class RadarHudSettingsTests(unittest.TestCase):
             )
             self.assertEqual(settings.radar_hud_layout_offset("wx_icon"), (-29, 31))
             self.assertEqual(settings.radar_hud_layout_offset("temp"), (42, -29))
-            self.assertEqual(settings.radar_hud_layout_offset("wind"), (14, -6))
+            self.assertEqual(settings.radar_hud_layout_offset("wind"), (5, -5))
             self.assertEqual(settings.radar_hud_layout_offset("clock"), (0, 0))
 
     def test_arrange_gated_by_env(self):
@@ -240,8 +240,11 @@ class RadarHudGeometryTests(unittest.TestCase):
                                         self.assertTrue(radar_hud.hit_chime(*g["chime_c"]))
                                         self.assertTrue(radar_hud.hit_speaker(*g["speaker_c"]))
                                         self.assertFalse(radar_hud.hit_chime(theme.CENTER_X, theme.CENTER_Y))
-                                        # Top: volume left of chime (chime is farthest right).
+                                        # Top: volume left of chime.
                                         self.assertLess(g["speaker_c"][0], g["chime_c"][0])
+                                        # Home sits immediately left of the clock.
+                                        self.assertTrue(radar_hud.hit_home(*g["home_c"]))
+                                        self.assertLess(g["home_c"][0], g["clock_c"][0])
                                         # With weather+wind present, left cluster is left of clock.
                                         wx = {
                                             "ready": True,
@@ -254,12 +257,15 @@ class RadarHudGeometryTests(unittest.TestCase):
                                         }
                                         g2 = radar_hud._geometry(wx)
                                         self.assertLess(g2["weather_c"][0], g2["wind_c"][0])
-                                        self.assertLess(g2["wind_c"][0], g2["clock_c"][0])
+                                        self.assertLess(g2["wind_c"][0], g2["home_c"][0])
+                                        self.assertLess(g2["home_c"][0], g2["clock_c"][0])
                                         self.assertLess(g2["clock_c"][0], g2["speaker_c"][0])
                                         self.assertLess(g2["speaker_c"][0], g2["chime_c"][0])
                                         self.assertLess(g2["chime_c"][0], g2["alert_c"][0])
                                         self.assertLess(g2["alert_c"][0], g2["atc_c"][0])
+                                        self.assertLess(g2["atc_c"][0], g2["lofi_c"][0])
                                         self.assertTrue(radar_hud.hit_alert(*g2["alert_c"]))
+                                        self.assertTrue(radar_hud.hit_lofi(*g2["lofi_c"]))
                                         # Clock stays at the arc midpoint (centered on N).
                                         self.assertAlmostEqual(
                                             g2["clock_c"][0], theme.CENTER_X, delta=2
@@ -273,20 +279,33 @@ class RadarHudGeometryTests(unittest.TestCase):
                                         d_sc = g2["chime_c"][0] - g2["speaker_c"][0]
                                         d_ca = g2["alert_c"][0] - g2["chime_c"][0]
                                         d_aa = g2["atc_c"][0] - g2["alert_c"][0]
+                                        d_al = g2["lofi_c"][0] - g2["atc_c"][0]
                                         self.assertAlmostEqual(d_sc, d_ca, delta=theme.s(3))
                                         self.assertAlmostEqual(d_ca, d_aa, delta=theme.s(3))
+                                        self.assertAlmostEqual(d_aa, d_al, delta=theme.s(3))
                                         wind_w, _, _ = radar_hud._wind_bits(
                                             wx, g2["arrow_px"], (0, 0, 0)
                                         )
-                                        clock_w, _, _ = radar_hud._clock_bits((0, 0, 0))
-                                        edge_gap = (g2["clock_c"][0] - clock_w // 2) - (
-                                            g2["wind_c"][0] + wind_w // 2
+                                        # Home sits between wind and clock with a major_gap.
+                                        self.assertGreater(
+                                            g2["home_c"][0] - g2["wind_c"][0],
+                                            wind_w // 2,
                                         )
-                                        # Chordal gap can be ~1px under the arc major_gap.
-                                        self.assertGreaterEqual(edge_gap, theme.s(7))
                                         self.assertGreater(g2["weather_c"][1], g2["clock_c"][1])
-                                        self.assertGreater(g2["atc_c"][1], g2["clock_c"][1])
+                                        self.assertGreater(g2["lofi_c"][1], g2["clock_c"][1])
                                         self.assertTrue(radar_hud.hit_atc(*g2["atc_c"]))
+                                        radar_hud._refresh_hit_targets(g2)
+                                        self.assertEqual(
+                                            radar_hud.handle_tap(*g2["home_c"]), "home"
+                                        )
+                                        self.assertFalse(radar_hud.volume_popover_open())
+                                        self.assertEqual(
+                                            radar_hud.handle_tap(*g2["lofi_c"]), "lofi"
+                                        )
+                                        self.assertEqual(
+                                            radar_hud.volume_popover_channel(), "lofi"
+                                        )
+                                        radar_hud.close_volume_popover()
 
     def test_wind_arrow_tip_points_from(self):
         """Tip extends toward the meteorological FROM direction (not downwind)."""
@@ -474,6 +493,8 @@ class HudVolumeControlTests(unittest.TestCase):
             settings._state["military_sfx_volume"] = 40
             settings._state["atc_enabled"] = True
             settings._state["atc_volume"] = 85
+            settings._state["lofi_enabled"] = True
+            settings._state["lofi_volume"] = 25
 
             def _flip_atc_enabled(**_kwargs):
                 settings._state["atc_enabled"] = not bool(
@@ -485,6 +506,7 @@ class HudVolumeControlTests(unittest.TestCase):
                 ("chime", "hourly_chime_volume", settings.hourly_chime_enabled),
                 ("alert", "traffic_sfx_volume", settings.alert_sfx_enabled),
                 ("atc", "atc_volume", settings.atc_enabled),
+                ("lofi", "lofi_volume", settings.lofi_enabled),
             ):
                 before = settings._state[vol_key]
                 self.assertFalse(settings.hud_channel_muted(channel))
@@ -526,6 +548,7 @@ class HudVolumeControlTests(unittest.TestCase):
             settings._state["traffic_sfx_volume"] = 55
             settings._state["military_sfx_volume"] = 55
             settings._state["atc_volume"] = 66
+            settings._state["lofi_volume"] = 25
 
             radar_hud.close_volume_popover()
             self.assertIsNone(radar_hud.volume_popover_channel())
@@ -553,6 +576,13 @@ class HudVolumeControlTests(unittest.TestCase):
             self.assertEqual(value, 100)
             self.assertEqual(settings.traffic_sfx_volume(), 100)
             self.assertEqual(settings.military_sfx_volume(), 100)
+
+            self.assertEqual(radar_hud.open_volume_popover("lofi"), "lofi")
+            with mock.patch.object(radar_hud, "_wx_snapshot", return_value=None):
+                radar_hud.draw_hud(surf, include_popover=True)
+            value = radar_hud.apply_volume_at_x(radar_hud._slider_track.centerx, persist=False)
+            self.assertIsNotNone(value)
+            self.assertEqual(settings.lofi_volume(), value)
             radar_hud.close_volume_popover()
 
     def test_tap_opens_popover_long_press_helper_mutes(self):
@@ -573,6 +603,7 @@ class HudVolumeControlTests(unittest.TestCase):
             settings._state["traffic_sfx_enabled"] = True
             settings._state["military_sfx_enabled"] = True
             settings._state["atc_enabled"] = True
+            settings._state["lofi_enabled"] = True
             with mock.patch.object(settings, "radar_hud_layout", return_value={}):
                 with mock.patch.object(radar_hud, "_wx_snapshot", return_value=None):
                     surf = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
@@ -599,6 +630,15 @@ class HudVolumeControlTests(unittest.TestCase):
                         powered = radar_hud.handle_long_press_mute(*g["atc_c"])
                     self.assertEqual(powered, "atc")
                     self.assertFalse(settings.atc_enabled())
+                    self.assertEqual(radar_hud.volume_popover_channel(), "speaker")
+
+                    lofi_muted = radar_hud.handle_long_press_mute(*g["lofi_c"])
+                    self.assertEqual(lofi_muted, "lofi")
+                    self.assertFalse(settings.lofi_enabled())
+                    self.assertEqual(radar_hud.volume_popover_channel(), "speaker")
+
+                    home_action = radar_hud.handle_tap(*g["home_c"])
+                    self.assertEqual(home_action, "home")
                     self.assertEqual(radar_hud.volume_popover_channel(), "speaker")
 
 
