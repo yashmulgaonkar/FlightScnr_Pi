@@ -383,6 +383,61 @@ def _index_zone_flights_by_callsign(flights: list) -> dict[str, LiveFlight]:
     return index
 
 
+def _zone_entry_for_callsign(entries, callsign: str) -> dict | None:
+    """Nearest local display entry whose callsign matches (variant-aware)."""
+    from utilities.aircraft_alert import callsign_match_keys
+
+    keys = set(callsign_match_keys(callsign))
+    if not keys:
+        return None
+    for entry in entries or []:
+        if entry.get("kind") == "vessel":
+            continue
+        label = (entry.get("callsign") or "").strip()
+        if label and keys & set(callsign_match_keys(label)):
+            return entry
+    return None
+
+
+def _local_tracked_from_entry(entry: dict, callsign: str) -> dict:
+    """Follow data synthesized from a local ADS-B entry.
+
+    Lets Follow work for flights FR24's feed doesn't carry (LADD-blocked,
+    anonymous-feed gaps, dump1090-only setups). Route/schedule fields stay
+    empty — position, motion, and identity come straight off the antenna.
+    """
+    lat = entry.get("plane_latitude")
+    lon = entry.get("plane_longitude")
+    return {
+        "callsign": (entry.get("callsign") or callsign).strip().upper(),
+        "number": "",
+        "flight_number": "",
+        "airline_name": entry.get("airline") or "",
+        "owner_icao": "",
+        "airline_icao": "",
+        "icao_hex": (entry.get("icao_hex") or "").strip().upper(),
+        "registration": (entry.get("registration") or "").strip().upper(),
+        "aircraft_type": entry.get("plane") or "",
+        "is_live": True,
+        "is_scheduled": False,
+        "origin": entry.get("origin") or "",
+        "destination": entry.get("destination") or "",
+        "altitude": entry.get("altitude") or 0,
+        "ground_speed": entry.get("ground_speed") or 0,
+        "heading": entry.get("heading") or 0,
+        "vertical_speed": entry.get("vertical_speed") or 0,
+        "dist_remaining": None,
+        "total_distance": None,
+        "time_remaining": None,
+        "latitude": lat,
+        "longitude": lon,
+        "plane_latitude": lat,
+        "plane_longitude": lon,
+        "last_seen_ts": time(),
+        "data_source": entry.get("data_source") or "local",
+    }
+
+
 def _lookup_zone_flight(index: dict[str, LiveFlight], callsign: str) -> LiveFlight | None:
     from utilities.aircraft_alert import callsign_match_keys
 
@@ -1762,6 +1817,16 @@ class Overhead:
                             self._tracked_miss_count += 1
                             if self._tracked_miss_count >= self._TRACKED_MISS_THRESHOLD:
                                 self._do_auto_wipe()
+
+            if tracked_callsign and not tracked_data:
+                # FR24 and the schedule both missed — follow straight off the
+                # local antenna when the flight is in the zone list.
+                local_entry = _zone_entry_for_callsign(overhead_data, tracked_callsign)
+                if local_entry is not None:
+                    tracked_data = _local_tracked_from_entry(local_entry, tracked_callsign)
+                    self._tracked_was_live = True
+                    self._tracked_miss_count = 0
+                    self._tracked_last_data = tracked_data
 
             # Keep schedule cache even after flight goes live — arr_time_utc
             # is used as reality check to prevent premature auto-wipe when
