@@ -737,6 +737,15 @@
                 <label for="night_en">Enable off-hours (night mode)</label>
                 <span class="switch"><input id="night_en" type="checkbox"><span class="track"></span></span>
             </div>
+            <label for="night_mode">During off-hours</label>
+            <select id="night_mode">
+                <option value="dim">Dim display</option>
+                <option value="off">Turn off display</option>
+            </select>
+            <div id="dim-row">
+                <label for="night_dim">Dim brightness <span id="night_dim_label">20%</span></label>
+                <input id="night_dim" type="range" min="3" max="100" step="1" value="20" oninput="syncNightDimLabel()">
+            </div>
             <div class="chk">
                 <label for="night_clock">Show clock during off-hours</label>
                 <span class="switch"><input id="night_clock" type="checkbox"><span class="track"></span></span>
@@ -745,7 +754,7 @@
                 <div><label for="night_start">Start</label><input type="time" id="night_start"></div>
                 <div><label for="night_end">End</label><input type="time" id="night_end"></div>
             </div>
-            <p class="note">Off-hours controls the night-clock schedule. Display dimming (down to 0% = screen off) lives under Display, screens &amp; volume &rarr; "Dim during quiet hours", which follows the ATC quiet-hours window.</p>
+            <p class="note">Dim/off and clock can be combined — e.g. turn the display off (or dim it) and still force the clock screen. Quiet-hours dim under Display is a separate schedule tied to ATC quiet hours.</p>
             <button class="btn btn-primary" id="btn-offhours" style="margin-top:.7rem" type="button">Save off-hours</button>
             <div id="offhours-status" class="status"></div>
         </div>
@@ -1544,8 +1553,10 @@ async function loadAll() {
         $("night_en").checked = !!o.enabled;
         let mode = (o.mode || "dim");
         if (mode === "clock") mode = "dim";
+        if ($("night_mode")) $("night_mode").value = (mode === "off") ? "off" : "dim";
         $("night_start").value = o.start || "22:00";
         $("night_end").value = o.end || "06:00";
+        if ($("night_dim")) $("night_dim").value = String(o.dim_percent ?? 20);
         syncNightDimLabel();
         if ($("night_clock")) $("night_clock").checked = !!o.force_clock || (o.mode === "clock");
         toggleDimRow();
@@ -1629,6 +1640,9 @@ async function loadAll() {
 }
 
 function toggleDimRow() {
+    const mode = $("night_mode") ? $("night_mode").value : "dim";
+    const row = $("dim-row");
+    if (row) row.style.display = mode === "dim" ? "" : "none";
 }
 
 function syncBrightLabel() {
@@ -1636,6 +1650,8 @@ function syncBrightLabel() {
     if (el) el.textContent = `${$("bright_pct").value}%`;
 }
 function syncNightDimLabel() {
+    const el = $("night_dim_label");
+    if (el && $("night_dim")) el.textContent = `${$("night_dim").value}%`;
 }
 function syncHudOpacityLabel() {
     const el = $("radar_hud_opacity_label");
@@ -2187,6 +2203,8 @@ async function saveOffHours() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 enabled: $("night_en").checked,
+                mode: $("night_mode") ? $("night_mode").value : "dim",
+                dim_percent: $("night_dim") ? Number($("night_dim").value) : 20,
                 force_clock: $("night_clock") ? $("night_clock").checked : false,
                 start: $("night_start").value,
                 end: $("night_end").value,
@@ -3071,6 +3089,9 @@ $("btn-position-sources-reset").addEventListener("click", resetPositionSources);
 $("btn-save-reload").addEventListener("click", () => saveAndReloadSettings("display-status"));
 $("btn-save-lofi").addEventListener("click", () => saveAndReloadSettings("lofi-status"));
 $("btn-offhours").addEventListener("click", saveOffHours);
+if ($("night_mode")) {
+    $("night_mode").addEventListener("change", toggleDimRow);
+}
 $("btn-weather").addEventListener("click", saveWeather);
 $("btn-weather-fetch").addEventListener("click", fetchWeatherNow);
 $("btn-alerts").addEventListener("click", saveAlerts);

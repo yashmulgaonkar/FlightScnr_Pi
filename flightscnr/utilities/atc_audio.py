@@ -936,6 +936,19 @@ def _settings():
     return settings
 
 
+def _sync_settings_from_disk() -> None:
+    """Reload ATC intent from disk before cross-process start/stop decisions.
+
+    Display and portal each cache settings in memory. The portal speaker-watch
+    only synced on HTTP requests, so a stale enabled=False/want=False could
+    reconcile-kill mpv that the display keepalive just started.
+    """
+    try:
+        _settings().sync_from_disk()
+    except Exception:
+        logger.debug("ATC settings sync_from_disk failed", exc_info=True)
+
+
 def _prefs() -> dict:
     settings = _settings()
     return {
@@ -1488,6 +1501,7 @@ def maybe_resume_when_speaker_ready() -> dict:
     Used by the USB-speaker watch thread. Does not clear ``want_playing`` when
     the speaker is still missing — that is handled by ``start()`` deferral.
     """
+    _sync_settings_from_disk()
     settings = _settings()
     if not settings.atc_enabled() or not settings.atc_want_playing():
         return status()
@@ -1515,6 +1529,7 @@ def reconcile_enabled_state() -> dict:
     (especially if the IPC socket was already unlinked). Call from the speaker
     watch and after settings reload so orphans cannot outlive the UI toggle.
     """
+    _sync_settings_from_disk()
     settings = _settings()
     if settings.atc_enabled() and settings.atc_want_playing():
         return status()
@@ -1536,6 +1551,7 @@ def maybe_keepalive() -> dict:
     """
     global _keepalive_next_at, _keepalive_failures
 
+    _sync_settings_from_disk()
     settings = _settings()
     if not settings.atc_enabled() or not settings.atc_want_playing():
         _keepalive_failures = 0

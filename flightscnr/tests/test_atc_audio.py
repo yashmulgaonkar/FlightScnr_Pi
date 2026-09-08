@@ -666,6 +666,49 @@ class PlayerTests(unittest.TestCase):
             atc_audio.reconcile_enabled_state()
         stop.assert_called_once_with(clear_override=False)
 
+    def test_keepalive_syncs_disk_before_stale_reconcile(self):
+        """Portal memory can lag disk; sync before killing a live stream."""
+        from utilities import atc_audio
+
+        self.settings.atc_enabled.return_value = False
+        self.settings.atc_want_playing.return_value = False
+
+        def _sync():
+            self.settings.atc_enabled.return_value = True
+            self.settings.atc_want_playing.return_value = True
+
+        self.settings.sync_from_disk.side_effect = _sync
+        self.settings.atc_airport.return_value = "KSFO"
+        with mock.patch.object(atc_audio, "is_playing", return_value=True), mock.patch.object(
+            atc_audio, "reconcile_enabled_state"
+        ) as reconcile, mock.patch.object(atc_audio, "start") as start:
+            st = atc_audio.maybe_keepalive()
+        reconcile.assert_not_called()
+        start.assert_not_called()
+        self.assertTrue(st.get("playing") or "playing" in st)
+        self.settings.sync_from_disk.assert_called()
+
+    def test_reconcile_syncs_disk_before_stopping(self):
+        from utilities import atc_audio
+
+        self.settings.atc_enabled.return_value = False
+        self.settings.atc_want_playing.return_value = False
+
+        def _sync():
+            self.settings.atc_enabled.return_value = True
+            self.settings.atc_want_playing.return_value = True
+
+        self.settings.sync_from_disk.side_effect = _sync
+        with mock.patch.object(atc_audio, "is_playing", return_value=True), mock.patch.object(
+            atc_audio, "stop", return_value={"playing": False}
+        ) as stop, mock.patch.object(
+            atc_audio, "status", return_value={"playing": True}
+        ):
+            st = atc_audio.reconcile_enabled_state()
+        stop.assert_not_called()
+        self.assertTrue(st["playing"])
+        self.settings.sync_from_disk.assert_called()
+
     def test_set_volume_uses_ipc_when_playing(self):
         from utilities import atc_audio
 

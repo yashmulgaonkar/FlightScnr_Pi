@@ -342,11 +342,12 @@ class RoundTouchDisplay:
         self._safe_draw()
 
     def _migrate_off_hours_dim(self) -> None:
-        """One-time fold: legacy off-hours dim/off becomes quiet-hours dim.
+        """One-time fold: copy legacy off-hours dim into quiet-hours dim too.
 
-        Off-hours no longer touches brightness. Anyone who had night
-        dimming (the old default) keeps the same behavior through quiet
-        dim — the quiet window already defaults to the off-hours window.
+        Off-hours dim/off still drives brightness on its own schedule.
+        Quiet dim remains available for the ATC quiet-hours window; devices
+        that only had off-hours night dimming also get quiet dim seeded once
+        so both UIs stay consistent.
         """
         try:
             if bool(settings._state.get("quiet_dim_migrated", False)):

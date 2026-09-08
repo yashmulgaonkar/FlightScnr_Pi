@@ -105,8 +105,8 @@ class TestOffHoursClockNav(unittest.TestCase):
         self.assertEqual(d._opened, [])
         self.assertFalse(d._off_hours_force_clock_active)
 
-    def test_off_hours_does_not_change_brightness(self):
-        """Night dimming lives on Quiet Hours; off-hours only drives the clock."""
+    def test_off_hours_dim_and_off_change_brightness(self):
+        """Off-hours schedule still dims or blanks the panel on its window."""
         d = _bare_display()
         d.screen = app_mod.SCREEN_RADAR
         applied = []
@@ -115,10 +115,10 @@ class TestOffHoursClockNav(unittest.TestCase):
             "display.round_touch.off_hours.in_off_hours", return_value=True
         ), mock.patch(
             "display.round_touch.off_hours.effective_brightness_percent",
-            side_effect=lambda day: day,
+            return_value=0,
         ), mock.patch(
             "display.round_touch.off_hours.prefs",
-            return_value={"mode": "clock"},
+            return_value={"mode": "off"},
         ), mock.patch(
             "display.round_touch.settings.brightness_percent", return_value=80
         ), mock.patch(
@@ -127,18 +127,17 @@ class TestOffHoursClockNav(unittest.TestCase):
             "display.round_touch.backlight.apply_percent", side_effect=applied.append
         ):
             d._apply_brightness()
-        self.assertEqual(applied, [80])
+        self.assertEqual(applied, [0])
 
-        d.screen = app_mod.SCREEN_CLOCK
         applied.clear()
         with mock.patch(
             "display.round_touch.off_hours.in_off_hours", return_value=True
         ), mock.patch(
             "display.round_touch.off_hours.effective_brightness_percent",
-            side_effect=lambda day: day,
+            return_value=12,
         ), mock.patch(
             "display.round_touch.off_hours.prefs",
-            return_value={"mode": "clock"},
+            return_value={"mode": "dim", "dim_percent": 12},
         ), mock.patch(
             "display.round_touch.settings.brightness_percent", return_value=80
         ), mock.patch(
@@ -147,7 +146,33 @@ class TestOffHoursClockNav(unittest.TestCase):
             "display.round_touch.backlight.apply_percent", side_effect=applied.append
         ):
             d._apply_brightness()
-        self.assertEqual(applied, [80])
+        self.assertEqual(applied, [12])
+
+
+class TestOffHoursBrightness(unittest.TestCase):
+    def test_effective_brightness_off_and_dim(self):
+        from display.round_touch import off_hours
+
+        with mock.patch.object(
+            off_hours, "in_off_hours", return_value=True
+        ), mock.patch.object(
+            off_hours,
+            "prefs",
+            return_value={"mode": "off", "dim_percent": 20},
+        ):
+            self.assertEqual(off_hours.effective_brightness_percent(80), 0)
+
+        with mock.patch.object(
+            off_hours, "in_off_hours", return_value=True
+        ), mock.patch.object(
+            off_hours,
+            "prefs",
+            return_value={"mode": "dim", "dim_percent": 15},
+        ):
+            self.assertEqual(off_hours.effective_brightness_percent(80), 15)
+
+        with mock.patch.object(off_hours, "in_off_hours", return_value=False):
+            self.assertEqual(off_hours.effective_brightness_percent(80), 80)
 
 
 if __name__ == "__main__":
