@@ -316,7 +316,7 @@
   "portal.off_hours.clock.label": "Klok tijdens rusturen tonen",
   "portal.common.start": "Begin",
   "portal.common.end": "Einde",
-  "portal.off_hours.hint": "Rusturen regelen het nachtklokschema. Schermdimmen (tot 0% = scherm uit) staat onder Scherm, pagina’s en volume → \"Dimmen tijdens stille uren\" en volgt het venster van de stille ATC-uren.",
+  "portal.off_hours.hint": "Dim/uit en klok kunnen worden gecombineerd: zet het scherm uit (of dim het) en forceer toch het klokscherm. Dimmen tijdens stille uren onder Scherm is een apart schema, gekoppeld aan de stille ATC-uren.",
   "portal.off_hours.save": "Rusturen opslaan",
   "portal.targets.hint": "Zichtbaarheid per categorie op de radar: accentkleur, formaat en symbool voor vliegtuigen, helikopters, drones en vaartuigen, plus de stijl van kompasroos en radarpunten. Dit is hetzelfde als Instellingen → Doelen op het apparaat. Automatisch behoudt de huidige standaardweergave.",
   "portal.targets.save": "Doelen opslaan",
@@ -944,5 +944,9 @@
   "moon.phase.last_quarter": "Laatste kwartier",
   "moon.phase.waning_crescent": "Afnemende sikkel",
   "metar.calm": "Windstil",
-  "metar.clear": "Helder"
+  "metar.clear": "Helder",
+  "portal.off_hours.mode.label": "Tijdens rusturen",
+  "portal.off_hours.mode.dim": "Scherm dimmen",
+  "portal.off_hours.mode.off": "Scherm uitschakelen",
+  "portal.off_hours.dim.label": "Dimhelderheid"
 }

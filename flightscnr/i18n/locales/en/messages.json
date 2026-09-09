@@ -316,7 +316,7 @@
   "portal.off_hours.clock.label": "Show clock during off-hours",
   "portal.common.start": "Start",
   "portal.common.end": "End",
-  "portal.off_hours.hint": "Off-hours controls the night-clock schedule. Display dimming (down to 0% = screen off) lives under Display, screens & volume → \"Dim during quiet hours\", which follows the ATC quiet-hours window.",
+  "portal.off_hours.hint": "Dim/off and clock can be combined — e.g. turn the display off (or dim it) and still force the clock screen. Quiet-hours dim under Display is a separate schedule tied to ATC quiet hours.",
   "portal.off_hours.save": "Save off-hours",
   "portal.targets.hint": "Per-category visibility for the radar: accent color, size, and symbol for planes, helicopters, drones, and vessels, plus compass rose and blip styling. Same as Settings → Targets on the device. Auto keeps today's default look.",
   "portal.targets.save": "Save targets",
@@ -944,5 +944,9 @@
   "moon.phase.last_quarter": "Last Quarter",
   "moon.phase.waning_crescent": "Waning Crescent",
   "metar.calm": "Calm",
-  "metar.clear": "Clear"
+  "metar.clear": "Clear",
+  "portal.off_hours.mode.label": "During off-hours",
+  "portal.off_hours.mode.dim": "Dim display",
+  "portal.off_hours.mode.off": "Turn off display",
+  "portal.off_hours.dim.label": "Dim brightness"
 }

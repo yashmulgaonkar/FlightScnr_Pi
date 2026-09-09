@@ -353,7 +353,7 @@
   "portal.off_hours.clock.label": "Afficher l’horloge pendant la plage nocturne",
   "portal.common.start": "Début",
   "portal.common.end": "Fin",
-  "portal.off_hours.hint": "La plage nocturne détermine quand utiliser l’horloge de nuit. L’assombrissement de l’écran (jusqu’à 0 % = écran éteint) se règle sous Affichage, écrans et volume → « Assombrir pendant les heures silencieuses » et suit les heures silencieuses de l’ATC.",
+  "portal.off_hours.hint": "Dim/off and clock can be combined — e.g. turn the display off (or dim it) and still force the clock screen. Quiet-hours dim under Display is a separate schedule tied to ATC quiet hours.",
   "portal.off_hours.save": "Enregistrer la plage nocturne",
   "portal.targets.hint": "Visibilité par catégorie sur le radar : couleur d’accentuation, taille et symbole des avions, hélicoptères, drones et navires, ainsi que style de la rose des vents et des plots radar. Correspond à Paramètres → Cibles sur l’appareil. Auto conserve l’apparence par défaut actuelle.",
   "portal.targets.save": "Enregistrer les cibles",
@@ -944,5 +944,9 @@
   "moon.phase.last_quarter": "Last Quarter",
   "moon.phase.waning_crescent": "Waning Crescent",
   "metar.calm": "Calm",
-  "metar.clear": "Clear"
+  "metar.clear": "Clear",
+  "portal.off_hours.mode.label": "During off-hours",
+  "portal.off_hours.mode.dim": "Dim display",
+  "portal.off_hours.mode.off": "Turn off display",
+  "portal.off_hours.dim.label": "Dim brightness"
 }
