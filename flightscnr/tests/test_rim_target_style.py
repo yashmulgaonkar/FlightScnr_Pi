@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
 
 import config  # noqa: E402
 from display.round_touch import geo, settings, theme  # noqa: E402
+from i18n import tr  # noqa: E402
 
 
 class TestRimStyleParsing(unittest.TestCase):
@@ -52,7 +53,7 @@ class TestRimTargetStyle(unittest.TestCase):
             self.assertEqual(settings.rim_target_style(), value)
             self.assertEqual(
                 settings.rim_target_style_label(),
-                settings.RIM_TARGET_STYLE_LABELS[value],
+                tr(settings.RIM_TARGET_STYLE_LABELS[value]),
             )
 
     def test_invalid_falls_back_to_plane(self):

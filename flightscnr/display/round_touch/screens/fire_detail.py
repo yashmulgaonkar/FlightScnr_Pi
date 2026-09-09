@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from display.round_touch import aircraft_photos, draw, geo, nav, theme, wildfire_overlay
+from i18n import tr
 from display.round_touch.screens import common
 
 FOOTER_BUTTONS = ("prev", "next", "radar")
@@ -43,7 +44,7 @@ def _fmt_containment(pct) -> str:
         val = float(pct)
     except (TypeError, ValueError):
         return "—"
-    return f"{val:.0f}% contained"
+    return tr("fire.contained", percent=f"{val:.0f}")
 
 
 def _fmt_started(started: str | None) -> str | None:
@@ -52,20 +53,20 @@ def _fmt_started(started: str | None) -> str | None:
     text = started.strip()
     if "T" in text:
         text = text.split("T", 1)[0]
-    return f"Started {text}"
+    return tr("fire.started", when=text)
 
 
 def _fire_rows(fire: dict, title_font, body_font, detail_font) -> list[tuple[str, object, tuple]]:
-    name = (fire.get("name") or "Wildfire").strip()
+    name = (fire.get("name") or tr("fire.wildfire_default")).strip()
     county = (fire.get("county") or "").strip()
     rows: list[tuple[str, object, tuple]] = [
         (name, title_font, theme.LABEL),
     ]
     if county:
-        label = "Counties" if ("," in county or "&" in county) else "County"
+        label = tr("fire.counties") if ("," in county or "&" in county) else tr("fire.county")
         rows.append((f"{label}: {county}", body_font, theme.MUTED))
     else:
-        rows.append(("Counties: —", body_font, theme.MUTED))
+        rows.append((f"{tr('fire.counties')}: —", body_font, theme.MUTED))
 
     acres = _fmt_acres(fire.get("acres"))
     contained = _fmt_containment(fire.get("containment"))
@@ -115,15 +116,15 @@ def draw_fire_detail(surface, fires, selected_index, scroll_offset: int = 0) -> 
     bottom = nav.content_bottom_y()
 
     if not fires:
-        nav.draw_curved_breadcrumb(surface, ["Radar", "Fire"])
+        nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("fire.breadcrumb")])
         nav.draw_curved_footer(surface, list(FOOTER_EMPTY))
-        common.draw_center_row(surface, "No wildfires", chrome_top, body_font, theme.MUTED)
+        common.draw_center_row(surface, tr("fire.no_wildfires"), chrome_top, body_font, theme.MUTED)
         return 0
 
     idx = max(0, min(selected_index, len(fires) - 1))
     fire = fires[idx]
-    crumb = (fire.get("name") or "Fire").strip()
-    nav.draw_curved_breadcrumb(surface, ["Radar", "Fire", crumb])
+    crumb = (fire.get("name") or tr("fire.breadcrumb")).strip()
+    nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("fire.breadcrumb"), crumb])
     nav.draw_curved_page_dots(surface, idx, len(fires), active_color=theme.LABEL)
 
     map_path = (fire.get("map_path") or "").strip()

@@ -25,6 +25,7 @@ import pygame
 
 from display.round_touch import draw as draw_mod
 from display.round_touch import theme
+from i18n import tr
 
 logger = logging.getLogger("flightscnr.display")
 
@@ -227,25 +228,25 @@ def draw(surface: pygame.Surface) -> pygame.Rect | None:
     label_font = draw_mod.load_font(max(8, theme.s(9)), bold=True)
 
     block = blocked_reason()
-    name = display_name(_track) or ("Lofi" if block else "Paused")
+    name = display_name(_track) or ("Lofi" if block else tr("lofi.paused"))
     pad = theme.s(12)
     gap = theme.s(10)
     button = theme.s(44)
 
     name_text = draw_mod.fit_text(name, name_font, theme.s(210))
     name_img = name_font.render(name_text, True, theme.LABEL)
-    note = block or "Undo in the web portal"
+    note = block or tr("lofi.undo_portal")
 
     buttons = []
     if not block:
         buttons.append(
             (BUTTON_PLAY, _play_glyph(button, theme.LABEL, paused),
-             "PLAY" if paused else "PAUSE", theme.MUTED)
+             tr("lofi.play") if paused else tr("lofi.pause"), theme.MUTED)
         )
     # "Disable" read like an on/off switch. This drops the track for good,
     # and only the web portal puts it back.
     buttons.append(
-        (BUTTON_DISABLE, _slash_glyph(button, _DANGER), "NEVER PLAY", _DANGER)
+        (BUTTON_DISABLE, _slash_glyph(button, _DANGER), tr("lofi.never_play"), _DANGER)
     )
     buttons = tuple(buttons)
 

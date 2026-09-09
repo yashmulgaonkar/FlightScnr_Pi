@@ -13,6 +13,7 @@ import pygame
 
 from display.round_touch import aircraft, draw, geo, nav, theme
 from display.round_touch.screens import common
+from i18n import tr
 from utilities.airline_branding import display_flight_id_for_flight
 from utilities.icao_types import format_aircraft_type
 from utilities.route_labels import route_display_lines
@@ -66,7 +67,7 @@ def _draw_follow_row(
         already = load_tracked_callsign() == callsign.upper()
     except Exception:
         already = False
-    label_text = "Following" if already else "Follow this Flight"
+    label_text = tr("flight.following") if already else tr("flight.follow_this")
     try:
         font = draw.load_font(theme.s(13), bold=True)
         label = font.render(label_text, True, theme.LABEL if already else theme.MUTED)
@@ -95,8 +96,8 @@ def draw_follow_confirm(surface, new_id: str, current_id: str) -> None:
     body_font = draw.load_font(theme.s(13))
     btn_font = draw.load_font(theme.s(13), bold=True)
     lines = [
-        title_font.render(f"Follow {new_id}?", True, theme.MUTED),
-        body_font.render(f"This stops following {current_id}.", True, theme.HINT),
+        title_font.render(tr("flight.confirm.title", id=new_id), True, theme.MUTED),
+        body_font.render(tr("flight.confirm.body", id=current_id), True, theme.HINT),
     ]
     w = max(l.get_width() for l in lines) + theme.s(44)
     panel = pygame.Rect(0, 0, max(w, theme.s(230)), theme.s(118))
@@ -118,8 +119,8 @@ def draw_follow_confirm(surface, new_id: str, current_id: str) -> None:
         surface.blit(label, label.get_rect(center=r.center))
         return pygame.Rect(r).inflate(theme.s(6), theme.s(6))
 
-    _confirm_follow_rect = _btn("Follow", panel.centerx - panel.width // 4, True)
-    _confirm_cancel_rect = _btn("Cancel", panel.centerx + panel.width // 4, False)
+    _confirm_follow_rect = _btn(tr("flight.confirm.follow"), panel.centerx - panel.width // 4, True)
+    _confirm_cancel_rect = _btn(tr("common.cancel"), panel.centerx + panel.width // 4, False)
 
 
 def clear_follow_confirm() -> None:
@@ -137,10 +138,10 @@ def tap_footer_action(x: int, y: int, flights) -> str | None:
 
 
 def _vessel_rows(f: dict, title_font, body_font, detail_font) -> list[tuple[str, object, tuple]]:
-    name = (f.get("name") or f.get("callsign") or "Vessel").strip()
+    name = (f.get("name") or f.get("callsign") or tr("flight.vessel_default")).strip()
     mmsi = f.get("mmsi") or ""
-    flag = f.get("flag_country") or "Flag unknown"
-    category = f.get("plane") or "Vessel"
+    flag = f.get("flag_country") or tr("flight.flag_unknown")
+    category = f.get("plane") or tr("flight.vessel_default")
     dest = (f.get("destination") or "").strip()
     nav_name = f.get("nav_status_name") or ""
 
@@ -206,7 +207,7 @@ def _flight_rows(
     chrome_top: int,
 ) -> list[tuple[str, object, tuple]]:
     callsign = display_flight_id_for_flight(f)
-    airline = f.get("airline") or "Airline unknown"
+    airline = f.get("airline") or tr("flight.airline_unknown")
     origin = f.get("origin") or "—"
     dest = f.get("destination") or "—"
     plane_type = format_aircraft_type(f.get("plane") or "")
@@ -267,21 +268,26 @@ def draw_flight_detail(surface, flights, selected_index, scroll_offset: int = 0)
     global _follow_btn_rect
     if not flights:
         _follow_btn_rect = None
-        nav.draw_curved_breadcrumb(surface, ["Radar", "Detail"])
+        nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("flight.breadcrumb.detail")])
         nav.draw_curved_footer(surface, list(FOOTER_EMPTY))
-        common.draw_center_row(surface, "No traffic", chrome_top, body_font, theme.MUTED)
+        common.draw_center_row(surface, tr("flight.no_traffic"), chrome_top, body_font, theme.MUTED)
         return 0
 
     idx = max(0, min(selected_index, len(flights) - 1))
     f = flights[idx]
     is_vessel = f.get("kind") == "vessel"
     crumb = (
-        (f.get("name") or f.get("callsign") or "Vessel")
+        (f.get("name") or f.get("callsign") or tr("flight.vessel_default"))
         if is_vessel
         else display_flight_id_for_flight(f)
     )
     nav.draw_curved_breadcrumb(
-        surface, ["Radar", "Vessel" if is_vessel else "Flight", crumb]
+        surface,
+        [
+            tr("common.radar"),
+            tr("flight.breadcrumb.vessel") if is_vessel else tr("flight.breadcrumb.flight"),
+            crumb,
+        ],
     )
     nav.draw_curved_page_dots(surface, idx, len(flights), active_color=theme.LABEL)
 

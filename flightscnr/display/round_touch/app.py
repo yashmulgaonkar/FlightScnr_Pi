@@ -63,6 +63,7 @@ from display.round_touch import (
 )
 from utilities import aircraft_alert
 from display.round_touch import alert_sounds
+from i18n import tr
 from display.round_touch.screens import (
     analog_clock,
     clock,
@@ -1101,7 +1102,9 @@ class RoundTouchDisplay:
                 draw.fill_background(self.surface)
                 tracked.draw_footer(self.surface, None)
                 nav.draw_curved_breadcrumb(
-                    self.surface, ["Radar", "Follow"], with_scrim=True
+                    self.surface,
+                    [tr("common.radar"), tr("flight.breadcrumb.follow")],
+                    with_scrim=True,
                 )
                 from utilities.overhead import load_tracked_callsign as _ltc
 
@@ -1263,9 +1266,9 @@ class RoundTouchDisplay:
         draw.fill_background(self.surface)
 
         display_id = display_flight_id_for_flight(overlay) if overlay else "Follow"
-        trail = ["Radar", "Follow"]
+        trail = [tr("common.radar"), tr("flight.breadcrumb.follow")]
         if display_id and display_id not in ("—", "Follow", "Live"):
-            trail = ["Radar", "Follow", display_id]
+            trail = [tr("common.radar"), tr("flight.breadcrumb.follow"), display_id]
 
         if lat is None or lon is None:
             # Nothing to center on yet — next throttled fetch may fill this in.
@@ -1448,7 +1451,7 @@ class RoundTouchDisplay:
         copy = system_control.reboot_progress_copy()
         if copy is None:
             return
-        title, detail = copy
+        title, detail = tr(copy[0]), tr(copy[1])
         info.draw_reboot_progress_popup(self.surface, title, detail)
 
     @staticmethod
@@ -1830,7 +1833,11 @@ class RoundTouchDisplay:
         if action is None:
             return
         self._display_focus = row
-        if action == "traffic":
+        if action == "language":
+            self._open_atc_picker("language")
+        elif action == "date_order":
+            self._open_atc_picker("date_order")
+        elif action == "traffic":
             self._open_atc_picker("traffic")
         elif action == "brightness":
             # Brightness is a drag slider; taps are handled via brightness_slider_at.
@@ -2184,6 +2191,16 @@ class RoundTouchDisplay:
             label = self._select_favourite_location(choice)
             if label:
                 radar.show_location_toast(label)
+            return
+        if kind == "language":
+            settings.set_display_language(choice)
+            info.invalidate_atc_labels()
+            radar_hud.rebuild_overlay()
+            self._weather_redraw_pending = True
+            return
+        if kind == "date_order":
+            settings.set_date_format(choice)
+            radar_hud.rebuild_overlay()
             return
         if kind == "range":
             try:
@@ -3102,7 +3119,7 @@ class RoundTouchDisplay:
             if not settings.atc_enabled():
                 if settings.lofi_enabled():
                     settings.set_lofi_enabled(False)
-                radar.show_location_toast("Plays under ATC audio")
+                radar.show_location_toast(tr("lofi.plays_under_atc"))
             else:
                 settings.toggle_hud_channel_mute("lofi")
         else:
@@ -5132,6 +5149,16 @@ class RoundTouchDisplay:
 
     def _apply_reloaded_settings(self):
         """Apply settings written by another process (e.g. web portal)."""
+        changed = settings.reload_changed_keys()
+        if changed and changed <= {"display_language", "date_format"}:
+            # Locale-only changes are presentation state. Never invalidate map,
+            # forecast, or provider caches and never spend Tomorrow.io quota.
+            info.invalidate_atc_labels()
+            radar_hud.rebuild_overlay()
+            radar.invalidate_frame_layer()
+            self._weather_redraw_pending = True
+            self._safe_draw()
+            return
         scale.select(settings.scale_index())
         map_bg.invalidate()
         map_bg.request_background()

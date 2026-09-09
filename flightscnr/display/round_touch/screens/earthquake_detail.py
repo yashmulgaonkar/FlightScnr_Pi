@@ -15,6 +15,7 @@ import time
 from datetime import datetime, timezone
 
 from display.round_touch import aircraft_photos, draw, earthquake_overlay, geo, nav, theme
+from i18n import tr
 from display.round_touch.screens import common
 
 FOOTER_BUTTONS = ("prev", "next", "radar")
@@ -42,7 +43,7 @@ def _fmt_mag(quake: dict) -> str:
     try:
         mag_f = float(mag)
     except (TypeError, ValueError):
-        return "Earthquake"
+        return tr("quake.earthquake_default")
     bit = f"M {mag_f:.1f}"
     if mag_type:
         bit = f"{bit} {mag_type}"
@@ -54,7 +55,7 @@ def _fmt_depth(depth) -> str | None:
         val = float(depth)
     except (TypeError, ValueError):
         return None
-    return f"{val:.1f} km depth"
+    return tr("quake.depth", km=f"{val:.1f}")
 
 
 def _fmt_time(time_ms, *, now: float | None = None) -> str | None:
@@ -65,16 +66,16 @@ def _fmt_time(time_ms, *, now: float | None = None) -> str | None:
     dt = datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
     age_s = (time.time() if now is None else now) - (ms / 1000.0)
     if age_s < 45:
-        rel = "just now"
+        rel = tr("quake.time.just_now")
     elif age_s < 3600:
         mins = max(1, int(age_s / 60))
-        rel = f"{mins} min ago"
+        rel = tr("quake.time.min_ago", mins=mins)
     elif age_s < 86400:
         hours = max(1, int(age_s / 3600))
-        rel = f"{hours} h ago"
+        rel = tr("quake.time.h_ago", hours=hours)
     else:
         days = max(1, int(age_s / 86400))
-        rel = f"{days} d ago"
+        rel = tr("quake.time.d_ago", days=days)
     return f"{dt.strftime('%Y-%m-%d %H:%M UTC')} · {rel}"
 
 
@@ -110,14 +111,14 @@ def _quake_rows(
         rows.append((pager, body_font, theme.LABEL))
 
     if int(quake.get("tsunami") or 0) == 1:
-        rows.append(("Tsunami bulletin issued", body_font, theme.LABEL))
+        rows.append((tr("quake.tsunami"), body_font, theme.LABEL))
 
     felt = quake.get("felt")
     mmi = quake.get("mmi")
     felt_bits = []
     try:
         if felt is not None and int(felt) > 0:
-            felt_bits.append(f"{int(felt)} felt")
+            felt_bits.append(tr("quake.felt", count=int(felt)))
     except (TypeError, ValueError):
         pass
     try:
@@ -148,17 +149,17 @@ def draw_earthquake_detail(
     bottom = nav.content_bottom_y()
 
     if not quakes:
-        nav.draw_curved_breadcrumb(surface, ["Radar", "Quake"])
+        nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("quake.breadcrumb")])
         nav.draw_curved_footer(surface, list(FOOTER_EMPTY))
         common.draw_center_row(
-            surface, "No earthquakes", chrome_top, body_font, theme.MUTED
+            surface, tr("quake.no_earthquakes"), chrome_top, body_font, theme.MUTED
         )
         return 0
 
     idx = max(0, min(selected_index, len(quakes) - 1))
     quake = quakes[idx]
     crumb = _fmt_mag(quake)
-    nav.draw_curved_breadcrumb(surface, ["Radar", "Quake", crumb])
+    nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("quake.breadcrumb"), crumb])
     nav.draw_curved_page_dots(surface, idx, len(quakes), active_color=theme.LABEL)
 
     rows = _quake_rows(quake, title_font, body_font, detail_font)

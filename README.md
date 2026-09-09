@@ -60,6 +60,19 @@ Radar home, flight detail, **tracked flight** with route map, **Follow / Live** 
 </tr>
 </table>
 
+### Language and region
+
+The clock, date, forecast, Tomorrow.io weather descriptions, portal settings
+overview, and **Language & Region** controls can use English, Dutch, German,
+French, or Spanish. English remains the safe default and per-message fallback.
+Choose a language and date order independently on-device under **Settings →
+Display** or in the web portal; **System** language detection is available as
+an explicit choice but is never selected automatically.
+
+Translation catalogs are dependency-free, validated JSON shared by the Python
+display and browser portal. See the [translation contributor
+guide](flightscnr/docs/i18n.md) to review a catalog or add another language.
+
 ### Map layers
 
 Ten basemap styles: CARTO dark/light/Voyager (free `CARTO_BASEMAPS_API_KEY`), OSM dark, **Dark Flat** (solid black), Stadia dark + Toner (free `STADIA_MAPS_API_KEY`), Esri streets/satellite, and free FAA VFR sectionals (US). Optional **tag leaders**, **color by altitude**, precipitation, airport overlays, wildfires, and earthquakes.
@@ -249,6 +262,10 @@ Step-by-step instructions: [Software Setup](https://github.com/yashmulgaonkar/Fl
 ## Contributing
 
 Contributions are welcome. If you find a bug, have an idea, or want to improve the project, open a [pull request](https://github.com/yashmulgaonkar/FlightScnr_Pi/pulls). For larger changes, opening an [issue](https://github.com/yashmulgaonkar/FlightScnr_Pi/issues) first is helpful so we can discuss the approach.
+
+Language contributors should follow the [translation catalog and native-review
+guide](flightscnr/docs/i18n.md). Keep translation-only changes separate from
+runtime code so attribution and review stay clear.
 
 Questions or setup help? Join the **FlightScnrPi Discord**:
 

@@ -43,6 +43,7 @@ except ImportError:
         return f"http://{name}.local"
 
 from display.round_touch import alert_prefs, draw, nav, settings, theme
+from i18n import available_languages, catalog_for, tr
 
 PAGE_MAIN = 0
 PAGE_ATC = 1
@@ -74,6 +75,8 @@ def is_atc_page(page: int) -> bool:
 # Display was overflowing the round viewport after HUD/chime rows were added.
 # Compass / range / screen controls stay here; radar HUD + chime get PAGE_HUD.
 DISPLAY_ACTIONS = (
+    "language",
+    "date_order",
     "facing",
     "recenter",
     "compass",
@@ -226,37 +229,42 @@ LIST_PICKER_KINDS = frozenset(
         "airport_icon_style",
         "airport_size",
         "zoom_position",
+        "language",
+        "date_order",
         # Missing here meant the Display > Rim targets row opened a picker
         # with a title, a close button, and no choices in it.
         "rim_style",
     }
 )
+# Maps picker id -> catalog key. Ids stay English; titles resolve at draw time.
 _LIST_PICKER_TITLES = {
-    "airport": "Select airport",
-    "channel": "Select channel",
-    "output": "Select output",
-    "favourite": "Select location",
-    "range": "Radar range",
-    "units": "Units",
-    "rotate": "Rotate screen",
-    "aircraft_tag": "Traffic labels",
-    "aircraft_tag_id": "Aircraft ID",
-    "rim_style": "Rim targets",
-    "min_height": "Min altitude",
-    "max_height": "Max altitude",
-    "aircraft_min_speed": "Min aircraft speed",
-    "vessel_min_speed": "Min vessel speed",
-    "map_style": "Basemap",
-    "traffic": "Select traffic",
-    "quiet_start": "Quiet start",
-    "quiet_end": "Quiet end",
-    "hud_position": "Clock position",
-    "airport_icon_style": "Icon style",
-    "airport_size": "Airport size",
-    "zoom_position": "Zoom position",
-    "default_clock": "Daytime clock",
-    "default_clock_off_hours": "Off-hours clock",
-    "hud_dark": "HUD style",
+    "language": "settings.picker.language",
+    "date_order": "settings.picker.date_order",
+    "airport": "settings.picker.airport",
+    "channel": "settings.picker.channel",
+    "output": "settings.picker.output",
+    "favourite": "settings.picker.favourite",
+    "range": "settings.picker.range",
+    "units": "settings.picker.units",
+    "rotate": "settings.picker.rotate",
+    "aircraft_tag": "settings.picker.aircraft_tag",
+    "aircraft_tag_id": "settings.picker.aircraft_tag_id",
+    "rim_style": "settings.picker.rim_style",
+    "min_height": "settings.picker.min_height",
+    "max_height": "settings.picker.max_height",
+    "aircraft_min_speed": "settings.picker.aircraft_min_speed",
+    "vessel_min_speed": "settings.picker.vessel_min_speed",
+    "map_style": "settings.picker.map_style",
+    "traffic": "settings.picker.traffic",
+    "quiet_start": "settings.picker.quiet_start",
+    "quiet_end": "settings.picker.quiet_end",
+    "hud_position": "settings.picker.hud_position",
+    "airport_icon_style": "settings.picker.airport_icon_style",
+    "airport_size": "settings.picker.airport_size",
+    "zoom_position": "settings.picker.zoom_position",
+    "default_clock": "settings.picker.default_clock",
+    "default_clock_off_hours": "settings.picker.default_clock_off_hours",
+    "hud_dark": "settings.picker.hud_dark",
 }
 _ATC_PICKER_TITLES = _LIST_PICKER_TITLES
 
@@ -267,19 +275,11 @@ _SYSTEM_BTN_DANGER_BORDER = (180, 64, 48)
 _system_buttons: list[tuple[str, pygame.Rect]] = []
 _system_confirm_buttons: list[tuple[str, pygame.Rect]] = []
 
+# (title key, detail key) per action; translated at draw time.
 _SYSTEM_CONFIRM_COPY = {
-    "reboot": (
-        "Reboot Pi?",
-        "Display and portal go offline briefly.",
-    ),
-    "shutdown": (
-        "Shutdown Pi?",
-        "Display and portal will power off.",
-    ),
-    "restart": (
-        "Restart App?",
-        "Display and portal will reconnect shortly.",
-    ),
+    "reboot": ("settings.confirm.reboot.title", "settings.confirm.reboot.detail"),
+    "shutdown": ("settings.confirm.shutdown.title", "settings.confirm.shutdown.detail"),
+    "restart": ("settings.confirm.restart.title", "settings.confirm.restart.detail"),
 }
 
 
@@ -295,28 +295,28 @@ def _local_ip():
         s.close()
         return ip
     except OSError:
-        return "Not connected"
+        return tr("settings.not_connected")
 
 
 def _route_api_line(name: str, key: str) -> str:
     if not key:
-        return f"{name}: no key"
-    return f"{name}: active"
+        return tr("settings.api.no_key", name=name)
+    return tr("settings.api.active", name=name)
 
 
 def _opensky_api_line() -> str:
     if not (OPENSKY_API_CLIENT_ID or "").strip() or not (
         OPENSKY_API_CLIENT_SECRET or ""
     ).strip():
-        return "OpenSky: no key"
+        return tr("settings.api.no_key", name="OpenSky")
     try:
         from secrets_store import api_enabled
 
         if not api_enabled("OPENSKY_API_CLIENT_ID"):
-            return "OpenSky: disabled"
+            return tr("settings.api.disabled", name="OpenSky")
     except Exception:
         pass
-    return "OpenSky: active"
+    return tr("settings.api.active", name="OpenSky")
 
 
 def _firms_api_line() -> str:
@@ -330,41 +330,41 @@ def _firms_api_line() -> str:
         except Exception:
             key = ""
     if not key:
-        return "FIRMS: no key"
+        return tr("settings.api.no_key", name="FIRMS")
     try:
         from display.round_touch import wildfire_overlay
 
         if wildfire_overlay.using_firms():
-            return "FIRMS: active"
+            return tr("settings.api.active", name="FIRMS")
         if wildfire_overlay.using_calfire():
-            return "FIRMS: set (CAL FIRE used)"
+            return tr("settings.api.firms_calfire")
         if wildfire_overlay.using_wfigs():
-            return "FIRMS: set (WFIGS used)"
+            return tr("settings.api.firms_wfigs")
     except Exception:
         pass
-    return "FIRMS: active"
+    return tr("settings.api.active", name="FIRMS")
 
 
 def _breadcrumb(page: int) -> list[str]:
-    trail = ["Radar", "About", "Settings"]
+    trail = [tr("common.radar"), tr("common.about"), tr("common.settings")]
     if page == PAGE_DISPLAY:
-        trail.append("Display")
+        trail.append(tr("common.display"))
     elif page == PAGE_HUD:
-        trail.append("HUD & Volume")
+        trail.append(tr("settings.page.hud"))
     elif page == PAGE_OPTIONS:
-        trail.append("Options")
+        trail.append(tr("settings.page.options"))
     elif page == PAGE_LAYERS:
-        trail.append("Layers")
+        trail.append(tr("settings.page.layers"))
     elif page == PAGE_ATC:
-        trail.append("ATC")
+        trail.append(tr("settings.page.atc"))
     elif page == PAGE_ATC_QUIET:
-        trail.append("Quiet")
+        trail.append(tr("settings.page.quiet"))
     elif page == PAGE_COLORS:
-        trail.append("Theme")
+        trail.append(tr("settings.page.theme"))
     elif page == PAGE_TARGETS:
-        trail.append("Targets")
+        trail.append(tr("settings.page.targets"))
     elif page == PAGE_SYSTEM:
-        trail.append("System")
+        trail.append(tr("common.system"))
     return trail
 
 
@@ -461,17 +461,47 @@ def _enum_picker_items(ids, current, label_fn) -> list[dict]:
 
 def _build_settings_picker_items(kind: str) -> list[dict]:
     """Discrete choices for settings rows that used to tap-cycle."""
+    if kind == "language":
+        current = settings.display_language()
+        selection = catalog_for(current)
+        out = [
+            {
+                "id": "system",
+                "label": tr("settings.language.system"),
+                "selected": current == "system",
+            }
+        ]
+        out.extend(
+            {
+                "id": info.locale,
+                "label": info.native_name,
+                "selected": current == info.locale
+                or (
+                    current != "system"
+                    and selection.effective_language == info.locale
+                    and current.split("-", 1)[0] == info.locale
+                ),
+            }
+            for info in available_languages()
+        )
+        return out
+    if kind == "date_order":
+        return _enum_picker_items(
+            settings.DATE_FORMATS,
+            settings.date_format(),
+            lambda order: tr(f"settings.date_order.{order}"),
+        )
     if kind == "favourite":
         from utilities import favourite_locations
 
         idx = favourite_locations.active_index()
         out: list[dict] = []
         if idx == favourite_locations.CUSTOM_INDEX:
-            out.append({"id": "custom", "label": "Custom", "selected": True})
+            out.append({"id": "custom", "label": tr("settings.favourite.custom"), "selected": True})
         out.append(
             {
                 "id": "home",
-                "label": "Home",
+                "label": tr("settings.favourite.home"),
                 "selected": idx == favourite_locations.HOME_INDEX,
             }
         )
@@ -509,19 +539,19 @@ def _build_settings_picker_items(kind: str) -> list[dict]:
         return _enum_picker_items(
             settings.TRAFFIC_LABEL_MODES,
             settings.traffic_labels(),
-            lambda mode: settings.TRAFFIC_LABEL_LABELS.get(mode, str(mode)),
+            lambda mode: tr(settings.TRAFFIC_LABEL_LABELS.get(mode, str(mode))),
         )
     if kind == "aircraft_tag_id":
         return _enum_picker_items(
             settings.AIRCRAFT_TAG_ID_MODES,
             settings.aircraft_tag_id(),
-            lambda mode: settings.AIRCRAFT_TAG_ID_LABELS.get(mode, str(mode)),
+            lambda mode: tr(settings.AIRCRAFT_TAG_ID_LABELS.get(mode, str(mode))),
         )
     if kind == "rim_style":
         return _enum_picker_items(
             settings.RIM_TARGET_STYLES,
             settings.rim_target_style(),
-            lambda style: settings.RIM_TARGET_STYLE_LABELS.get(style, str(style)),
+            lambda style: tr(settings.RIM_TARGET_STYLE_LABELS.get(style, str(style))),
         )
     if kind == "min_height":
         return _enum_picker_items(
@@ -561,7 +591,7 @@ def _build_settings_picker_items(kind: str) -> list[dict]:
         return _enum_picker_items(
             settings.TRAFFIC_MODES,
             settings.traffic_mode(),
-            lambda mode: settings.TRAFFIC_MODE_LABELS.get(mode, str(mode)),
+            lambda mode: tr(settings.TRAFFIC_MODE_LABELS.get(mode, str(mode))),
         )
     if kind in ("quiet_start", "quiet_end"):
         from utilities.atc_audio import format_hhmm, format_hhmm_12h
@@ -577,13 +607,13 @@ def _build_settings_picker_items(kind: str) -> list[dict]:
         return _enum_picker_items(
             settings.AIRPORT_ICON_STYLES,
             settings.airport_icon_style(),
-            lambda style: settings.AIRPORT_ICON_STYLE_LABELS.get(style, str(style)),
+            lambda style: tr(settings.AIRPORT_ICON_STYLE_LABELS.get(style, str(style))),
         )
     if kind == "airport_size":
         return _enum_picker_items(
             settings.AIRPORT_MIN_SIZES,
             settings.airport_min_size(),
-            lambda size: settings.AIRPORT_MIN_SIZE_LABELS.get(size, str(size)),
+            lambda size: tr(settings.AIRPORT_MIN_SIZE_LABELS.get(size, str(size))),
         )
     if kind == "hud_position":
         return _enum_picker_items(
@@ -601,13 +631,13 @@ def _build_settings_picker_items(kind: str) -> list[dict]:
         return _enum_picker_items(
             settings.DEFAULT_CLOCKS,
             settings.default_clock(),
-            lambda face: settings.DEFAULT_CLOCK_LABELS.get(face, str(face).title()),
+            lambda face: tr(settings.DEFAULT_CLOCK_LABELS.get(face, str(face).title())),
         )
     if kind == "default_clock_off_hours":
         return _enum_picker_items(
             settings.DEFAULT_CLOCKS,
             settings.default_clock_off_hours(),
-            lambda face: settings.DEFAULT_CLOCK_LABELS.get(face, str(face).title()),
+            lambda face: tr(settings.DEFAULT_CLOCK_LABELS.get(face, str(face).title())),
         )
     if kind == "hud_dark":
         current = "dark" if settings.radar_hud_dark() else "light"
@@ -738,12 +768,12 @@ TARGETS_ACTIONS = (
 )
 TARGETS_EDITOR_KINDS = frozenset(TARGETS_ACTIONS)
 _TARGETS_TITLES = {
-    "tgt_plane": "Planes",
-    "tgt_heli": "Helicopters",
-    "tgt_drone": "Drones",
-    "tgt_vessel": "Vessels",
-    "tgt_compass": "Compass Rose",
-    "tgt_blip": "Blips",
+    "tgt_plane": "settings.targets.tgt_plane",
+    "tgt_heli": "settings.targets.tgt_heli",
+    "tgt_drone": "settings.targets.tgt_drone",
+    "tgt_vessel": "settings.targets.tgt_vessel",
+    "tgt_compass": "settings.targets.tgt_compass",
+    "tgt_blip": "settings.targets.tgt_blip",
 }
 _TARGETS_CATEGORY = {
     "tgt_plane": "plane",
@@ -759,12 +789,21 @@ _TARGETS_PREVIEW_FLIGHT = {
     "tgt_drone": {"plane": "JAS4"},
     "tgt_vessel": {"kind": "vessel", "speed": 12, "stationary": False},
 }
-_TGT_FORM_LABELS = (("icon", "Icon"), ("triangle", "Triangle"), ("dot", "Dot"))
-_TGT_MODE_LABELS = (("letters", "Letters"), ("degrees", "Degrees"), ("both", "Both"))
+# (value, catalog key) — values stay English identifiers, labels translate.
+_TGT_FORM_LABELS = (
+    ("icon", "settings.tgt.form.icon"),
+    ("triangle", "settings.tgt.form.triangle"),
+    ("dot", "settings.tgt.form.dot"),
+)
+_TGT_MODE_LABELS = (
+    ("letters", "settings.tgt.mode.letters"),
+    ("degrees", "settings.tgt.mode.degrees"),
+    ("both", "settings.tgt.mode.both"),
+)
 
 
 def _targets_row_labels() -> list[str]:
-    return [f"{_TARGETS_TITLES[a]} ›" for a in TARGETS_ACTIONS]
+    return [f"{tr(_TARGETS_TITLES[a])} ›" for a in TARGETS_ACTIONS]
 
 
 def _tgt_editor_color(kind: str) -> tuple | None:
@@ -996,7 +1035,7 @@ def _draw_targets_editor(surface, kind: str) -> int:
     arc_r = _tgt_title_arc_r()
     title_items = [
         title_font.render(ch, True, theme.LABEL)
-        for ch in _TARGETS_TITLES.get(kind, "Targets")
+        for ch in tr(_TARGETS_TITLES.get(kind, "settings.targets.default"))
     ]
     arc_ui.blit_arc_items(
         surface, title_items, r=arc_r, mid=-_math.pi / 2, bottom=False,
@@ -1047,7 +1086,7 @@ def _draw_targets_editor(surface, kind: str) -> int:
                 pct = settings.target_size_pct(_TARGETS_CATEGORY.get(kind, "plane"))
             lo, hi = settings.TARGET_SIZE_MIN, settings.TARGET_SIZE_MAX
             frac = (pct - lo) / float(hi - lo)
-            label_text = "Size"
+            label_text = tr("settings.tgt.size")
         else:
             pct = (
                 settings.compass_opacity()
@@ -1055,7 +1094,7 @@ def _draw_targets_editor(surface, kind: str) -> int:
                 else settings.blip_opacity()
             )
             frac = (pct - 20) / 80.0
-            label_text = "Opacity"
+            label_text = tr("settings.tgt.opacity")
         text_h = body_font.get_height()
         row_cy = hit.centery
         label = body_font.render(label_text, True, theme.LABEL)
@@ -1088,7 +1127,7 @@ def _draw_targets_editor(surface, kind: str) -> int:
             border_radius=rect.height // 2,
         )
         img = small_font.render(
-            labels[value], True, theme.LABEL if active else theme.MUTED
+            tr(labels[value]), True, theme.LABEL if active else theme.MUTED
         )
         surface.blit(img, img.get_rect(center=rect.center))
         _atc_picker_hits.append(("tgt_segment", value, rect.inflate(theme.s(6), theme.s(10))))
@@ -1311,8 +1350,8 @@ def _draw_time_picker(surface, kind: str) -> int:
     gap = float(theme.s(14)) / float(max(1, arc_r))
     pill_font = draw.load_font(theme.s(12), bold=True)
     for action, label, mid, accent in (
-        ("close", "Cancel", bottom_mid + half + gap / 2, False),
-        ("time_set", "Set", bottom_mid - half - gap / 2, True),
+        ("close", tr("common.cancel"), bottom_mid + half + gap / 2, False),
+        ("time_set", tr("settings.time.set"), bottom_mid - half - gap / 2, True),
     ):
         fill = (14, 58, 24, 240) if accent else frost_rgba
         radar_hud._draw_curved_white_pill(
@@ -1352,7 +1391,12 @@ def draw_atc_picker(
         return _draw_time_picker(surface, kind)
     if kind in TARGETS_EDITOR_KINDS:
         return _draw_targets_editor(surface, kind)
-    title_text = _LIST_PICKER_TITLES.get(kind, "Select")
+    if kind == "language":
+        title_text = tr("settings.picker.language")
+    elif kind == "date_order":
+        title_text = tr("settings.picker.date_order")
+    else:
+        title_text = tr(_LIST_PICKER_TITLES.get(kind, "settings.picker.default"))
     items = atc_picker_items(kind)
     pressed = str(pressed_id or "").strip()
 
@@ -1426,11 +1470,11 @@ def draw_atc_picker(
     row_pitch = row_h + theme.s(6)
     if not items:
         if kind == "airport":
-            empty_text = "None in radar range"
+            empty_text = tr("settings.picker.empty.airport")
         elif kind == "channel":
-            empty_text = "No channels"
+            empty_text = tr("settings.picker.empty.channel")
         else:
-            empty_text = "No options"
+            empty_text = tr("settings.picker.empty.options")
         empty = hint_font.render(
             empty_text,
             True,
@@ -1512,13 +1556,13 @@ def atc_picker_list_rect() -> pygame.Rect | None:
 
 def _system_button_label(action: str) -> str:
     if action == "wifi_setup":
-        return "Start Wi-Fi Setup"
+        return tr("settings.system.wifi_setup")
     if action == "restart":
-        return "Restart App"
+        return tr("settings.system.restart")
     if action == "reboot":
-        return "Reboot Pi"
+        return tr("settings.system.reboot")
     if action == "shutdown":
-        return "Shutdown Pi"
+        return tr("settings.system.shutdown")
     return action
 
 
@@ -1573,7 +1617,7 @@ def draw_system_confirm_popup(surface, action: str) -> None:
     copy = _SYSTEM_CONFIRM_COPY.get(action)
     if copy is None:
         return
-    title_text, detail_text = copy
+    title_text, detail_text = tr(copy[0]), tr(copy[1])
     danger = action in ("reboot", "shutdown")
 
     # Opaque cover — SRCALPHA dims are unreliable on the Pi framebuffer.
@@ -1654,10 +1698,14 @@ def draw_system_confirm_popup(surface, action: str) -> None:
 
 def draw_reboot_progress_popup(
     surface,
-    title: str = "Reboot in progress",
-    detail: str = "Display will come back shortly.",
+    title: str | None = None,
+    detail: str | None = None,
 ) -> None:
     """Non-interactive modal shown while a reboot/shutdown is scheduled."""
+    if title is None:
+        title = tr("settings.reboot_progress.title")
+    if detail is None:
+        detail = tr("settings.reboot_progress.detail")
     # Opaque cover — SRCALPHA dims are unreliable on the Pi framebuffer.
     draw.fill_background_textured(surface)
 
@@ -1717,9 +1765,9 @@ RGB_GROUP_RUNWAY = "runway"
 RGB_GROUP_RUNWAY_LIGHT = "runway_light"
 _RGB_GROUP_ORDER = (RGB_GROUP_THEME, RGB_GROUP_RUNWAY, RGB_GROUP_RUNWAY_LIGHT)
 _RGB_GROUP_TITLES = {
-    RGB_GROUP_THEME: "Radar Theme",
-    RGB_GROUP_RUNWAY: "Runway Centerline — Dark Map",
-    RGB_GROUP_RUNWAY_LIGHT: "Runway Centerline — Light Map",
+    RGB_GROUP_THEME: "settings.rgb.theme",
+    RGB_GROUP_RUNWAY: "settings.rgb.runway",
+    RGB_GROUP_RUNWAY_LIGHT: "settings.rgb.runway_light",
 }
 
 
@@ -2251,25 +2299,25 @@ def _hud_volume_meta(action: str):
     """Return (label, getter, setter) for a HUD volume slider action."""
     if action == "chime_volume":
         return (
-            "Chime volume",
+            tr("settings.vol.chime"),
             settings.hourly_chime_volume,
             settings.set_hourly_chime_volume,
         )
     if action == "traffic_sfx_volume":
         return (
-            "Tracked volume",
+            tr("settings.vol.tracked"),
             settings.traffic_sfx_volume,
             settings.set_traffic_sfx_volume,
         )
     if action == "military_sfx_volume":
         return (
-            "Military volume",
+            tr("settings.vol.military"),
             settings.military_sfx_volume,
             settings.set_military_sfx_volume,
         )
     if action == "earthquake_voice_volume":
         return (
-            "Quake volume",
+            tr("settings.vol.quake"),
             settings.earthquake_voice_volume,
             settings.set_earthquake_voice_volume,
         )
@@ -2766,7 +2814,7 @@ def _atc_channel_label_from_status(st: dict | None) -> str:
         icao = str(st.get("playing_airport") or icao).strip().upper() or icao
     feeds = atc_audio.feeds_for_airport(icao) if icao else []
     if not feeds:
-        return "No known feeds"
+        return tr("settings.atc.no_feeds")
     for feed in feeds:
         if feed["mount"] == mount:
             return str(feed["label"])
@@ -2775,11 +2823,11 @@ def _atc_channel_label_from_status(st: dict | None) -> str:
 
 def _atc_status_label_from_status(st: dict | None) -> str:
     if not st:
-        return "Status: —"
+        return tr("settings.atc.status", value="—")
     err = st.get("error")
     if err and st.get("state") == "Error":
-        return f"Status: {err}"[:42]
-    return f"Status: {st.get('state') or 'Stopped'}"
+        return tr("settings.atc.status", value=err)[:42]
+    return tr("settings.atc.status", value=st.get("state") or tr("settings.atc.stopped"))
 
 
 def _atc_output_label() -> str:
@@ -2797,7 +2845,7 @@ def _atc_output_label() -> str:
                 return (f"BT {name}" if name else "Bluetooth")[:28]
             if st.get("mac"):
                 return (f"BT… {name}" if name else "Bluetooth")[:28]
-            return "BT (pair portal)"[:28]
+            return tr("settings.atc.bt_pair")[:28]
         return "USB"
     except Exception:
         route = settings.audio_route()
@@ -2820,15 +2868,15 @@ def _atc_row_labels() -> list[str]:
     except Exception:
         st = None
     all_rows = (
-        "ATC Audio",
+        tr("settings.atc.audio"),
         "",  # volume slider
-        "Background Lofi Beats",
+        tr("settings.atc.lofi_bg"),
         "",  # lofi volume slider
-        "Lofi Prev/Next Buttons",
-        "Scroll Lofi Track Name",
-        f"Airport › {_atc_airport_label()}",
-        f"Channel › {_atc_channel_label_from_status(st)}",
-        f"Output › {_atc_output_label()}",
+        tr("settings.atc.lofi_buttons"),
+        tr("settings.atc.lofi_scroll"),
+        tr("settings.atc.airport_row", value=_atc_airport_label()),
+        tr("settings.atc.channel_row", value=_atc_channel_label_from_status(st)),
+        tr("settings.atc.output_row", value=_atc_output_label()),
         _atc_status_label_from_status(st),
     )
     # Keep rows parallel to the gated action list (lofi hides w/o tracks).
@@ -2842,10 +2890,10 @@ def _atc_row_labels() -> list[str]:
 
 def _atc_quiet_row_labels() -> list[str]:
     return [
-        "Quiet hours",
-        f"Quiet start › {settings.atc_quiet_start_label()}",
-        f"Quiet end › {settings.atc_quiet_end_label()}",
-        "Dim During Quiet Hours",
+        tr("settings.atc.quiet_hours"),
+        tr("settings.atc.quiet_start_row", value=settings.atc_quiet_start_label()),
+        tr("settings.atc.quiet_end_row", value=settings.atc_quiet_end_label()),
+        tr("settings.atc.dim_quiet"),
         "",  # quiet dim level slider
     ]
 
@@ -2913,27 +2961,41 @@ def _draw_atc_page(surface, scroll_offset: int, display_focus: int, top: int, bo
 
 def _display_row_labels() -> list[str]:
     facing = settings.facing_label()
+    selection = catalog_for(settings.display_language())
+    language_label = tr("settings.language.system")
+    if settings.display_language() != "system":
+        language_label = next(
+            (
+                item.native_name
+                for item in available_languages()
+                if item.locale == selection.effective_language
+            ),
+            selection.effective_language,
+        )
     # Brightness is drawn as a slider; placeholder keeps row count aligned.
     # On/off rows carry a switch, so they are label-only here.
     return [
-        f"Change Compass Heading: {facing}",
-        "Click to Set Radar Center",
-        "Compass Rose",
-        "Radar Range Rings",
-        "Radar Sweep Line",
+        f"{tr('settings.display.language')} › {language_label}",
+        f"{tr('settings.display.date_order')} › "
+        f"{tr(f'settings.date_order.{settings.date_format()}')}",
+        tr("settings.row.compass_heading", facing=facing),
+        tr("settings.row.set_center"),
+        tr("settings.row.compass_rose"),
+        tr("settings.row.range_rings"),
+        tr("settings.row.sweep_line"),
         (
-            "Tag Leaders"
+            tr("settings.row.tag_leaders")
             if settings.show_aircraft_tag()
-            else "Tag Leaders (labels off)"
+            else tr("settings.row.tag_leaders_off")
         ),
-        "Color by Altitude",
-        f"Rim Targets › {settings.rim_target_style_label()}",
-        f"Units › {settings.unit_preset_label()}",
-        f"Radar Range › {settings.scale_label()}",
-        "Zoom −/+ Buttons",
-        f"Zoom Position › {settings.radar_zoom_position().title()}",
-        f"Rotate Screen › {settings.display_rotation()}°",
-        "Background Texture",
+        tr("settings.row.color_altitude"),
+        tr("settings.row.rim_targets", value=settings.rim_target_style_label()),
+        tr("settings.row.units", value=settings.unit_preset_label()),
+        tr("settings.row.radar_range", value=settings.scale_label()),
+        tr("settings.row.zoom_buttons"),
+        tr("settings.row.zoom_position", value=settings.radar_zoom_position().title()),
+        tr("settings.row.rotate_screen", value=settings.display_rotation()),
+        tr("settings.row.background_texture"),
         "",  # brightness slider
     ]
 
@@ -2943,15 +3005,15 @@ def _hud_row_labels() -> list[str]:
     hud_style = "dark" if settings.radar_hud_dark() else "light"
     # Opacity / volume rows are drawn as sliders; placeholders align actions.
     return [
-        "HUD",
-        f"Clock Position › {hud_pos.title()}",
-        f"HUD Style › {hud_style.title()}",
+        tr("settings.row.hud"),
+        tr("settings.row.clock_position", value=hud_pos.title()),
+        tr("settings.row.hud_style", value=hud_style.title()),
         "",  # HUD opacity slider
         "",  # chime switch + volume slider
         "",  # traffic switch + volume slider
         "",  # military switch + volume slider
         "",  # earthquake voice switch + volume slider
-        "Board Flip Sound",
+        tr("settings.row.board_flip_sound"),
     ]
 
 
@@ -2960,14 +3022,14 @@ def _options_row_labels() -> list[str]:
 
     fav = favourite_locations.active_label()
     return [
-        f"Traffic Labels › {settings.traffic_labels_label()}",
-        f"Aircraft ID › {settings.aircraft_tag_id_label()}",
-        f"Favorite Locations › {fav}",
-        f"Min Aircraft Altitude › {settings.min_height_ft()} ft",
-        f"Max Aircraft Altitude › {settings.max_height_ft()} ft",
-        f"Min Aircraft Speed › {settings.aircraft_min_speed_label()}",
-        f"Min Vessel Speed › {settings.vessel_min_speed_label()}",
-        f"Basemap › {settings.map_style_label()}",
+        tr("settings.row.traffic_labels", value=settings.traffic_labels_label()),
+        tr("settings.row.aircraft_id", value=settings.aircraft_tag_id_label()),
+        tr("settings.row.favorite_locations", value=fav),
+        tr("settings.row.min_altitude", value=settings.min_height_ft()),
+        tr("settings.row.max_altitude", value=settings.max_height_ft()),
+        tr("settings.row.min_aircraft_speed", value=settings.aircraft_min_speed_label()),
+        tr("settings.row.min_vessel_speed", value=settings.vessel_min_speed_label()),
+        tr("settings.row.basemap", value=settings.map_style_label()),
         "",  # VFR opacity slider
     ]
 
@@ -2980,21 +3042,21 @@ def layers_actions() -> tuple:
 def _layers_row_labels() -> list[str]:
     # Every overlay row but the traffic selector is a switch (label only here).
     return [
-        f"Select Traffic › {settings.traffic_mode_label()}",
-        "Show Precipitation",
-        "Show Wildfires",
-        "Show Earthquakes",
-        "Show Airport Centerlines",
-        "Show Airport Icons",
-        f"Icon Style \u203a {settings.airport_icon_style_label()}",
-        f"Airports \u203a {settings.airport_min_size_label()}",
-        "Show Ground Vehicles",
-        "Auto Idle Clock",
-        f"Daytime Clock › {settings.default_clock_label()}",
-        f"Off-Hours Clock › {settings.default_clock_off_hours_label()}",
-        "Alert on military aircraft",
-        "Alert on emergency squawk (7700/7600/7500)",
-        "Hide non-alerted aircraft on radar",
+        tr("settings.row.select_traffic", value=settings.traffic_mode_label()),
+        tr("settings.row.show_precip"),
+        tr("settings.row.show_wildfires"),
+        tr("settings.row.show_earthquakes"),
+        tr("settings.row.show_centerlines"),
+        tr("settings.row.show_airport_icons"),
+        tr("settings.row.icon_style", value=settings.airport_icon_style_label()),
+        tr("settings.row.airports", value=settings.airport_min_size_label()),
+        tr("settings.row.show_ground_vehicles"),
+        tr("settings.row.auto_idle_clock"),
+        tr("settings.row.daytime_clock", value=settings.default_clock_label()),
+        tr("settings.row.offhours_clock", value=settings.default_clock_off_hours_label()),
+        tr("settings.row.alert_military"),
+        tr("settings.row.alert_emergency"),
+        tr("settings.row.hide_non_alerted"),
     ]
 
 
@@ -3578,7 +3640,7 @@ def draw_info(
         section_y = top + top_pad - scroll_offset
         for group in _RGB_GROUP_ORDER:
             rgb = group_rgbs[group]
-            title = _RGB_GROUP_TITLES[group]
+            title = tr(_RGB_GROUP_TITLES[group])
             expanded = theme_group_expanded(group)
             if section_y + heading_h >= top and section_y <= bottom:
                 heading = body_font.render(title, True, theme.LABEL)
@@ -3641,18 +3703,18 @@ def draw_info(
                 # Chevron triangle: right when collapsed, down when expanded.
                 tri_cx = lx + exp_label.get_width() + theme.s(14)
                 tri_cy = ly + text_h // 2
-                tr = theme.s(5)
+                tri_r = theme.s(5)
                 if expanded:
                     pts = [
-                        (tri_cx - tr, tri_cy - tr // 2),
-                        (tri_cx + tr, tri_cy - tr // 2),
-                        (tri_cx, tri_cy + tr),
+                        (tri_cx - tri_r, tri_cy - tri_r // 2),
+                        (tri_cx + tri_r, tri_cy - tri_r // 2),
+                        (tri_cx, tri_cy + tri_r),
                     ]
                 else:
                     pts = [
-                        (tri_cx - tr // 2, tri_cy - tr),
-                        (tri_cx - tr // 2, tri_cy + tr),
-                        (tri_cx + tr, tri_cy),
+                        (tri_cx - tri_r // 2, tri_cy - tri_r),
+                        (tri_cx - tri_r // 2, tri_cy + tri_r),
+                        (tri_cx + tri_r, tri_cy),
                     ]
                 pygame.draw.polygon(surface, theme.MUTED, pts)
 

@@ -26,6 +26,7 @@ import time
 import pygame
 
 from display.round_touch import draw as draw_mod, theme
+from i18n import tr
 from utilities.aircraft_photo import get_cached_aircraft_photo
 from utilities.icao_types import format_aircraft_type
 
@@ -128,7 +129,7 @@ def note_activity() -> None:
 
 def _live_line(event: dict, flights: list[dict] | None) -> str:
     if not flights:
-        return "Not in range"
+        return tr("aircraft.not_in_range")
     from display.round_touch import aircraft
     from display.round_touch.screens import common
     from utilities.flip_board import flight_label
@@ -152,8 +153,8 @@ def _live_line(event: dict, flights: list[dict] | None) -> str:
         speed = common.format_speed(flight.get("ground_speed"))
         if speed:
             parts.append(speed)
-        return " · ".join(parts) if parts else "In range"
-    return "Not in range"
+        return " · ".join(parts) if parts else tr("aircraft.in_range")
+    return tr("aircraft.not_in_range")
 
 
 def content(flights: list[dict] | None = None) -> dict:
@@ -173,8 +174,8 @@ def content(flights: list[dict] | None = None) -> dict:
     bucket = str(event.get("bucket") or "arrivals")
     return {
         "id": board_label(event, settings.flip_board_id()),
-        "type_name": type_name or "Type unknown",
-        "movement": "Departed" if bucket == "departures" else "Arrived",
+        "type_name": type_name or tr("aircraft.type_unknown"),
+        "movement": tr("aircraft.departed") if bucket == "departures" else tr("aircraft.arrived"),
         "when": when,
         "ident": str(event.get("ident") or ""),
         "live": _live_line(event, flights),
@@ -200,9 +201,9 @@ def draw(surface: pygame.Surface, flights: list[dict] | None = None) -> pygame.R
     value_font = draw_mod.load_font(max(8, theme.s(11)))
 
     rows = [
-        ("TYPE", info["type_name"]),
+        (tr("aircraft.label.type"), info["type_name"]),
         (info["movement"].upper(), f"{info['when']}  {info['ident']}".strip()),
-        ("NOW", info["live"]),
+        (tr("aircraft.label.now"), info["live"]),
     ]
 
     photo_surface = _photo_surface(info.get("photo"))

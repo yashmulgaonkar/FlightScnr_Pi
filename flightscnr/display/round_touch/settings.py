@@ -14,6 +14,7 @@ import logging
 import os
 
 from display.round_touch import color_presets, theme
+from i18n import tr
 logger = logging.getLogger("flightscnr.display")
 
 DATA_DIR = os.environ.get("FLIGHTSCNR_DATA_DIR", "/var/lib/flightscnr")
@@ -22,6 +23,7 @@ RELOAD_REQUEST_PATH = os.path.join(DATA_DIR, "round_touch_settings.reload")
 _settings_mtime: float | None = None
 # True when _state matches disk. Slider drags set this False until persist.
 _disk_synced = True
+_last_reload_changed_keys: frozenset[str] = frozenset()
 
 
 class _SettingsState(dict):
@@ -65,41 +67,42 @@ MAX_HEIGHT_CYCLE_OPTIONS = (
     3000, 5000, 10000, 15000, 20000, 30000, 45000, 100000,
 )
 TRAFFIC_MODES = ("aircraft", "marine", "both")
+# *_LABELS map stored ids -> catalog keys; resolved with tr() at draw time.
 TRAFFIC_MODE_LABELS = {
-    "aircraft": "Aircraft Only",
-    "marine": "Marine Only",
-    "both": "Aircraft & Marine",
+    "aircraft": "settings.opt.traffic_mode.aircraft",
+    "marine": "settings.opt.traffic_mode.marine",
+    "both": "settings.opt.traffic_mode.both",
 }
 # Callsign / vessel-name tags next to radar icons.
 TRAFFIC_LABEL_MODES = ("aircraft", "marine", "both", "off")
 TRAFFIC_LABEL_LABELS = {
-    "aircraft": "Aircraft Only",
-    "marine": "Marine Only",
-    "both": "Aircraft and Marine",
-    "off": "OFF",
+    "aircraft": "settings.opt.traffic_label.aircraft",
+    "marine": "settings.opt.traffic_label.marine",
+    "both": "settings.opt.traffic_label.both",
+    "off": "settings.opt.traffic_label.off",
 }
 # Radar aircraft identity line: marketing flight number, ATC callsign, or both
 # (time-alternating on the same line when they differ).
 AIRCRAFT_TAG_ID_MODES = ("flight_number", "callsign", "both")
 AIRCRAFT_TAG_ID_LABELS = {
-    "flight_number": "Flight number",
-    "callsign": "Callsign",
-    "both": "Both (alternate)",
+    "flight_number": "settings.opt.tag_id.flight_number",
+    "callsign": "settings.opt.tag_id.callsign",
+    "both": "settings.opt.tag_id.both",
 }
 # Seconds between identity swaps when aircraft_tag_id == both.
 AIRCRAFT_TAG_ID_ALTERNATE_S = 2.5
 # Split-flap board row identity: tail number, marketing flight, or ATC callsign.
 FLIP_BOARD_ID_MODES = ("tail", "flight_number", "callsign")
 FLIP_BOARD_ID_LABELS = {
-    "tail": "Tail number",
-    "flight_number": "Flight number",
-    "callsign": "Callsign",
+    "tail": "settings.opt.flip_id.tail",
+    "flight_number": "settings.opt.flip_id.flight_number",
+    "callsign": "settings.opt.flip_id.callsign",
 }
 # Out-of-range aircraft on the radar rim (PR118).
 RIM_TARGET_STYLES = ("plane", "dot")
 RIM_TARGET_STYLE_LABELS = {
-    "plane": "Aircraft icon",
-    "dot": "Dot blip",
+    "plane": "settings.opt.rim.plane",
+    "dot": "settings.opt.rim.dot",
 }
 # Follow speed-based zoom bounds (issue #114) — portal / settings.json.
 LIVE_TRACKING_PREVIEW_MINUTES_MIN = 1.0
@@ -158,10 +161,10 @@ RADAR_HUD_OPACITY_MAX = 100
 RADAR_HUD_POSITIONS = ("top", "bottom")
 DEFAULT_CLOCKS = ("digital", "analog", "night", "flieger")
 DEFAULT_CLOCK_LABELS = {
-    "digital": "Digital",
-    "analog": "Analog",
-    "night": "Analog (altimeter, night)",
-    "flieger": "Flieger chronograph",
+    "digital": "settings.opt.clock.digital",
+    "analog": "settings.opt.clock.analog",
+    "night": "settings.opt.clock.night",
+    "flieger": "settings.opt.clock.flieger",
 }
 DATE_FORMATS = ("us", "eu")
 HOURLY_CHIME_VOLUME_MIN = 0
@@ -371,6 +374,8 @@ _defaults = {
     "runway_light_rgb": list(color_presets.DEFAULT_RUNWAY_LIGHT_RGB),
     "theme_palette_v": color_presets.THEME_PALETTE_V,
     "clock_12hr": True,
+    # Requested UI language. Missing/invalid packs resolve to English at runtime.
+    "display_language": "en",
     # us | eu — digital and altimeter clock date order (Flieger unchanged).
     "date_format": "us",
     "auto_timezone": True,
@@ -997,6 +1002,14 @@ def _load():
         migrated = True
     else:
         state["date_format"] = date_fmt
+    from i18n import normalize_requested_language
+
+    language = normalize_requested_language(state.get("display_language"))
+    if "display_language" not in data or state.get("display_language") != language:
+        state["display_language"] = language
+        migrated = True
+    else:
+        state["display_language"] = language
     try:
         if "radar_hud_opacity" not in data:
             state["radar_hud_opacity"] = 72
@@ -1215,6 +1228,12 @@ def _load():
 
 _state = _load()
 try:
+    from i18n import activate as _activate_language
+
+    _activate_language(_state.get("display_language", "en"))
+except Exception:
+    logger.warning("Could not activate display language", exc_info=True)
+try:
     _settings_mtime = os.path.getmtime(SETTINGS_PATH)
 except OSError:
     _settings_mtime = None
@@ -1262,6 +1281,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("flight_detail_timeout_s"),
         state.get("clock_timeout_s"),
         state.get("clock_12hr"),
+        str(state.get("display_language") or "en"),
         str(state.get("date_format") or "us"),
         state.get("auto_timezone"),
         state.get("traffic_mode"),
@@ -1370,6 +1390,12 @@ def sync_from_disk() -> bool:
         return False
     _state = _load()
     try:
+        from i18n import activate
+
+        activate(_state.get("display_language", "en"))
+    except Exception:
+        logger.warning("Could not activate reloaded display language", exc_info=True)
+    try:
         _settings_mtime = os.path.getmtime(SETTINGS_PATH)
     except OSError:
         _settings_mtime = None
@@ -1382,7 +1408,7 @@ def sync_from_disk() -> bool:
 
 def reload() -> bool:
     """Reload settings from disk if file changed externally."""
-    global _state, _settings_mtime, _disk_synced
+    global _state, _settings_mtime, _disk_synced, _last_reload_changed_keys
     force = _consume_reload_request()
     # Do not clobber in-memory slider edits (brightness / VFR opacity / theme RGB)
     # that have not been flushed to disk yet — otherwise values flicker every poll.
@@ -1404,6 +1430,7 @@ def reload() -> bool:
         with open(SETTINGS_PATH, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError, TypeError):
+        _last_reload_changed_keys = frozenset()
         return force
 
     incoming = {**_defaults, **data}
@@ -1412,9 +1439,22 @@ def reload() -> bool:
             _settings_mtime = os.path.getmtime(SETTINGS_PATH)
         except OSError:
             pass
+        _last_reload_changed_keys = frozenset()
         return False
 
+    previous = dict(_state)
     _state = _load()
+    _last_reload_changed_keys = frozenset(
+        key
+        for key in set(previous) | set(_state)
+        if previous.get(key) != _state.get(key)
+    )
+    try:
+        from i18n import activate
+
+        activate(_state.get("display_language", "en"))
+    except Exception:
+        logger.warning("Could not activate reloaded display language", exc_info=True)
     try:
         _settings_mtime = os.path.getmtime(SETTINGS_PATH)
     except OSError:
@@ -1426,6 +1466,11 @@ def reload() -> bool:
     # (e.g. from the web portal process).
     apply_theme_colors()
     return True
+
+
+def reload_changed_keys() -> frozenset[str]:
+    """Keys changed by the most recent successful ``reload`` call."""
+    return _last_reload_changed_keys
 
 
 def _sync_config_min_height():
@@ -1977,7 +2022,7 @@ def flip_board_id() -> str:
 
 
 def flip_board_id_label() -> str:
-    return FLIP_BOARD_ID_LABELS.get(flip_board_id(), "Tail number")
+    return tr(FLIP_BOARD_ID_LABELS.get(flip_board_id(), "settings.opt.flip_id.tail"))
 
 
 def set_flip_board_id(mode: str) -> str:
@@ -1990,7 +2035,10 @@ def set_flip_board_id(mode: str) -> str:
 
 
 AIRPORT_ICON_STYLES = ("classic", "chart")
-AIRPORT_ICON_STYLE_LABELS = {"classic": "Classic pins", "chart": "Chart style"}
+AIRPORT_ICON_STYLE_LABELS = {
+    "classic": "settings.opt.airport_icon.classic",
+    "chart": "settings.opt.airport_icon.chart",
+}
 
 
 def airport_icon_style() -> str:
@@ -2008,15 +2056,15 @@ def set_airport_icon_style(style: str) -> str:
 
 
 def airport_icon_style_label() -> str:
-    return AIRPORT_ICON_STYLE_LABELS.get(airport_icon_style(), "Classic pins")
+    return tr(AIRPORT_ICON_STYLE_LABELS.get(airport_icon_style(), "settings.opt.airport_icon.classic"))
 
 
 AIRPORT_MIN_SIZES = ("large", "medium", "small_paved", "small")
 AIRPORT_MIN_SIZE_LABELS = {
-    "large": "Large only",
-    "medium": "Large + medium",
-    "small_paved": "Small (paved only)",
-    "small": "All small strips",
+    "large": "settings.opt.airport_size.large",
+    "medium": "settings.opt.airport_size.medium",
+    "small_paved": "settings.opt.airport_size.small_paved",
+    "small": "settings.opt.airport_size.small",
 }
 
 
@@ -2035,7 +2083,7 @@ def set_airport_min_size(size: str) -> str:
 
 
 def airport_min_size_label() -> str:
-    return AIRPORT_MIN_SIZE_LABELS.get(airport_min_size(), "All small strips")
+    return tr(AIRPORT_MIN_SIZE_LABELS.get(airport_min_size(), "settings.opt.airport_size.small"))
 
 
 def show_ground_vehicles() -> bool:
@@ -2193,7 +2241,7 @@ def traffic_mode() -> str:
 
 def traffic_mode_label() -> str:
     mode = traffic_mode()
-    return TRAFFIC_MODE_LABELS.get(mode, mode)
+    return tr(TRAFFIC_MODE_LABELS.get(mode, mode))
 
 
 def aircraft_enabled() -> bool:
@@ -2297,7 +2345,7 @@ def rim_target_style() -> str:
 
 
 def rim_target_style_label() -> str:
-    return RIM_TARGET_STYLE_LABELS.get(rim_target_style(), "Aircraft icon")
+    return tr(RIM_TARGET_STYLE_LABELS.get(rim_target_style(), "settings.opt.rim.plane"))
 
 
 def set_rim_target_style(value: str):
@@ -2334,7 +2382,7 @@ def traffic_labels() -> str:
 
 
 def traffic_labels_label() -> str:
-    return TRAFFIC_LABEL_LABELS.get(traffic_labels(), "Aircraft Only")
+    return tr(TRAFFIC_LABEL_LABELS.get(traffic_labels(), "settings.opt.traffic_label.aircraft"))
 
 
 def show_aircraft_labels() -> bool:
@@ -2383,7 +2431,7 @@ def aircraft_tag_id() -> str:
 
 
 def aircraft_tag_id_label() -> str:
-    return AIRCRAFT_TAG_ID_LABELS.get(aircraft_tag_id(), "Flight number")
+    return tr(AIRCRAFT_TAG_ID_LABELS.get(aircraft_tag_id(), "settings.opt.tag_id.flight_number"))
 
 
 def set_aircraft_tag_id(mode: str) -> str:
@@ -2580,6 +2628,21 @@ def toggle_clock_format():
     return set_use_12hr_clock(not use_12hr_clock())
 
 
+def display_language() -> str:
+    from i18n import normalize_requested_language
+
+    return normalize_requested_language(_state.get("display_language"))
+
+
+def set_display_language(language: str) -> str:
+    from i18n import activate, normalize_requested_language
+
+    value = normalize_requested_language(language)
+    _rmw_save({"display_language": value})
+    activate(value)
+    return value
+
+
 def date_format() -> str:
     fmt = str(_state.get("date_format") or "us").strip().lower()
     return fmt if fmt in DATE_FORMATS else "us"
@@ -2600,6 +2663,24 @@ def set_date_format(fmt: str) -> str:
 
 def set_use_european_date(enabled: bool) -> str:
     return set_date_format("eu" if enabled else "us")
+
+
+def set_language_region(language: str, date_order: str) -> tuple[str, str]:
+    """Atomically persist the portal/device language and existing date order."""
+    from i18n import activate, normalize_requested_language
+
+    language_value = normalize_requested_language(language)
+    date_value = str(date_order or "us").strip().lower()
+    if date_value not in DATE_FORMATS:
+        date_value = "us"
+    _rmw_save(
+        {
+            "display_language": language_value,
+            "date_format": date_value,
+        }
+    )
+    activate(language_value)
+    return language_value, date_value
 
 
 def auto_idle_clock_enabled() -> bool:
@@ -2632,7 +2713,7 @@ def default_clock() -> str:
 
 
 def default_clock_label() -> str:
-    return DEFAULT_CLOCK_LABELS.get(default_clock(), "Digital")
+    return tr(DEFAULT_CLOCK_LABELS.get(default_clock(), "settings.opt.clock.digital"))
 
 
 def set_default_clock(face: str) -> str:
@@ -2656,7 +2737,7 @@ def default_clock_off_hours() -> str:
 
 
 def default_clock_off_hours_label() -> str:
-    return DEFAULT_CLOCK_LABELS.get(default_clock_off_hours(), "Digital")
+    return tr(DEFAULT_CLOCK_LABELS.get(default_clock_off_hours(), "settings.opt.clock.digital"))
 
 
 def set_default_clock_off_hours(face: str) -> str:

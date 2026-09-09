@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "locale": "nl",
+  "native_name": "Nederlands",
+  "english_name": "Dutch",
+  "direction": "ltr",
+  "fallback": "en",
+  "source_catalog_revision": 7,
+  "license": "CC-BY-NC-SA-4.0",
+  "authors": ["jmwijnholds (translation coordination)","OpenAI Codex (machine-assisted draft)"]
+}

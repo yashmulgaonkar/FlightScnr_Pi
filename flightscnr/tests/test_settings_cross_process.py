@@ -111,6 +111,17 @@ class TestCrossProcessSaves:
         assert disk["atc_airport"] == "KHMT"
         assert disk["atc_want_playing"] is True
 
+    def test_language_and_date_survive_a_stale_display_save(self):
+        settings.set_show_sweep_line(True)
+        _write_as_other_process(display_language="fr-FR", date_format="eu")
+
+        settings.set_show_sweep_line(False)
+
+        disk = _disk()
+        assert disk["display_language"] == "fr-FR"
+        assert disk["date_format"] == "eu"
+        assert disk["show_sweep"] is False
+
     def test_a_fresh_file_is_written_in_full(self):
         os.remove(settings.SETTINGS_PATH)
         settings.set_show_sweep_line(True)

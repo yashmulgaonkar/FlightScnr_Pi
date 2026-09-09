@@ -31,6 +31,7 @@ from display.round_touch import (
 )
 from display.round_touch import alert_prefs, frame_debug
 from display.round_touch import vessel_declutter
+from i18n import tr
 from utilities import aircraft_alert
 from utilities.overhead import load_tracked_callsign
 
@@ -101,7 +102,7 @@ def _rebuild_stage(name: str, t0: float) -> float:
 def show_location_toast(label: str) -> None:
     """Show a brief Home / favorite name after the active center changes."""
     global _location_toast_label, _location_toast_until
-    text = str(label or "").strip() or "Location"
+    text = str(label or "").strip() or tr("radar.location_default")
     _location_toast_label = text
     _location_toast_until = time.time() + _LOCATION_TOAST_TTL_S
 
@@ -1423,25 +1424,25 @@ def _draw_status(surface, flights):
 
     if not location_configured():
         lines = [
-            "Set radar center on web portal",
-            "in /etc/flightscnr.env",
+            tr("radar.center.set_portal_1"),
+            tr("radar.center.set_portal_2"),
         ]
         color = theme.TAG_ALT_DESCEND
     else:
         try:
-            min_line = f"Min height: {settings.min_height_ft()} ft"
+            min_line = tr("radar.min_height", feet=settings.min_height_ft())
         except ImportError:
             min_line = ""
-        lines = [location_status(), "Waiting for traffic…"]
+        lines = [location_status(), tr("radar.waiting.traffic")]
         if min_line:
             lines.insert(1, min_line)
         try:
             from display.round_touch import settings as _settings
             mode = _settings.traffic_mode()
             if mode == "marine":
-                lines[-1] = "Waiting for AIS…"
+                lines[-1] = tr("radar.waiting.ais")
             elif mode == "both":
-                lines[-1] = "Waiting for aircraft / AIS…"
+                lines[-1] = tr("radar.waiting.both")
         except Exception:
             pass
         color = theme.HINT
@@ -1486,16 +1487,16 @@ def _draw_map_pan_overlay(
     center_line = f"{preview_lat:.5f}, {preview_lon:.5f}"
     if release_to_save:
         lines = [
-            ("Set radar center", title, theme.LABEL),
-            ("Drag map · release to save", font, theme.HINT),
-            ("Release without moving to cancel", font, theme.MUTED),
+            (tr("radar.pan.title"), title, theme.LABEL),
+            (tr("radar.pan.drag_release"), font, theme.HINT),
+            (tr("radar.pan.release_cancel"), font, theme.MUTED),
             (center_line, font, theme.MUTED),
         ]
     else:
         lines = [
-            ("Set radar center", title, theme.LABEL),
-            ("Drag map · tap center to save", font, theme.HINT),
-            ("Tap rim to cancel", font, theme.MUTED),
+            (tr("radar.pan.title"), title, theme.LABEL),
+            (tr("radar.pan.drag_tap"), font, theme.HINT),
+            (tr("radar.pan.tap_cancel"), font, theme.MUTED),
             (center_line, font, theme.MUTED),
         ]
     pad_x = theme.s(8)
@@ -1540,14 +1541,14 @@ def _draw_pan_commit_overlay(surface):
     fav = favourite_locations.active_favorite()
     buttons: list[tuple[str, str]] = []
     if fav is not None:
-        name = (fav.get("name") or "Favorite")[:14]
-        buttons.append(("update_fav", f"Update {name}"))
-    buttons.append(("save_home", "Save as Home"))
+        name = (fav.get("name") or tr("radar.favorite_default"))[:14]
+        buttons.append(("update_fav", tr("radar.update_favorite", name=name)))
+    buttons.append(("save_home", tr("radar.save_home")))
 
     lines = [
-        ("Center saved", title, theme.LABEL),
-        ("Choose how to store it", font, theme.HINT),
-        ("Tap rim to keep as Custom", font, theme.MUTED),
+        (tr("radar.center_saved.title"), title, theme.LABEL),
+        (tr("radar.center_saved.choose"), font, theme.HINT),
+        (tr("radar.center_saved.keep_custom"), font, theme.MUTED),
     ]
     pad_x = theme.s(10)
     pad_y = theme.s(8)

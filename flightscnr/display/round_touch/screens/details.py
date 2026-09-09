@@ -17,6 +17,7 @@ import os
 import pygame
 
 from display.round_touch import draw, nav, theme
+from i18n import tr
 from version import APP_VERSION
 
 FOOTER_BUTTONS = ("next", "radar")
@@ -116,17 +117,17 @@ def _update_notice_text() -> str | None:
         )
 
         if update_running():
-            return "Update in progress — do not turn off"
+            return tr("details.update_in_progress")
         if not should_show_update_banner():
             return None
         if update_is_scheduled():
-            return "Firmware will update tonight during off-hours"
+            return tr("details.update_tonight")
         remote = remote_release_label()
     except Exception:
         return None
     if remote:
-        return f"Update available v{remote}"
-    return "Update available"
+        return tr("details.update_available_version", version=remote)
+    return tr("details.update_available")
 
 
 def _draw_version_with_update(
@@ -175,6 +176,6 @@ def draw_details(surface, boot_splash=False, scroll_offset: int = 0) -> int:
     if boot_splash:
         return 0
 
-    nav.draw_curved_breadcrumb(surface, ["Radar", "About"])
+    nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("common.about")])
     nav.draw_curved_footer(surface, list(FOOTER_BUTTONS))
     return 0

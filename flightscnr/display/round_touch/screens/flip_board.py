@@ -26,6 +26,7 @@ import time
 import pygame
 
 from display.round_touch import draw, flap_sound, flip_tiles, nav, settings, theme
+from i18n import tr
 
 FOOTER_BUTTONS = ("pin", "prev", "radar", "next", "board_id")
 
@@ -96,7 +97,12 @@ CLOCK_LIFT_PX = 20
 ARRIVALS = "arrivals"
 DEPARTURES = "departures"
 
-_TITLES = {ARRIVALS: "ARRIVALS", DEPARTURES: "DEPARTURES"}
+# Board mode ids stay English identifiers; titles are translated at draw time.
+_TITLE_KEYS = {ARRIVALS: "flip.title.arrivals", DEPARTURES: "flip.title.departures"}
+
+
+def _board_title(name: str) -> str:
+    return tr(_TITLE_KEYS[name])
 
 _airport_index = 0
 _direction = ARRIVALS
@@ -620,7 +626,7 @@ def _draw_direction_line(surface: pygame.Surface, y: int) -> int:
     pad = max(5, theme.s(9))
 
     order = (ARRIVALS, DEPARTURES)
-    labels = {name: draw.render_text_cached(font, _TITLES[name], theme.LABEL)
+    labels = {name: draw.render_text_cached(font, _board_title(name), theme.LABEL)
               for name in order}
     widths = {
         name: labels[name].get_width() + pad * 2 + (icon + gap if name == _direction else 0)
@@ -649,7 +655,7 @@ def _draw_direction_line(surface: pygame.Surface, y: int) -> int:
             border_radius=height // 2,
         )
         text = draw.render_text_cached(
-            font, _TITLES[name], flip_tiles.YELLOW if selected else theme.HINT
+            font, _board_title(name), flip_tiles.YELLOW if selected else theme.HINT
         )
         tx = rect.x + pad
         if selected:
@@ -762,7 +768,7 @@ def draw_flip_board(surface: pygame.Surface) -> None:
     airport = selected_airport(airports)
     if airport is None:
         close_id_picker()
-        _draw_empty_state(surface, "No airports in range")
+        _draw_empty_state(surface, tr("flip.no_airports"))
         _draw_board_clock(surface)
         nav.draw_curved_footer(surface, ["radar"])
         return
@@ -784,7 +790,7 @@ def draw_flip_board(surface: pygame.Surface) -> None:
     else:
         for index, y in enumerate(row_positions()):
             _draw_row(surface, None, y, row=index, now=now)
-        _draw_empty_state(surface, "Watching for traffic")
+        _draw_empty_state(surface, tr("flip.watching"))
 
     _draw_board_clock(surface)
     nav.draw_curved_footer(surface, list(FOOTER_BUTTONS), pin_active=_pinned)
@@ -851,7 +857,7 @@ def _draw_id_picker(surface: pygame.Surface) -> None:
     close_size = theme.s(28)
     modes = settings.FLIP_BOARD_ID_MODES
     labels = [
-        settings.FLIP_BOARD_ID_LABELS.get(mode, mode) for mode in modes
+        tr(settings.FLIP_BOARD_ID_LABELS.get(mode, mode)) for mode in modes
     ]
     inner_w = max(
         title.get_width() + close_size + theme.s(12),

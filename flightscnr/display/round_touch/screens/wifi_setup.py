@@ -17,6 +17,7 @@ import logging
 import pygame
 
 from display.round_touch import draw, theme
+from i18n import tr
 from utilities import wifi_setup
 
 logger = logging.getLogger("flightscnr.display")
@@ -73,7 +74,7 @@ def try_saved_button_rect() -> pygame.Rect | None:
 
 
 def _draw_try_saved_button(surface: pygame.Surface, y: int, *, enabled: bool) -> pygame.Rect:
-    label = "Trying saved Wi‑Fi…" if not enabled else "Try saved Wi‑Fi"
+    label = tr("wifi.trying_saved") if not enabled else tr("wifi.try_saved")
     font = draw.load_font(theme.s(13), bold=True)
     text_w, text_h = font.size(label)
     pad_x = theme.s(14)
@@ -111,7 +112,7 @@ def draw_wifi_setup(surface: pygame.Surface, *, try_saved_busy: bool = False) ->
     except Exception:
         logger.exception("Wi-Fi setup credentials unavailable")
         draw.draw_center_line(
-            surface, "Wi-Fi setup unavailable", theme.CENTER_Y, title_font, theme.LABEL
+            surface, tr("wifi.setup_unavailable"), theme.CENTER_Y, title_font, theme.LABEL
         )
         return
 
@@ -126,9 +127,9 @@ def draw_wifi_setup(surface: pygame.Surface, *, try_saved_busy: bool = False) ->
 
     y = top
     # Use draw_center_line's return value so text never overlaps the QR plate.
-    y = draw.draw_center_line(surface, "Set up Wi‑Fi", int(y), title_font, theme.LABEL)
+    y = draw.draw_center_line(surface, tr("wifi.setup_title"), int(y), title_font, theme.LABEL)
     y = draw.draw_center_line(
-        surface, "Scan QR with your phone", int(y), body_font, theme.MUTED
+        surface, tr("wifi.scan_qr"), int(y), body_font, theme.MUTED
     )
     y += theme.s(10)
 
@@ -145,12 +146,12 @@ def draw_wifi_setup(surface: pygame.Surface, *, try_saved_busy: bool = False) ->
         y = plate.bottom + theme.s(8)
     else:
         y = draw.draw_center_line(
-            surface, "QR unavailable — join Wi‑Fi below", int(y), body_font, theme.HINT
+            surface, tr("wifi.qr_unavailable"), int(y), body_font, theme.HINT
         )
 
     y = draw.draw_center_line(surface, creds.ssid, int(y), mono_font, theme.SWEEP)
     y = draw.draw_center_line(
-        surface, f"Pass: {creds.password}", int(y), mono_font, theme.MUTED
+        surface, tr("wifi.pass", password=creds.password), int(y), mono_font, theme.MUTED
     )
     y = draw.draw_center_line(
         surface, f"{creds.gateway}/wifi", int(y), mono_font, theme.LABEL

@@ -18,6 +18,7 @@ from datetime import datetime
 import pygame
 
 from display.round_touch import draw as draw_mod, settings, theme
+from i18n import tr
 
 # Volume popover stays open until dismissed or this idle timeout.
 _POPOVER_IDLE_S = 4.0
@@ -36,12 +37,13 @@ _home_rect = pygame.Rect(0, 0, 0, 0)
 _slider_track = pygame.Rect(0, 0, 0, 0)
 _hud_bounds = pygame.Rect(0, 0, 0, 0)
 
+# Channel id -> catalog key; label resolves at draw time.
 _CHANNEL_LABELS = {
-    "speaker": "Master",
-    "chime": "Hourly Chime",
-    "alert": "Alert",
-    "atc": "ATC",
-    "lofi": "LoFi",
+    "speaker": "radar_hud.channel.speaker",
+    "chime": "radar_hud.channel.chime",
+    "alert": "radar_hud.channel.alert",
+    "atc": "radar_hud.channel.atc",
+    "lofi": "radar_hud.channel.lofi",
 }
 _CHANNEL_ICONS = {
     "speaker": "volume",
@@ -1244,7 +1246,7 @@ def draw_hud(
         track_h = theme.s(10)
         label_font = draw_mod.load_font(max(8, theme.s(10)), bold=True)
         pct_font = draw_mod.load_font(max(8, theme.s(10)), bold=True)
-        label = _CHANNEL_LABELS.get(channel, channel.title())
+        label = tr(_CHANNEL_LABELS[channel]) if channel in _CHANNEL_LABELS else channel.title()
         vol = settings.hud_channel_volume(channel)
         label_img = label_font.render(label, True, color)
         pct_img = pct_font.render(f"{vol}%", True, color)

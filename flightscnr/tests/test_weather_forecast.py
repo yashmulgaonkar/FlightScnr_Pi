@@ -48,9 +48,15 @@ class TestForecastDayRollover:
         days = weather_data._parse_days(intervals, max_days=3)
 
         assert len(days) == 3
-        assert days[0]["label"] == "Today"
-        assert days[1]["label"] == "Wed"
-        assert days[2]["label"] == "Thu"
+        assert days[0]["date"] == today.isoformat()
+        assert days[1]["date"] == (today + timedelta(days=1)).isoformat()
+        assert "label" not in days[0]
+        localized = weather_data._localized_payload(
+            {"days": days, "weather_code": 1000}
+        )
+        assert localized["days"][0]["label"] == "Today"
+        assert localized["days"][1]["label"] == "Tomorrow"
+        assert localized["days"][2]["label"] == "Thu"
 
     def test_refresh_invalidates_on_date_change(self, monkeypatch):
         weather_data.invalidate_cache()
@@ -99,6 +105,37 @@ class TestForecastDayRollover:
         second = weather_data.refresh(force=False)
         assert second is not None
         assert second["days"][0]["label"] == "Today"
+
+    def test_language_switch_reuses_semantic_cache_without_fetch(self, monkeypatch):
+        from i18n import activate
+
+        today = date(2026, 8, 7)
+        monkeypatch.setattr(weather_data, "_today", lambda: today)
+        raw = {
+            "temp": 20,
+            "unit": "C",
+            "days": [
+                {
+                    "date": today.isoformat(),
+                    "weather_code": 1000,
+                    "sunrise_raw": "2026-08-07T06:00:00",
+                    "sunset_raw": "2026-08-07T21:00:00",
+                }
+            ],
+            "weather_code": 1000,
+            "sunrise_raw": "2026-08-07T06:00:00",
+            "sunset_raw": "2026-08-07T21:00:00",
+            "ready": True,
+        }
+        weather_data._CACHE = {"ts": time.time(), "payload": raw, "date": today}
+
+        activate("en")
+        assert weather_data.snapshot()["weather_label"] == "Clear"
+        activate("nl")
+        assert weather_data.snapshot()["weather_label"] == "Helder"
+        assert weather_data._CACHE["payload"] is raw
+        assert "weather_label" not in weather_data._CACHE["payload"]
+        activate("en")
 
 
 class TestHourlyWeatherRefresh:

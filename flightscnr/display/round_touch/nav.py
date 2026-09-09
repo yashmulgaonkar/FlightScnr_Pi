@@ -16,6 +16,7 @@ import math
 import pygame
 
 from display.round_touch import buttons, draw, theme
+from i18n import active_catalog, tr
 
 # Footer button chrome (radar-green palette)
 _BTN_FILL = (8, 38, 14)
@@ -38,6 +39,26 @@ SETTINGS_PAGES = (
     "Targets",
     "System",
 )
+
+# Catalog keys for footer chrome. Kinds stay English identifiers; only the
+# rendered label is translated, resolved at draw time so live language
+# switches take effect without a restart.
+_FOOTER_BTN_KEYS = {
+    "prev": "nav.prev",
+    "next": "nav.next",
+    "radar": "nav.radar",
+    "pin": "nav.pin_it",
+}
+_PILL_KEYS = {
+    "now": "nav.now",
+    "tonight": "nav.tonight",
+    "dismiss": "nav.dismiss",
+}
+_FOOTER_ARC_KEYS = {
+    "prev": "nav.footer.prev",
+    "next": "nav.footer.next",
+    "back": "nav.footer.back",
+}
 
 
 class ScrollState:
@@ -324,7 +345,6 @@ def footer_button_rects(
     row_gap = theme.s(8)
 
     _TEXT_FOOTER = ("now", "tonight", "dismiss")
-    _TEXT_LABELS = {"now": "NOW", "tonight": "TONIGHT", "dismiss": "DISMISS"}
 
     kind_list = list(kinds) if kinds and len(kinds) == button_count else None
 
@@ -346,9 +366,9 @@ def footer_button_rects(
 
         radar_w = min(btn_h, theme.s(56))
         widths = {
-            "now": _text_w("NOW"),
-            "tonight": _text_w("TONIGHT"),
-            "dismiss": _text_w("DISMISS"),
+            "now": _text_w(tr("nav.now")),
+            "tonight": _text_w(tr("nav.tonight")),
+            "dismiss": _text_w(tr("nav.dismiss")),
             "radar": radar_w,
         }
         y0 = top + theme.s(3)
@@ -389,7 +409,7 @@ def footer_button_rects(
         widths_list: list[int] = []
         for kind in kind_list:
             if kind in _TEXT_FOOTER:
-                label = _TEXT_LABELS[kind]
+                label = tr(_PILL_KEYS[kind])
                 tw = label_font.size(label)[0] + pad_x * 2
                 widths_list.append(max(theme.s(52), min(tw, theme.s(96))))
             else:
@@ -534,8 +554,7 @@ def _draw_footer_button(
     # Update-notes actions: outlined text pills (no fill / icons).
     if kind in ("now", "tonight", "dismiss"):
         label_font = draw.load_font(theme.s(13), bold=True)
-        labels = {"now": "NOW", "tonight": "TONIGHT", "dismiss": "DISMISS"}
-        label = labels[kind]
+        label = tr(_PILL_KEYS[kind])
         # Prefer full label; only clip if the slot is still too narrow.
         if label_font.size(label)[0] <= rect.width - theme.s(8):
             text = label
@@ -557,13 +576,7 @@ def _draw_footer_button(
     _draw_round_button(surface, rect, accent=accent)
     icon_color = _BTN_ICON_ACCENT if accent else _BTN_ICON
     label_font = draw.load_font(theme.s(11))
-    labels = {
-        "prev": "PREV",
-        "next": "NEXT",
-        "radar": "RADAR",
-        "pin": "PIN IT",
-    }
-    label = labels.get(kind, kind.upper())
+    label = tr(_FOOTER_BTN_KEYS[kind]) if kind in _FOOTER_BTN_KEYS else kind.upper()
 
     icon_cy = rect.centery - theme.s(6)
     icon_size = theme.s(10) if kind == "pin" else theme.s(7)
@@ -819,9 +832,6 @@ def _fallback_radar_glyph(size: int, glyph_color) -> pygame.Surface:
     return icon
 
 
-_FOOTER_LABELS = {"prev": "Prev", "next": "Next", "back": "Back"}
-
-
 def draw_curved_footer(
     surface: pygame.Surface, kinds: list[str], *, pin_active: bool = False
 ) -> None:
@@ -831,7 +841,15 @@ def draw_curved_footer(
     from display.round_touch import radar_hud
 
     glyph_color, fill_rgba = radar_hud._hud_chrome()
-    key = (tuple(kinds), tuple(glyph_color), tuple(fill_rgba), bool(pin_active))
+    # Include the active language: the footer renders translated Prev/Next/Back,
+    # so a live language switch must not serve a stale cached surface.
+    key = (
+        tuple(kinds),
+        tuple(glyph_color),
+        tuple(fill_rgba),
+        bool(pin_active),
+        active_catalog().effective_language,
+    )
     surf_pos = _overlay_cached(
         _footer_cache, key,
         lambda tmp: _draw_curved_footer_uncached(tmp, kinds, pin_active=pin_active),
@@ -893,7 +911,8 @@ def _draw_curved_footer_uncached(
             if label is not None:
                 surface.blit(label, label.get_rect(center=(px, py)))
             continue
-        label = _FOOTER_LABELS.get(kind)
+        arc_key = _FOOTER_ARC_KEYS.get(kind)
+        label = tr(arc_key) if arc_key else None
         if not label:
             continue
         try:

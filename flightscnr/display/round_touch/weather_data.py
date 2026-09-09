@@ -31,6 +31,42 @@ CACHE_PATH = os.path.join(DATA_DIR, "weather_cache.json")
 # every restart — and every OTA update — left the clock and forecast screens
 # empty until that window reopened.
 _DISK_MAX_AGE_S = 6 * 3600
+CACHE_SCHEMA_VERSION = 2
+
+
+def _migrate_cached_payload(payload: dict, saved_date: object = None) -> dict:
+    """Convert the pre-i18n disk payload to semantic cache schema v2."""
+    out = dict(payload)
+    raw_days = payload.get("days") or []
+    try:
+        base_date = date.fromisoformat(str(saved_date))
+    except (TypeError, ValueError):
+        base_date = datetime.now().date()
+    days: list[dict] = []
+    for index, raw_day in enumerate(raw_days):
+        if not isinstance(raw_day, dict):
+            continue
+        day = dict(raw_day)
+        if not day.get("date"):
+            day["date"] = (base_date + timedelta(days=index)).isoformat()
+        if "sunrise_raw" not in day and "sunrise" in day:
+            day["sunrise_raw"] = day.get("sunrise")
+        if "sunset_raw" not in day and "sunset" in day:
+            day["sunset_raw"] = day.get("sunset")
+        day.pop("label", None)
+        day.pop("weather_label", None)
+        day.pop("sunrise", None)
+        day.pop("sunset", None)
+        days.append(day)
+    out["days"] = days
+    if "sunrise_raw" not in out and "sunrise" in out:
+        out["sunrise_raw"] = out.get("sunrise")
+    if "sunset_raw" not in out and "sunset" in out:
+        out["sunset_raw"] = out.get("sunset")
+    out.pop("weather_label", None)
+    out.pop("sunrise", None)
+    out.pop("sunset", None)
+    return out
 
 
 def _save_cache() -> None:
@@ -43,6 +79,7 @@ def _save_cache() -> None:
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(
                 {
+                    "schema_version": CACHE_SCHEMA_VERSION,
                     "ts": float(_CACHE.get("ts") or 0.0),
                     "date": str(_CACHE.get("date") or ""),
                     "payload": payload,
@@ -67,6 +104,14 @@ def _load_cache() -> None:
     payload = saved.get("payload")
     if not isinstance(payload, dict):
         return
+    try:
+        schema_version = int(saved.get("schema_version") or 1)
+    except (TypeError, ValueError):
+        return
+    if schema_version > CACHE_SCHEMA_VERSION or schema_version < 1:
+        return
+    if schema_version < CACHE_SCHEMA_VERSION:
+        payload = _migrate_cached_payload(payload, saved.get("date"))
     stamp = float(saved.get("ts") or 0.0)
     if stamp <= 0 or (time.time() - stamp) > _DISK_MAX_AGE_S:
         return
@@ -99,38 +144,6 @@ def _interval_local_date(start: str) -> date | None:
         return None
 
 
-def _weather_code_label(code) -> str:
-    try:
-        code = int(code)
-    except (TypeError, ValueError):
-        return "—"
-    mapping = {
-        1000: "Clear",
-        1100: "Mostly clear",
-        1101: "Partly cloudy",
-        1102: "Mostly cloudy",
-        1001: "Cloudy",
-        4000: "Drizzle",
-        4200: "Light rain",
-        4001: "Rain",
-        4201: "Heavy rain",
-        5000: "Snow",
-        5001: "Flurries",
-        5100: "Light snow",
-        5101: "Heavy snow",
-        6000: "Freezing drizzle",
-        6001: "Freezing rain",
-        7000: "Ice pellets",
-        8000: "Thunderstorm",
-        2100: "Light fog",
-        2000: "Fog",
-        3000: "Light wind",
-        3001: "Wind",
-        3002: "Strong wind",
-    }
-    return mapping.get(code, "Weather")
-
-
 def _fmt_time(value) -> str:
     if value is None or value == "":
         return "—"
@@ -138,6 +151,13 @@ def _fmt_time(value) -> str:
         text = value.strip()
         if not text:
             return "—"
+        if len(text) == 5 and text[2] == ":":
+            try:
+                hour, minute = (int(part) for part in text.split(":"))
+                if 0 <= hour <= 23 and 0 <= minute <= 59:
+                    return text
+            except ValueError:
+                pass
         if "T" in text:
             try:
                 dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
@@ -156,6 +176,7 @@ def _fmt_time(value) -> str:
 
 
 def _parse_days(intervals: list, max_days: int = 3) -> list[dict]:
+    """Normalize provider intervals without caching localized presentation."""
     days = []
     today = _today()
     for item in intervals:
@@ -164,25 +185,65 @@ def _parse_days(intervals: list, max_days: int = 3) -> list[dict]:
         if day_date is not None and day_date < today:
             continue
         values = item.get("values") or {}
-        if day_date is not None:
-            label = "Today" if day_date == today else day_date.strftime("%a")
-        else:
-            label = f"Day {len(days) + 1}"
         days.append(
             {
-                "label": label,
+                "date": day_date.isoformat() if day_date is not None else None,
                 "temp_min": values.get("temperatureMin"),
                 "temp_max": values.get("temperatureMax"),
                 "weather_code": values.get("weatherCodeFullDay"),
-                "weather_label": _weather_code_label(values.get("weatherCodeFullDay")),
                 "precip_pct": values.get("precipitationProbabilityAvg"),
-                "sunrise": _fmt_time(values.get("sunriseTime")),
-                "sunset": _fmt_time(values.get("sunsetTime")),
+                "sunrise_raw": values.get("sunriseTime"),
+                "sunset_raw": values.get("sunsetTime"),
             }
         )
         if len(days) >= max_days:
             break
     return days
+
+
+def _day_date(value) -> date | None:
+    if isinstance(value, date):
+        return value
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def _localized_payload(payload: dict | None) -> dict | None:
+    """Build a display view from semantic cache data without network access."""
+    if not isinstance(payload, dict):
+        return None
+    from i18n import active_catalog, format_forecast_day, weather_code_label
+
+    out = dict(payload)
+    localized_days: list[dict] = []
+    today = _today()
+    selected = active_catalog()
+    for index, raw_day in enumerate(payload.get("days") or [], start=1):
+        day = dict(raw_day)
+        day["label"] = format_forecast_day(
+            _day_date(day.get("date")),
+            today=today,
+            number=index,
+            catalog=selected,
+        )
+        day["is_today"] = _day_date(day.get("date")) == today
+        day["weather_label"] = weather_code_label(
+            day.get("weather_code"), catalog=selected
+        )
+        day["sunrise"] = _fmt_time(day.get("sunrise_raw"))
+        day["sunset"] = _fmt_time(day.get("sunset_raw"))
+        localized_days.append(day)
+    out["days"] = localized_days
+    out["sunrise"] = _fmt_time(payload.get("sunrise_raw"))
+    out["sunset"] = _fmt_time(payload.get("sunset_raw"))
+    out["weather_label"] = weather_code_label(
+        payload.get("weather_code"), catalog=selected
+    )
+    return out
 
 
 def _merge_aqi(payload: dict, *, force: bool = False) -> dict:
@@ -264,7 +325,7 @@ def refresh(force: bool = False) -> dict | None:
                 pass
             cached = _merge_aqi(cached)
             _CACHE["payload"] = cached
-            return cached
+            return _localized_payload(cached)
 
     temp_hum = grab_temperature_and_humidity(force=force)
     intervals = grab_forecast("display", force=force)
@@ -287,15 +348,14 @@ def refresh(force: bool = False) -> dict | None:
         # Keep the last good reading when the provider is rate-limiting.
         prev = _CACHE.get("payload")
         if isinstance(prev, dict) and prev.get("ready"):
-            return _merge_aqi(prev)
+            return _localized_payload(_merge_aqi(prev))
         payload = {
             "temp": None,
             "humidity": None,
             "unit": unit_symbol(),
             "days": [],
-            "sunrise": "—",
-            "sunset": "—",
-            "weather_label": "—",
+            "sunrise_raw": None,
+            "sunset_raw": None,
             "weather_code": None,
             "wind_speed": None,
             "wind_direction": None,
@@ -308,7 +368,7 @@ def refresh(force: bool = False) -> dict | None:
         _CACHE["date"] = today
         _CACHE["payload"] = payload
         _save_cache()
-        return payload
+        return _localized_payload(payload)
 
     temp, humidity = temp_hum if temp_hum else (None, None)
     days = _parse_days(intervals or [])
@@ -324,9 +384,8 @@ def refresh(force: bool = False) -> dict | None:
         "humidity": humidity,
         "unit": unit_symbol(),
         "days": days,
-        "sunrise": days[0].get("sunrise") if days else "—",
-        "sunset": days[0].get("sunset") if days else "—",
-        "weather_label": _weather_code_label(current_code),
+        "sunrise_raw": days[0].get("sunrise_raw") if days else None,
+        "sunset_raw": days[0].get("sunset_raw") if days else None,
         "weather_code": current_code,
         "wind_speed": wind_speed,
         "wind_direction": wind_direction,
@@ -339,11 +398,11 @@ def refresh(force: bool = False) -> dict | None:
     _CACHE["date"] = today
     _CACHE["payload"] = payload
     _save_cache()
-    return payload
+    return _localized_payload(payload)
 
 
 def snapshot() -> dict | None:
-    return _CACHE["payload"]
+    return _localized_payload(_CACHE["payload"])
 
 
 def unavailable_messages() -> tuple[str, str]:
@@ -354,15 +413,9 @@ def unavailable_messages() -> tuple[str, str]:
         status = weather_fetch_status()
     except Exception:
         status = "unknown"
-    if status == "no_key":
-        return "Weather unavailable", "Add TOMORROW_API_KEY in the portal"
-    if status == "disabled":
-        return "Weather disabled", "Enable Tomorrow.io in the portal"
-    if status == "backoff":
-        return "Weather rate-limited", "Tomorrow.io limit reached - retrying later"
-    if status == "rate_limited":
-        return "Weather updating", "Next refresh at :01 or :31"
-    return "Weather unavailable", "Tap to retry · or use portal Weather"
+    from i18n import weather_status_messages
+
+    return weather_status_messages(status)
 
 
 def request_fetch_now() -> dict | None:
@@ -438,7 +491,7 @@ def refresh_current(force: bool = False) -> dict | None:
             pass
         cached = _merge_aqi(cached)
         _CACHE["payload"] = cached
-        return cached
+        return _localized_payload(cached)
 
     temp_hum = grab_temperature_and_humidity(force=force)
     temp, humidity = temp_hum if temp_hum else (None, None)
@@ -454,7 +507,7 @@ def refresh_current(force: bool = False) -> dict | None:
     base = cached if isinstance(cached, dict) else {}
     # On rate-limit / failed fetch, keep the previous ready reading.
     if temp is None and isinstance(base, dict) and base.get("ready") and base.get("temp") is not None:
-        return _merge_aqi(base)
+        return _localized_payload(_merge_aqi(base))
     days = list(base.get("days") or [])
     current_code = realtime_code or (days[0].get("weather_code") if days else None)
     payload = {
@@ -462,9 +515,12 @@ def refresh_current(force: bool = False) -> dict | None:
         "humidity": humidity,
         "unit": units,
         "days": days,
-        "sunrise": base.get("sunrise") or (days[0].get("sunrise") if days else "—"),
-        "sunset": base.get("sunset") or (days[0].get("sunset") if days else "—"),
-        "weather_label": _weather_code_label(current_code),
+        "sunrise_raw": base.get("sunrise_raw") or (
+            days[0].get("sunrise_raw") if days else None
+        ),
+        "sunset_raw": base.get("sunset_raw") or (
+            days[0].get("sunset_raw") if days else None
+        ),
         "weather_code": current_code,
         "wind_speed": wind_speed,
         "wind_direction": wind_direction,
@@ -477,7 +533,7 @@ def refresh_current(force: bool = False) -> dict | None:
     _CACHE["date"] = today
     _CACHE["payload"] = payload
     _save_cache()
-    return payload
+    return _localized_payload(payload)
 
 
 def _current_slot_key(when: datetime | None = None) -> str:

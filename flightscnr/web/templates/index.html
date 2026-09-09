@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ effective_language|default('en')|e }}">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>FlightScnrPi Settings</title>
+    <title data-i18n="portal.page.title">FlightScnrPi Settings</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <style>
         :root{--bg:#0a0a0a;--card:#141414;--card2:#1c1c1c;--line:#333;--text:#ececec;
@@ -172,15 +172,32 @@
         <img class="logo" src="/static/radar_icon.png" alt="" width="34" height="34">
         <h1>FlightScnrPi</h1>
     </div>
-    <p class="subtitle">Portal settings for radar, local ADS-B, display, alerts, tracking, and API keys.</p>
+    <p class="subtitle" data-i18n="portal.page.subtitle">Portal settings for radar, local ADS-B, display, alerts, tracking, and API keys.</p>
 
     <div class="search-wrap">
-        <input id="setting_search" type="search" placeholder="Search settings…" autocomplete="off">
+        <input id="setting_search" type="search" placeholder="Search settings…" data-i18n-placeholder="portal.search.placeholder" autocomplete="off">
         <div id="setting_search_results" class="search-results hidden"></div>
     </div>
 
+    <details class="card" id="language-region-card">
+        <summary><span class="ico">Aa</span><span data-i18n="portal.language_region.title">Language and Region</span><span class="sum" data-i18n="portal.language_region.summary">language and date order</span><span class="chev">&#9656;</span></summary>
+        <div class="body">
+            <label for="display_language" data-i18n="portal.language_region.language">Display language</label>
+            <select id="display_language"></select>
+            <p class="hint" data-i18n="portal.language_region.language_hint">English is used when a translation is unavailable.</p>
+            <label for="date_order" data-i18n="portal.language_region.date_order">Date order</label>
+            <select id="date_order">
+                <option value="us" data-i18n="settings.date_order.us">Month-Day</option>
+                <option value="eu" data-i18n="settings.date_order.eu">Day-Month</option>
+            </select>
+            <p class="hint"><span data-i18n="portal.language_region.preview">Preview</span>: <code id="date_order_preview"></code></p>
+            <button class="btn btn-primary" id="btn-language-region" type="button" data-i18n="portal.language_region.save">Save language and region</button>
+            <div id="language-region-status" class="status"></div>
+        </div>
+    </details>
+
     <details class="card">
-        <summary><span class="ico">&#9678;</span>Radar<span class="sum">center, range, units</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9678;</span><span data-i18n="portal.section.radar.title">Radar</span><span class="sum" data-i18n="portal.section.radar.summary">center, range, units</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <label for="radar_center">Radar center (lat, lon)</label>
             <input id="radar_center" type="text" autocomplete="off" placeholder="37.620000, -122.370000">
@@ -358,14 +375,14 @@
             </select>
             <p class="hint">OurAirports tags most dirt strips and private fields as small airports. "Paved only" keeps small fields with at least one paved runway.</p>
             <p class="hint">Airport pin icons (airport.png) for large, medium, and small airports in range. Heliports and closed fields are skipped.</p>
-            <p class="hint">Split-flap arrivals and departures for each airport in radar range, by tail number, flight number, or callsign. Movements are worked out on the device from the aircraft the radar already tracks, so no flight-schedule subscription is needed. Swipe left from the radar to reach it; tap the board to flip between arrivals and departures, or tap a row for an aircraft tile. The ID button next to Next picks which identity the flaps show.</p>
-            <label for="flip_board_id">Board identity</label>
+            <p class="hint" data-i18n="portal.radar.flip_board.hint">Split-flap arrivals and departures for each airport in radar range, by tail number, flight number, or callsign. Movements are worked out on the device from the aircraft the radar already tracks, so no flight-schedule subscription is needed. Swipe left from the radar to reach it; tap the board to flip between arrivals and departures, or tap a row for an aircraft tile. The ID button next to Next picks which identity the flaps show.</p>
+            <label for="flip_board_id" data-i18n="portal.radar.flip_board_id.label">Board identity</label>
             <select id="flip_board_id">
-                <option value="tail">Tail number</option>
-                <option value="flight_number">Flight number</option>
-                <option value="callsign">Callsign</option>
+                <option value="tail" data-i18n="portal.radar.flip_board_id.tail">Tail number</option>
+                <option value="flight_number" data-i18n="portal.radar.flip_board_id.flight_number">Flight number</option>
+                <option value="callsign" data-i18n="portal.radar.flip_board_id.callsign">Callsign</option>
             </select>
-            <p class="hint">What each split-flap row shows. Missing values fall back (a GA tail with no flight number still shows the N-number).</p>
+            <p class="hint" data-i18n="portal.radar.flip_board_id.hint">What each split-flap row shows. Missing values fall back (a GA tail with no flight number still shows the N-number).</p>
             <div class="chk">
                 <label for="show_ground_vehicles">Show ground vehicles</label>
                 <span class="switch"><input id="show_ground_vehicles" type="checkbox"><span class="track"></span></span>
@@ -408,10 +425,10 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#9873;</span>Favorite Locations<span class="sum">saved centers, up to 10</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9873;</span><span data-i18n="portal.section.favorites.title">Favorite Locations</span><span class="sum" data-i18n="portal.section.favorites.summary">saved centers, up to 10</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <details class="card" style="margin:0 0 .75rem;border-color:var(--fline)">
-                <summary><span class="ico">&#43;</span>Add New Location<span class="sum">Location Details</span><span class="chev">&#9656;</span></summary>
+                <summary><span class="ico">&#43;</span><span data-i18n="portal.section.favorite_add.title">Add New Location</span><span class="sum" data-i18n="portal.section.favorite_add.summary">Location Details</span><span class="chev">&#9656;</span></summary>
                 <div class="body">
                     <label for="fav_icao">ICAO Code (optional)</label>
                     <input id="fav_icao" type="text" autocomplete="off" placeholder="e.g. EGLL" maxlength="4">
@@ -420,13 +437,13 @@
                     <input id="fav_name" type="text" autocomplete="off" placeholder="e.g. Heathrow" maxlength="40">
                     <label for="fav_position">Location Position (lat, lon)</label>
                     <input id="fav_position" type="text" autocomplete="off" placeholder="e.g. 51.470748, -0.459909">
-                    <p class="hint">Radar center above is Home. After Set Radar Center on the Pi you can Update the active favorite, Save as Home, or keep as Custom. The last center is what reboot restores. Pick a saved center under Settings → Options → Favorite Locations. Max 10 favorites.</p>
+                    <p class="hint" data-i18n="portal.favorites.add.hint">Radar center above is Home. After Set Radar Center on the Pi you can Update the active favorite, Save as Home, or keep as Custom. The last center is what reboot restores. Pick a saved center under Settings → Options → Favorite Locations. Max 10 favorites.</p>
                     <button class="btn btn-primary" id="btn-fav-add" style="margin-top:.5rem" type="button">Add location</button>
                     <div id="fav-add-status" class="status"></div>
                 </div>
             </details>
             <details class="card" style="margin:0;border-color:var(--fline)">
-                <summary><span class="ico">&#9733;</span>Saved Locations<span class="sum">up to 10</span><span class="chev">&#9656;</span></summary>
+                <summary><span class="ico">&#9733;</span><span data-i18n="portal.section.favorite_saved.title">Saved Locations</span><span class="sum" data-i18n="portal.section.favorite_saved.summary">up to 10</span><span class="chev">&#9656;</span></summary>
                 <div class="body">
                     <div id="fav-list" class="fav-list"><p class="fav-empty">No locations saved yet.</p></div>
                     <div id="fav-list-status" class="status"></div>
@@ -436,7 +453,7 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#128225;</span>Local ADS-B<span class="sum">dump1090 / readsb</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#128225;</span><span data-i18n="portal.section.local_adsb.title">Local ADS-B</span><span class="sum" data-i18n="portal.section.local_adsb.summary">dump1090 / readsb</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <div class="chk">
                 <label for="dump1090_enabled">Use local dump1090 / readsb</label>
@@ -452,7 +469,7 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#128225;</span>Route Sources<span class="sum">order &amp; fallback</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#128225;</span><span data-i18n="portal.section.route_sources.title">Route Sources</span><span class="sum" data-i18n="portal.section.route_sources.summary">order &amp; fallback</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <label for="route_source_order">Route lookup order</label>
             <input id="route_source_order" type="text" autocomplete="off" placeholder="airlabs,flightaware,opensky">
@@ -463,9 +480,9 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#128506;</span>Position Sources<span class="sum">extended tracking map</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#128506;</span><span data-i18n="portal.section.position_sources.title">Position Sources</span><span class="sum" data-i18n="portal.section.position_sources.summary">extended tracking map</span><span class="chev">&#9656;</span></summary>
         <div class="body">
-            <p class="hint">Fallback order for the live-centered map (Radar &gt; Track &gt; Live). First source that has a fresh position for the tracked aircraft wins. Drag to reorder; a source with no key/URL configured is skipped automatically even if left in the list.</p>
+            <p class="hint"><span data-i18n="portal.position_sources.hint_before_path">Fallback order for the live-centered map (</span><span data-i18n="common.radar">Radar</span> &gt; <span data-i18n="portal.tracking.track">Track</span> &gt; <span data-i18n="portal.position_sources.path_live">Live</span><span data-i18n="portal.position_sources.hint_after_path">). First source that has a fresh position for the tracked aircraft wins. Drag to reorder; a source with no key/URL configured is skipped automatically even if left in the list.</span></p>
             <ul id="position-source-list" class="drag-list">
                 <!-- populated by loadPositionSourceOrder() -->
             </ul>
@@ -489,7 +506,7 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#9888;</span>Alerts<span class="sum">flight #, type, registration</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9888;</span><span data-i18n="portal.section.alerts.title">Alerts</span><span class="sum" data-i18n="portal.section.alerts.summary">flight #, type, registration</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <div class="chk"><label for="alert-mil">Alert on military aircraft</label><span class="switch"><input id="alert-mil" type="checkbox"><span class="track"></span></span></div>
             <div class="chk"><label for="alert-emrg">Alert on emergency squawk (7700/7600/7500)</label><span class="switch"><input id="alert-emrg" type="checkbox"><span class="track"></span></span></div>
@@ -506,7 +523,7 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#9992;</span>Tracking<span class="sum">one flight # or tail worldwide</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9992;</span><span data-i18n="portal.section.tracking.title">Tracking</span><span class="sum" data-i18n="portal.section.tracking.summary">one flight # or tail worldwide</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <label for="callsign-input">Track flight number or registration</label>
             <div class="track-row">
@@ -532,7 +549,7 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#9788;</span>Display, screens &amp; volume<span class="sum">brightness, rotation, timeouts, volume</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9788;</span><span data-i18n="portal.section.display.title">Display, screens &amp; volume</span><span class="sum" data-i18n="portal.section.display.summary">brightness, rotation, timeouts, volume</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <label for="bright_pct">Screen brightness <span id="bright_pct_label">100%</span></label>
             <input id="bright_pct" type="range" min="3" max="100" step="1" value="100">
@@ -580,11 +597,6 @@
                 <span class="switch"><input id="clock_12hr" type="checkbox" checked><span class="track"></span></span>
             </div>
             <p class="hint">Applies everywhere: radar HUD, clock screen, and settings. Off = 24-hour.</p>
-            <div class="chk">
-                <label for="date_format_eu">European date format</label>
-                <span class="switch"><input id="date_format_eu" type="checkbox"><span class="track"></span></span>
-            </div>
-            <p class="hint">Digital clock: <code>Wed, 26 Aug</code>. Altimeter drums: <code>DD MM</code>. Flieger is unchanged (day + date only).</p>
             <label for="default_clock">Daytime clock face</label>
             <select id="default_clock">
                 <option value="digital">Digital</option>
@@ -663,17 +675,17 @@
             <input id="earthquake_voice_volume" type="range" min="0" max="100" step="1" value="80">
             <p class="hint">Off by default. Plays a voice clip once per new USGS event M3.0+ in radar range. Not earthquake early warning — catalog events can be minutes old. Silent during quiet hours and display off-hours. Needs the earthquake layer on, plus a USB or Bluetooth speaker.</p>
             <div class="chk">
-                <label for="flip_board_sound">Board flip sound</label>
+                <label for="flip_board_sound" data-i18n="portal.radar.flip_board_sound.label">Board flip sound</label>
                 <span class="switch"><input id="flip_board_sound" type="checkbox"><span class="track"></span></span>
             </div>
-            <p class="hint">Split-flap clatter while the arrivals board turns. Density follows how many tiles are moving. Needs a speaker, and follows the master sound switch and the off-hours schedule.</p>
+            <p class="hint" data-i18n="portal.radar.flip_board_sound.hint">Split-flap clatter while the arrivals board turns. Density follows how many tiles are moving. Needs a speaker, and follows the master sound switch and the off-hours schedule.</p>
             <button class="btn btn-primary" id="btn-save-reload" style="margin-top:.7rem" type="button">Save &amp; reload on display</button>
             <div id="display-status" class="status"></div>
         </div>
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#9835;</span>LoFi Beats<span class="sum">background music, playlist, uploads</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9835;</span><span data-i18n="portal.section.lofi.title">LoFi Beats</span><span class="sum" data-i18n="portal.section.lofi.summary">background music, playlist, uploads</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <div class="chk">
                 <label for="lofi_enabled">Background lofi beats</label>
@@ -731,7 +743,7 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#9790;</span>Off-Hours<span class="sum">night mode schedule</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9790;</span><span data-i18n="portal.section.off_hours.title">Off-Hours</span><span class="sum" data-i18n="portal.section.off_hours.summary">night mode schedule</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <div class="chk">
                 <label for="night_en">Enable off-hours (night mode)</label>
@@ -761,7 +773,7 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#9678;</span>Targets<span class="sum">colors, sizes, symbols</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9678;</span><span data-i18n="portal.section.targets.title">Targets</span><span class="sum" data-i18n="portal.section.targets.summary">colors, sizes, symbols</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <p class="hint">Per-category visibility for the radar: accent color, size, and symbol for planes, helicopters, drones, and vessels, plus compass rose and blip styling. Same as Settings &rarr; Targets on the device. Auto keeps today's default look.</p>
             <div id="targets_body"></div>
@@ -771,7 +783,7 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#9729;</span>Weather<span class="sum">units</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9729;</span><span data-i18n="portal.section.weather.title">Weather</span><span class="sum" data-i18n="portal.section.weather.summary">units</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <label for="weather_units">Units</label>
             <select id="weather_units">
@@ -786,7 +798,7 @@
     </details>
 
     <details class="card atc-card">
-        <summary><span class="ico">&#9835;</span>ATC Audio<span class="sum">LiveATC</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9835;</span><span data-i18n="portal.section.atc.title">ATC Audio</span><span class="sum" data-i18n="portal.section.atc.summary">LiveATC</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <p class="hint">Manual LiveATC stream to the Pi’s USB or Bluetooth speaker via <code>mpv</code> (<code>sudo apt install mpv</code>). Pair a Bluetooth speaker in the card below. Airport lists every large/medium field in radar range. Channel loads local seed/index immediately, then auto-fetches the full LiveATC feed list in the background (Cloudflare-bypass search). Enable ATC audio to start playback; disable to stop. Changing airport or moving the map while ATC is enabled selects that area’s Tower and keeps playing. Playback resumes after reboot/app restart when it was left enabled. Quiet hours block auto-resume after reboot; turning ATC on again overrides quiet hours until you disable it.</p>
             <div class="chk">
@@ -831,7 +843,7 @@
     </details>
 
     <details class="card bluetooth-card">
-        <summary><span class="ico">&#9834;</span>Bluetooth Speaker<span class="sum" id="bt-sum">ATC &amp; chime</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9834;</span><span data-i18n="portal.section.bluetooth.title">Bluetooth Speaker</span><span class="sum" id="bt-sum" data-i18n="portal.section.bluetooth.summary">ATC &amp; chime</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <p class="hint">Scan, pair, and select a Bluetooth speaker for ATC audio and the hourly chime. On the round display, Settings → ATC shows status and a quick Use Bluetooth reconnect for the speaker paired here. Put the speaker in pairing mode before Scan / Pair &amp; Connect. Requires <code>bluez</code> on the Pi.</p>
             <p class="hint" id="bt_status_line">Status: —</p>
@@ -849,7 +861,7 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#128273;</span>API Keys<span class="sum">FR24, Tomorrow.io, AirLabs, AIS, FlightAware, FIRMS, Stadia</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#128273;</span><span data-i18n="portal.section.api_keys.title">API Keys</span><span class="sum" data-i18n="portal.section.api_keys.summary">FR24, Tomorrow.io, AirLabs, AIS, FlightAware, FIRMS, Stadia</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <div class="chk">
                 <label for="use-fr24-api">Use FR24 API</label>
@@ -937,7 +949,7 @@
     </details>
 
     <details class="card update-card">
-        <summary><span class="ico">&#8635;</span>Updates<span class="sum">version, install</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#8635;</span><span data-i18n="portal.section.updates.title">Updates</span><span class="sum" data-i18n="portal.section.updates.summary">version, install</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <div class="update-row">
                 <span id="update-badge" class="update-badge ok hidden">Up to date</span>
@@ -954,14 +966,14 @@
                 <span class="switch"><input id="auto_off_hours" type="checkbox"><span class="track"></span></span>
             </div>
             <div class="chk" id="auto-update-time-row">
-                <label for="auto_update_time">Auto-update time (optional)</label>
+                <label for="auto_update_time" data-i18n="portal.updates.auto_time.label">Auto-update time (optional)</label>
                 <input id="auto_update_time" type="time" step="60">
             </div>
             <div class="chk">
-                <label for="hide_update_banner">Hide update banner on device</label>
+                <label for="hide_update_banner" data-i18n="portal.updates.hide_banner.label">Hide update banner on device</label>
                 <span class="switch"><input id="hide_update_banner" type="checkbox"><span class="track"></span></span>
             </div>
-            <p class="hint">When Auto-install is on, the update banner stays hidden on the radar/clock screen entirely; it installs silently. By default it installs in the Off Hours window (start/end above, or 22:00–06:00) once the panel has been idle for 5 minutes. Set a specific Auto-update time instead if you want updates to run at a fixed time independent of your Off Hours schedule (a window of about an hour after that time). Dismissing the radar bubble skips that version. ATC playing also delays the install. Hide update banner works on its own too: turn it on to stop the on-screen banner without enabling auto-install, so updates only happen when you tap Update Now here in the portal.</p>
+            <p class="hint" data-i18n="portal.updates.auto.behavior_hint">When Auto-install is on, the update banner stays hidden on the radar/clock screen entirely; it installs silently. By default it installs in the Off Hours window (start/end above, or 22:00–06:00) once the panel has been idle for 5 minutes. Set a specific Auto-update time instead if you want updates to run at a fixed time independent of your Off Hours schedule (a window of about an hour after that time). Dismissing the radar bubble skips that version. ATC playing also delays the install. Hide update banner works on its own too: turn it on to stop the on-screen banner without enabling auto-install, so updates only happen when you tap Update Now here in the portal.</p>
             <p class="hint" id="update-repair-hint">If you are stuck on an old version and <strong>Repair &amp; Update</strong> is missing, on the Pi open <strong>Menu → Accessories → Terminal</strong> and paste:<br><code>curl -fsSL https://raw.githubusercontent.com/yashmulgaonkar/FlightScnr_Pi/main/scripts/repair-ota.sh | bash</code></p>
             <div class="track-row" style="margin-top:.55rem">
                 <button class="btn" id="btn-check-updates" type="button">Check Updates</button>
@@ -979,15 +991,15 @@
     </details>
 
     <details class="card system-card">
-        <summary><span class="ico">&#9881;</span>System<span class="sum">power, Wi-Fi</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9881;</span><span data-i18n="portal.section.system.title">System</span><span class="sum" data-i18n="portal.section.system.summary">power, Wi-Fi</span><span class="chev">&#9656;</span></summary>
         <div class="body">
-            <p class="hint">When enabled (default), FlightScnr opens the setup hotspot if the network stays down past a short grace period. Turn this off on mesh or always-on Wi-Fi so NetworkManager can keep reconnecting. First-time setup with no saved Wi-Fi still uses the QR hotspot. Use <strong>Start Wi-Fi setup</strong> for recovery.</p>
+            <p class="hint" data-i18n="portal.system.wifi_setup.hint">When enabled (default), FlightScnr opens the setup hotspot if the network stays down past a short grace period. Turn this off on mesh or always-on Wi-Fi so NetworkManager can keep reconnecting. First-time setup with no saved Wi-Fi still uses the QR hotspot. Use Start Wi-Fi setup for recovery.</p>
             <div class="chk">
-                <label for="auto_wifi_setup_hotspot">Automatic Wi-Fi setup hotspot</label>
+                <label for="auto_wifi_setup_hotspot" data-i18n="portal.system.wifi_setup.automatic.label">Automatic Wi-Fi setup hotspot</label>
                 <span class="switch"><input id="auto_wifi_setup_hotspot" type="checkbox" checked><span class="track"></span></span>
             </div>
             <div class="track-row" style="margin-top:.55rem">
-                <button class="btn btn-primary" id="btn-wifi-start-setup" type="button">Start Wi-Fi setup</button>
+                <button class="btn btn-primary" id="btn-wifi-start-setup" type="button" data-i18n="portal.system.wifi_setup.start">Start Wi-Fi setup</button>
             </div>
             <div id="wifi-setup-pref-status" class="status"></div>
             <hr style="border:none;border-top:1px solid var(--line, #333);margin:1rem 0">
@@ -1028,9 +1040,9 @@
     </details>
 
     <details class="card irreversible-card">
-        <summary><span class="ico">&#9888;</span>Master Caution<span class="sum">wipe, reinstall</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9888;</span><span data-i18n="portal.section.master_caution.title">Master Caution</span><span class="sum" data-i18n="portal.section.master_caution.summary">wipe, reinstall</span><span class="chev">&#9656;</span></summary>
         <div class="body">
-            <p class="hint">Download settings from <strong>System</strong> first if you want to keep radar prefs and API keys. Wi-Fi and dump1090 are not touched. If this button fails with a sudo error, tap <strong>Update Now</strong> or <strong>Finish install</strong> once so sudoers is updated.</p>
+            <p class="hint">Download settings from <strong data-i18n="portal.master_caution.system">System</strong> first if you want to keep radar prefs and API keys. Wi-Fi and dump1090 are not touched. If this button fails with a sudo error, tap <strong>Update Now</strong> or <strong>Finish install</strong> once so sudoers is updated.</p>
             <div class="irreversible-row" id="irreversible-actions-row">
                 <div class="irreversible-copy">
                     <h3>Clean install</h3>
@@ -1048,7 +1060,7 @@
     </details>
 
 
-    <p class="wifi-note">First-time Wi-Fi uses the on-device QR setup hotspot when no network is configured. Automatic hotspot after a lost link can be changed under System.</p>
+    <p class="wifi-note" data-i18n="portal.footer.wifi">First-time Wi-Fi uses the on-device QR setup hotspot when no network is configured. Automatic hotspot after a lost link can be changed under System.</p>
     <p class="foot">
         <a href="/stats">Statistics</a> ·
         <a href="/closest">Closest map</a> ·
@@ -1064,6 +1076,169 @@ let rangePresetsMi = [2, 3, 5, 8, 10, 20, 30, 50];
 const STATUTE_MILE_KM = 1.609344;
 const NM_PER_KM = 1 / 1.852;
 const $ = (id) => document.getElementById(id);
+let i18nState = { messages: {}, source_keys: {}, date_previews: {} };
+let i18nStaticBindingsPrepared = false;
+
+function i18nText(key, fallback = "") {
+    const value = i18nState.messages && i18nState.messages[key];
+    return typeof value === "string" ? value : fallback;
+}
+
+function i18nFromSource(value) {
+    const text = String(value || "");
+    const source = normalizedI18nSource(text);
+    const key = (i18nState.source_keys || {})[source];
+    return key ? i18nText(key, text) : text;
+}
+
+function i18nFormat(key, fallback, values = {}) {
+    let text = i18nText(key, fallback);
+    Object.entries(values).forEach(([name, value]) => {
+        text = text.split(`{${name}}`).join(String(value));
+    });
+    return text;
+}
+
+function normalizedI18nSource(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function applyI18nTextBindings(root = document.querySelector(".wrap")) {
+    if (!root || !document.createTreeWalker) return;
+    const sourceKeys = i18nState.source_keys || {};
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach((node) => {
+        const parent = node.parentElement;
+        if (!parent || parent.closest("script, style, code, [data-i18n]")) return;
+        const current = String(node.nodeValue || "");
+        if (!i18nStaticBindingsPrepared) {
+            const source = normalizedI18nSource(current);
+            if (typeof sourceKeys[source] === "string") {
+                node._flightscnrI18nKey = sourceKeys[source];
+            }
+        }
+        const key = node._flightscnrI18nKey;
+        if (!key) return;
+        const leading = (current.match(/^\s*/) || [""])[0];
+        const trailing = (current.match(/\s*$/) || [""])[0];
+        const translated = leading + i18nText(key, current.trim()) + trailing;
+        if (node.nodeValue !== translated) node.nodeValue = translated;
+    });
+    root.querySelectorAll("[placeholder], [title], [aria-label]").forEach((el) => {
+        if (!el._flightscnrI18nAttributeKeys) {
+            el._flightscnrI18nAttributeKeys = {};
+        }
+        ["placeholder", "title", "aria-label"].forEach((name) => {
+            if (!el.hasAttribute(name)) return;
+            if (!i18nStaticBindingsPrepared) {
+                const source = normalizedI18nSource(el.getAttribute(name));
+                if (typeof sourceKeys[source] === "string") {
+                    el._flightscnrI18nAttributeKeys[name] = sourceKeys[source];
+                }
+            }
+            const key = el._flightscnrI18nAttributeKeys[name];
+            if (key) {
+                const translated = i18nText(key, el.getAttribute(name));
+                if (el.getAttribute(name) !== translated) {
+                    el.setAttribute(name, translated);
+                }
+            }
+        });
+    });
+    i18nStaticBindingsPrepared = true;
+}
+
+function applyI18nCatalog(data) {
+    i18nState = data || { messages: {}, date_previews: {} };
+    document.documentElement.lang = i18nState.effective_language || "en";
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+        const key = el.dataset.i18n;
+        const translated = i18nText(key, el.textContent || "");
+        el.textContent = translated;
+    });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+        const key = el.dataset.i18nPlaceholder;
+        el.placeholder = i18nText(key, el.placeholder || "");
+    });
+    applyI18nTextBindings();
+
+    const languageSelect = $("display_language");
+    if (languageSelect) {
+        const requested = i18nState.requested_language || "en";
+        const effective = i18nState.effective_language || "en";
+        languageSelect.textContent = "";
+        const systemOption = document.createElement("option");
+        systemOption.value = "system";
+        systemOption.textContent = i18nText("settings.language.system", "System");
+        languageSelect.appendChild(systemOption);
+        (i18nState.languages || []).forEach((language) => {
+            const option = document.createElement("option");
+            option.value = String(language.locale || "");
+            option.textContent = String(language.native_name || language.locale || "");
+            languageSelect.appendChild(option);
+        });
+        if (requested !== "system" && !Array.from(languageSelect.options).some(
+            (option) => option.value === requested
+        )) {
+            const effectiveOption = Array.from(languageSelect.options).find(
+                (option) => option.value === effective
+            );
+            if (effectiveOption && requested.split("-")[0] === effective) {
+                const regionalOption = effectiveOption.cloneNode(true);
+                regionalOption.value = requested;
+                languageSelect.appendChild(regionalOption);
+            }
+        }
+        languageSelect.value = requested;
+        if (languageSelect.value !== requested) languageSelect.value = effective;
+    }
+    const dateSelect = $("date_order");
+    if (dateSelect && ["us", "eu"].includes(i18nState.date_order)) {
+        dateSelect.value = i18nState.date_order;
+    }
+    updateDateOrderPreview();
+}
+
+function updateDateOrderPreview() {
+    const order = $("date_order") ? $("date_order").value : "us";
+    const preview = $("date_order_preview");
+    if (preview) preview.textContent = (i18nState.date_previews || {})[order] || "";
+}
+
+async function loadLanguageRegion(language = "") {
+    const params = new URLSearchParams();
+    if (language) {
+        params.set("language", language);
+        if ($("date_order")) params.set("date_order", $("date_order").value || "us");
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    const data = await jsonFetch(`/i18n/catalog.json${suffix}`);
+    applyI18nCatalog(data);
+}
+
+async function saveLanguageRegion() {
+    clearStatus("language-region-status");
+    try {
+        await jsonFetch("/display", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                display_language: $("display_language").value || "en",
+                date_format: $("date_order").value || "us",
+            }),
+        });
+        await jsonFetch("/settings/reload", { method: "POST" });
+        await loadLanguageRegion();
+        showStatus(
+            "language-region-status",
+            i18nText("portal.language_region.saved", "Language and region saved.")
+        );
+    } catch (e) {
+        showStatus("language-region-status", e.message, true);
+    }
+}
 
 function clampByte(n) {
     const v = Number(n);
@@ -1117,7 +1292,7 @@ function wireRgbGroup(prefix) {
 
 function showStatus(id, msg, error = false) {
     const el = $(id);
-    el.textContent = msg || "";
+    el.textContent = i18nFromSource(msg || "");
     el.className = "status show" + (error ? " error" : "");
 }
 
@@ -1132,7 +1307,7 @@ async function jsonFetch(url, opts = {}) {
     // Prefer fresh prefs from the Pi — portal + display are separate processes.
     const res = await fetch(url, { cache: "no-store", ...opts, headers });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.message || "Request failed");
+    if (!res.ok) throw new Error(i18nFromSource(data.message || "Request failed"));
     return data;
 }
 
@@ -1154,7 +1329,12 @@ function applyKeyHints(keys) {
         const el = $(id);
         if (!el) return;
         const info = keys[key] || {};
-        el.textContent = info.configured ? `Current: ${info.masked} (${info.source})` : "Not set";
+        el.textContent = info.configured
+            ? i18nFormat("portal.api_keys.current", "Current: {masked} ({source})", {
+                masked: info.masked,
+                source: info.source,
+            })
+            : i18nText("portal.api_keys.not_set", "Not set");
     });
 }
 
@@ -1213,13 +1393,21 @@ function syncRangeSelect() {
 let updatePollTimer = null;
 
 function formatVersionLine(prefix, info) {
-    if (!info) return `${prefix}: unavailable`;
+    if (!info) {
+        return i18nFormat("portal.updates.version_unavailable", "{label}: unavailable", {
+            label: prefix,
+        });
+    }
     if (info.release) {
         const bits = [`${prefix}: ${info.release}`];
         if (info.commit_short) bits.push(`(${info.commit_short})`);
         return bits.join(" ");
     }
-    if (!info.commit_short) return `${prefix}: unavailable`;
+    if (!info.commit_short) {
+        return i18nFormat("portal.updates.version_unavailable", "{label}: unavailable", {
+            label: prefix,
+        });
+    }
     const bits = [`${prefix}: ${info.describe || info.commit_short}`];
     if (info.branch) bits.push(`(${info.branch})`);
     return bits.join(" ");
@@ -1233,15 +1421,29 @@ function applyUpdateInfo(data) {
     const resync = !!data.install_resync_needed && !running && !available;
     const repair = !!data.ota_repair_needed && !running;
 
-    $("update-local").textContent = formatVersionLine("Installed", local);
+    $("update-local").textContent = formatVersionLine(
+        i18nText("portal.updates.installed", "Installed"),
+        local
+    );
     if (remote.release_tag) {
-        $("update-remote").textContent =
-            `Latest release: ${remote.release_tag}${remote.commit_short ? ` (${remote.commit_short})` : ""}`;
+        $("update-remote").textContent = i18nFormat(
+            "portal.updates.latest_release_value",
+            "Latest release: {version}{commit}",
+            {
+                version: remote.release_tag,
+                commit: remote.commit_short ? ` (${remote.commit_short})` : "",
+            }
+        );
     } else if (remote.commit_short) {
-        $("update-remote").textContent =
-            `${formatVersionLine("Latest on GitHub", remote)}`;
+        $("update-remote").textContent = formatVersionLine(
+            i18nText("portal.updates.latest_github", "Latest on GitHub"),
+            remote
+        );
     } else {
-        $("update-remote").textContent = "Latest on GitHub: unavailable";
+        $("update-remote").textContent = formatVersionLine(
+            i18nText("portal.updates.latest_github", "Latest on GitHub"),
+            null
+        );
     }
 
     $("update-message").textContent = data.message || "";
@@ -1260,7 +1462,7 @@ function applyUpdateInfo(data) {
             a.href = href;
             a.target = "_blank";
             a.rel = "noopener";
-            a.textContent = "View on GitHub";
+            a.textContent = i18nText("portal.updates.view_github", "View on GitHub");
             notesLink.appendChild(a);
             notesLink.classList.add("show");
         } else {
@@ -1271,9 +1473,15 @@ function applyUpdateInfo(data) {
     $("update-badge").classList.toggle("hidden", available || running || resync || repair);
     $("update-available-badge").classList.toggle("hidden", !available && !repair);
     if (repair && !available) {
-        $("update-available-badge").textContent = "Update blocked";
+        $("update-available-badge").textContent = i18nText(
+            "portal.updates.blocked",
+            "Update blocked"
+        );
     } else {
-        $("update-available-badge").textContent = "Update available";
+        $("update-available-badge").textContent = i18nText(
+            "portal.updates.available",
+            "Update available"
+        );
     }
     $("btn-update-now").classList.toggle("hidden", !available);
     const tonightBtn = $("btn-update-tonight");
@@ -1281,8 +1489,8 @@ function applyUpdateInfo(data) {
         tonightBtn.classList.toggle("hidden", !available);
         tonightBtn.disabled = running || !!data.scheduled_tonight;
         tonightBtn.textContent = data.scheduled_tonight
-            ? "Tonight (armed)"
-            : "Later tonight";
+            ? i18nText("portal.updates.tonight_armed", "Tonight (armed)")
+            : i18nText("portal.updates.tonight", "Later tonight");
     }
     if ($("auto_off_hours")) $("auto_off_hours").checked = !!data.auto_off_hours;
     if ($("auto_update_time")) $("auto_update_time").value = data.auto_update_time || "";
@@ -1319,7 +1527,13 @@ async function checkUpdates() {
 
 function startUpdatePoll() {
     if (updatePollTimer) return;
-    showStatus("updates-status", "Update in progress. The page will reconnect when the service restarts…");
+    showStatus(
+        "updates-status",
+        i18nText(
+            "portal.updates.in_progress",
+            "Update in progress. The page will reconnect when the service restarts…"
+        )
+    );
     updatePollTimer = setInterval(async () => {
         try {
             const data = await jsonFetch("/updates/status");
@@ -1331,13 +1545,28 @@ function startUpdatePoll() {
                 if (st === "failed") {
                     showStatus(
                         "updates-status",
-                        (data.status && data.status.message) || "Update failed. Try Repair & Update.",
+                        (data.status && data.status.message) || i18nText(
+                            "portal.updates.failed_repair",
+                            "Update failed. Try Repair & Update."
+                        ),
                         true
                     );
                 } else if (st === "success") {
-                    showStatus("updates-status", "Update finished. Refresh if the display did not restart.");
+                    showStatus(
+                        "updates-status",
+                        i18nText(
+                            "portal.updates.finished",
+                            "Update finished. Refresh if the display did not restart."
+                        )
+                    );
                 } else {
-                    showStatus("updates-status", "Update ended. Refresh and check the version above.");
+                    showStatus(
+                        "updates-status",
+                        i18nText(
+                            "portal.updates.ended",
+                            "Update ended. Refresh and check the version above."
+                        )
+                    );
                 }
             }
         } catch (_) {
@@ -1365,7 +1594,10 @@ async function applyUpdateTonight() {
         applyUpdateInfo(data);
         showStatus(
             "updates-status",
-            "Armed for tonight. Installs during off-hours after 5 minutes idle."
+            i18nText(
+                "portal.updates.armed",
+                "Armed for tonight. Installs during off-hours after 5 minutes idle."
+            )
         );
     } catch (e) {
         showStatus("updates-status", e.message, true);
@@ -1378,7 +1610,10 @@ async function applyUpdateConfirmed() {
     $("btn-update-now").disabled = true;
     try {
         const data = await jsonFetch("/updates/apply", { method: "POST" });
-        showStatus("updates-status", data.message || "Update started.");
+        showStatus(
+            "updates-status",
+            data.message || i18nText("portal.updates.started", "Update started.")
+        );
         startUpdatePoll();
         await checkUpdates();
     } catch (e) {
@@ -1392,7 +1627,13 @@ async function applyResyncConfirmed() {
     $("btn-resync-install").disabled = true;
     try {
         const data = await jsonFetch("/updates/resync", { method: "POST" });
-        showStatus("updates-status", data.message || "Install re-sync started.");
+        showStatus(
+            "updates-status",
+            data.message || i18nText(
+                "portal.updates.resync_started",
+                "Install re-sync started."
+            )
+        );
         startUpdatePoll();
         await checkUpdates();
     } catch (e) {
@@ -1406,7 +1647,10 @@ async function applyRepairConfirmed() {
     $("btn-repair-update").disabled = true;
     try {
         const data = await jsonFetch("/updates/repair", { method: "POST" });
-        showStatus("updates-status", data.message || "Repair started.");
+        showStatus(
+            "updates-status",
+            data.message || i18nText("portal.updates.repair_started", "Repair started.")
+        );
         startUpdatePoll();
         await checkUpdates();
     } catch (e) {
@@ -1416,6 +1660,9 @@ async function applyRepairConfirmed() {
 }
 
 async function loadAll() {
+    try {
+        await loadLanguageRegion();
+    } catch (_) {}
     try {
         const loc = await jsonFetch("/location/json");
         if (loc.location) $("radar_center").value = loc.location;
@@ -1493,7 +1740,6 @@ async function loadAll() {
         $("clock_timeout").value = String(d.clock_timeout_s ?? 10);
         $("idle_clock").checked = !!d.auto_idle_clock;
         if ($("clock_12hr")) $("clock_12hr").checked = d.clock_12hr !== false;
-        if ($("date_format_eu")) $("date_format_eu").checked = d.date_format === "eu";
         if ($("default_clock")) {
             const face = d.default_clock;
             $("default_clock").value = (face === "analog" || face === "night" || face === "flieger") ? face : "digital";
@@ -1594,7 +1840,9 @@ async function loadAll() {
 
     try {
         const t = await jsonFetch("/tracked/json");
-        $("current-tracked").textContent = t.callsign ? `Currently tracking: ${t.callsign}` : "Not currently tracking a flight.";
+        $("current-tracked").textContent = t.callsign
+            ? i18nFormat("portal.tracking.current", "Currently tracking: {callsign}", { callsign: t.callsign })
+            : i18nText("portal.tracking.none", "Not currently tracking a flight.");
     } catch (_) {}
 
     try {
@@ -1627,8 +1875,15 @@ async function loadAll() {
         renderPositionSourceList(keys.position_source_order || DEFAULT_POSITION_SOURCE_ORDER);
         const faUsage = keys.flightaware_usage;
         if ($("flightaware-usage") && faUsage) {
-            $("flightaware-usage").textContent =
-                `FlightAware this month: $${Number(faUsage.spend_usd || 0).toFixed(2)} / $${Number(faUsage.monthly_limit_usd || 4.5).toFixed(2)} (${faUsage.calls || 0} calls)`;
+            $("flightaware-usage").textContent = i18nFormat(
+                "portal.api_keys.flightaware_usage",
+                "FlightAware this month: ${spent} / ${limit} ({calls} calls)",
+                {
+                    spent: Number(faUsage.spend_usd || 0).toFixed(2),
+                    limit: Number(faUsage.monthly_limit_usd || 4.5).toFixed(2),
+                    calls: faUsage.calls || 0,
+                }
+            );
         }
         const d1090 = keys.dump1090 || {};
         if ($("dump1090_enabled")) $("dump1090_enabled").checked = !!d1090.DUMP1090_ENABLED;
@@ -1637,6 +1892,7 @@ async function loadAll() {
                 || "http://127.0.0.1:8080/data/aircraft.json";
         }
     } catch (_) {}
+    applyI18nTextBindings();
 }
 
 function toggleDimRow() {
@@ -1789,20 +2045,33 @@ function syncFollowRadiusUnitLabels() {
     const maxLabel = $("live_tracking_max_radius_label");
     const minHint = $("live_tracking_min_radius_hint");
     const maxHint = $("live_tracking_max_radius_hint");
-    if (minLabel) minLabel.textContent = `Follow min radius (${dist})`;
-    if (maxLabel) maxLabel.textContent = `Follow max radius (${dist})`;
+    if (minLabel) minLabel.textContent = i18nFormat(
+        "portal.position_sources.min_radius.with_unit",
+        "Follow min radius ({unit})",
+        { unit: dist }
+    );
+    if (maxLabel) maxLabel.textContent = i18nFormat(
+        "portal.position_sources.max_radius.with_unit",
+        "Follow max radius ({unit})",
+        { unit: dist }
+    );
     const taxiDist = formatDistanceAmount(FOLLOW_DEFAULT_MIN_KM, dist);
     const defMin = formatDistanceAmount(FOLLOW_DEFAULT_MIN_KM, dist);
     const defMax = formatDistanceAmount(FOLLOW_DEFAULT_MAX_KM, dist);
     const taxiSpeed = formatSpeedAmountFromKt(50);
     if (minHint) {
-        minHint.textContent =
-            `Floor for the speed-based zoom curve (not the taxi snap under ${taxiSpeed}, ` +
-            `which stays ~${taxiDist} ${dist}). Default ${defMin} ${dist}.`;
+        minHint.textContent = i18nFormat(
+            "portal.position_sources.min_radius.dynamic_hint",
+            "Floor for the speed-based zoom curve (not the taxi snap under {taxi_speed}, which stays ~{taxi_distance} {unit}). Default {default_min} {unit}.",
+            { taxi_speed: taxiSpeed, taxi_distance: taxiDist, default_min: defMin, unit: dist }
+        );
     }
     if (maxHint) {
-        maxHint.textContent =
-            `Ceiling for cruise / high-speed Follow zoom. Default ${defMax} ${dist}.`;
+        maxHint.textContent = i18nFormat(
+            "portal.position_sources.max_radius.dynamic_hint",
+            "Ceiling for cruise / high-speed Follow zoom. Default {default_max} {unit}.",
+            { default_max: defMax, unit: dist }
+        );
     }
 }
 
@@ -1819,7 +2088,7 @@ function onDistanceUnitsChanged() {
 
 function formatSpeedFloorFromKt(kt) {
     const n = Number(kt) || 0;
-    if (n <= 0) return "Any (no floor)";
+    if (n <= 0) return i18nText("portal.radar.speed.any", "Any (no floor)");
     const units = speedUnitFromSelect();
     if (units === "mph") return `> ${Math.trunc(n * 1.15078)} mph`;
     if (units === "kts") return `> ${Math.trunc(n)} kts`;
@@ -1834,8 +2103,16 @@ function syncMinSpeedUnitLabels() {
     const suffix = speedUnitSuffix();
     const vesselLabel = $("vessel_min_speed_label");
     const aircraftLabel = $("aircraft_min_speed_label");
-    if (vesselLabel) vesselLabel.textContent = `Marine min speed (${suffix})`;
-    if (aircraftLabel) aircraftLabel.textContent = `Aircraft min speed (${suffix})`;
+    if (vesselLabel) vesselLabel.textContent = i18nFormat(
+        "portal.radar.vessel_min_speed.with_unit",
+        "Marine min speed ({unit})",
+        { unit: suffix }
+    );
+    if (aircraftLabel) aircraftLabel.textContent = i18nFormat(
+        "portal.radar.aircraft_min_speed.with_unit",
+        "Aircraft min speed ({unit})",
+        { unit: suffix }
+    );
     for (const id of ["vessel_min_speed", "aircraft_min_speed"]) {
         const sel = $(id);
         if (!sel) continue;
@@ -1891,7 +2168,7 @@ async function saveRadar() {
                 aircraft_min_speed_kt: Number($("aircraft_min_speed") ? $("aircraft_min_speed").value : 0),
             }),
         });
-        showStatus("radar-status", "Radar settings saved.");
+        showStatus("radar-status", i18nText("portal.radar.saved", "Radar settings saved."));
         await loadAll();
         // ATC airports are recomputed for the new center; force a fresh load.
         try { await loadAtc(); } catch (_) {}
@@ -1916,8 +2193,8 @@ async function saveDump1090() {
         showStatus(
             "dump1090-status",
             enabled
-                ? "Local ADS-B saved — display picks it up on the next data cycle."
-                : "Local ADS-B disabled."
+                ? i18nText("portal.local_adsb.saved", "Local ADS-B saved — display picks it up on the next data cycle.")
+                : i18nText("portal.local_adsb.disabled", "Local ADS-B disabled.")
         );
         await loadAll();
         await refreshDump1090Live();
@@ -1928,29 +2205,37 @@ async function saveDump1090() {
 
 function formatDump1090Live(data) {
     if (!data || !data.enabled) {
-        return "Status: disabled";
+        return i18nText("portal.local_adsb.status.disabled", "Status: disabled");
     }
     if (data.reachable === false) {
         const err = data.error ? ` (${data.error})` : "";
-        return `Status: unreachable${err}`;
+        return i18nFormat("portal.local_adsb.status.unreachable", "Status: unreachable{error}", { error: err });
     }
     if (data.reachable !== true) {
-        return "Status: checking…";
+        return i18nText("portal.local_adsb.status.checking", "Status: checking…");
     }
     const fresh = Number(data.aircraft_fresh || 0);
     const total = Number(data.aircraft_total || 0);
-    let line = `Status: reachable — ${fresh} aircraft with fresh position`;
+    let line = i18nFormat(
+        "portal.local_adsb.status.reachable",
+        "Status: reachable — {fresh} aircraft with fresh position",
+        { fresh }
+    );
     if (total > fresh) {
-        line += ` (${total} in feed)`;
+        line += i18nFormat("portal.local_adsb.status.total", " ({total} in feed)", { total });
     }
     const radar = data.radar || {};
     const added = Number(radar.added || 0);
     const updated = Number(radar.updated || 0);
     const raw = Number(radar.raw || 0);
     if (radar.ts) {
-        line += `. Last radar cycle: ${raw} in range, ${added} new, ${updated} refreshed`;
+        line += i18nFormat(
+            "portal.local_adsb.status.radar_cycle",
+            ". Last radar cycle: {raw} in range, {added} new, {updated} refreshed",
+            { raw, added, updated }
+        );
         if (radar.ok === false) {
-            line += " (feed error — may be using cache)";
+            line += i18nText("portal.local_adsb.status.feed_error", " (feed error — may be using cache)");
         }
     }
     return line;
@@ -1965,7 +2250,11 @@ async function refreshDump1090Live() {
         const data = await jsonFetch("/dump1090/status.json");
         el.textContent = formatDump1090Live(data);
     } catch (e) {
-        el.textContent = `Status: ${e.message || "unavailable"}`;
+        el.textContent = i18nFormat(
+            "portal.common.status.value",
+            "Status: {status}",
+            { status: e.message || i18nText("portal.common.unavailable", "unavailable") }
+        );
     }
 }
 
@@ -1993,7 +2282,11 @@ async function saveRouteSourceOrder() {
             (resp.keys && resp.keys.route_source_order &&
                 resp.keys.route_source_order.ROUTE_SOURCE_ORDER_EFFECTIVE) ||
             "airlabs,flightaware,opensky";
-	showStatus("route-source-order-status", `Saved — effective order: ${effective}`);
+	showStatus("route-source-order-status", i18nFormat(
+            "portal.route_sources.saved",
+            "Saved — effective order: {order}",
+            { order: effective }
+        ));
         await loadAll();
     } catch (e) {
         showStatus("route-source-order-status", e.message, true);
@@ -2085,7 +2378,11 @@ async function savePositionSources() {
         // in case any dragged-in entry was somehow invalid).
         const keys = await jsonFetch("/api-keys/json");
         const effective = keys.position_source_order || order;
-        showStatus("position-sources-status", `Saved: ${effective.join(" \u2192 ")}`);
+        showStatus("position-sources-status", i18nFormat(
+            "portal.position_sources.saved",
+            "Saved: {order}",
+            { order: effective.join(" \u2192 ") }
+        ));
     } catch (e) {
         showStatus("position-sources-status", e.message, true);
     }
@@ -2149,7 +2446,7 @@ async function saveAndReloadSettings(statusId) {
                 clock_timeout_s: Number($("clock_timeout").value),
                 auto_idle_clock: $("idle_clock").checked,
                 clock_12hr: $("clock_12hr") ? $("clock_12hr").checked : true,
-                date_format: $("date_format_eu") && $("date_format_eu").checked ? "eu" : "us",
+                date_format: $("date_order") ? $("date_order").value : "us",
                 default_clock: $("default_clock") ? $("default_clock").value : "digital",
                 default_clock_off_hours: $("default_clock_off_hours")
                     ? $("default_clock_off_hours").value
@@ -2187,7 +2484,10 @@ async function saveAndReloadSettings(statusId) {
         const data = await jsonFetch("/settings/reload", { method: "POST" });
         showStatus(
             statusId,
-            data.message || "Settings saved; display will reload shortly."
+            i18nText(
+                "portal.settings.saved_reload",
+                "Settings saved; display will reload shortly."
+            )
         );
         await loadAll();
     } catch (e) {
@@ -2210,7 +2510,10 @@ async function saveOffHours() {
                 end: $("night_end").value,
             }),
         });
-        showStatus("offhours-status", data.message || "Off-hours saved.");
+        showStatus(
+            "offhours-status",
+            i18nText("portal.offhours.saved", "Off-hours saved.")
+        );
     } catch (e) {
         showStatus("offhours-status", e.message, true);
     }
@@ -2224,7 +2527,10 @@ async function saveWeather() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ temperature_units: $("weather_units").value }),
         });
-        showStatus("weather-status", data.message || "Weather settings saved.");
+        showStatus(
+            "weather-status",
+            i18nText("portal.weather.saved", "Weather settings saved.")
+        );
     } catch (e) {
         showStatus("weather-status", e.message, true);
     }
@@ -2238,7 +2544,10 @@ async function fetchWeatherNow() {
             headers: { "Content-Type": "application/json" },
             body: "{}",
         });
-        showStatus("weather-status", data.message || "Weather refresh requested.");
+        showStatus(
+            "weather-status",
+            i18nText("portal.weather.refresh_requested", "Weather refresh requested.")
+        );
     } catch (e) {
         showStatus("weather-status", e.message, true);
     }
@@ -2258,7 +2567,10 @@ async function saveAlerts() {
                 alert_watch_types: ($("alert-watch-types") ? $("alert-watch-types").value : "").trim().toUpperCase(),
             }),
         });
-        showStatus("alert-status", "Alert settings saved.");
+        showStatus(
+            "alert-status",
+            i18nText("portal.alerts.saved", "Alert settings saved.")
+        );
     } catch (e) {
         showStatus("alert-status", e.message, true);
     }
@@ -2278,7 +2590,7 @@ async function loadFavourites() {
     const locs = data.locations || [];
     const activeIdx = Number(data.active_index);
     if (!locs.length) {
-        list.innerHTML = '<p class="fav-empty">No locations saved yet.</p>';
+        list.innerHTML = `<p class="fav-empty">${escapeHtml(i18nText("portal.favorites.empty", "No locations saved yet."))}</p>`;
         return data;
     }
     list.innerHTML = locs.map((loc, idx) => {
@@ -2288,12 +2600,12 @@ async function loadFavourites() {
         const rowClass = active ? "fav-row active" : "fav-row";
         return `<div class="${rowClass}">
             <div class="fav-meta">
-                <strong>${escapeHtml(loc.name)}${icao}${active ? " · active" : ""}</strong>
+                <strong>${escapeHtml(loc.name)}${icao}${active ? ` · ${escapeHtml(i18nText("portal.favorites.active", "active"))}` : ""}</strong>
                 <span>${escapeHtml(pos)}</span>
             </div>
             <div class="fav-actions">
-                <button class="btn btn-sm btn-primary" type="button" data-fav-select="${escapeHtml(loc.id)}">Select</button>
-                <button class="btn btn-sm btn-danger" type="button" data-fav-delete="${escapeHtml(loc.id)}">Delete</button>
+                <button class="btn btn-sm btn-primary" type="button" data-fav-select="${escapeHtml(loc.id)}">${escapeHtml(i18nText("portal.favorites.select", "Select"))}</button>
+                <button class="btn btn-sm btn-danger" type="button" data-fav-delete="${escapeHtml(loc.id)}">${escapeHtml(i18nText("portal.favorites.delete", "Delete"))}</button>
             </div>
         </div>`;
     }).join("");
@@ -2304,7 +2616,7 @@ async function searchFavouriteIcao() {
     clearStatus("fav-add-status");
     const code = ($("fav_icao").value || "").trim().toUpperCase();
     if (!code) {
-        showStatus("fav-add-status", "Enter an ICAO or IATA code first.", true);
+        showStatus("fav-add-status", i18nText("portal.favorites.code_required", "Enter an ICAO or IATA code first."), true);
         return;
     }
     try {
@@ -2313,7 +2625,11 @@ async function searchFavouriteIcao() {
         if (data.name && !($("fav_name").value || "").trim()) $("fav_name").value = data.name;
         $("fav_position").value =
             `${Number(data.lat).toFixed(6)}, ${Number(data.lon).toFixed(6)}`;
-        showStatus("fav-add-status", `Found ${data.name || data.icao}. Edit the name if you like, then Add.`);
+        showStatus("fav-add-status", i18nFormat(
+            "portal.favorites.found",
+            "Found {name}. Edit the name if you like, then Add.",
+            { name: data.name || data.icao }
+        ));
     } catch (e) {
         showStatus("fav-add-status", e.message, true);
     }
@@ -2334,7 +2650,7 @@ async function addFavourite() {
         $("fav_icao").value = "";
         $("fav_name").value = "";
         $("fav_position").value = "";
-        showStatus("fav-add-status", data.message || "Added.");
+        showStatus("fav-add-status", data.message || i18nText("portal.favorites.added", "Added."));
         await loadFavourites();
     } catch (e) {
         showStatus("fav-add-status", e.message, true);
@@ -2350,7 +2666,10 @@ async function deleteFavourite(id) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id }),
         });
-        showStatus("fav-list-status", data.message || "Deleted.");
+        showStatus(
+            "fav-list-status",
+            i18nText("portal.runtime.deleted", "Deleted.")
+        );
         await loadFavourites();
     } catch (e) {
         showStatus("fav-list-status", e.message, true);
@@ -2369,7 +2688,10 @@ async function selectFavourite(id) {
         if (data.location && $("radar_center")) {
             $("radar_center").value = data.location;
         }
-        showStatus("fav-list-status", data.message || "Selected.");
+        showStatus(
+            "fav-list-status",
+            i18nText("portal.runtime.selected", "Selected.")
+        );
         await loadFavourites();
         try {
             await loadAtc();
@@ -2421,7 +2743,10 @@ async function saveApiKeys(restart) {
         if ($("stadia-key")) $("stadia-key").value = "";
         if ($("carto-key")) $("carto-key").value = "";
         if (data.keys) applyKeyHints(data.keys);
-        showStatus("api-keys-status", data.message || "API keys saved.");
+        showStatus(
+            "api-keys-status",
+            i18nText("portal.api_keys.saved", "API keys saved.")
+        );
     } catch (e) {
         showStatus("api-keys-status", e.message, true);
     }
@@ -2441,14 +2766,16 @@ async function saveTracked(callsign) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ callsign }),
     });
-    $("current-tracked").textContent = callsign ? `Currently tracking: ${callsign}` : "Not currently tracking a flight.";
+    $("current-tracked").textContent = callsign
+        ? i18nFormat("portal.tracking.current", "Currently tracking: {callsign}", { callsign })
+        : i18nText("portal.tracking.none", "Not currently tracking a flight.");
 }
 
 async function lookupAndTrack() {
     const callsign = $("callsign-input").value.trim().toUpperCase();
     if (!callsign) return;
     showConfirm(false);
-    setTrackStatus("Looking up live flight...");
+    setTrackStatus(i18nText("portal.tracking.looking_up", "Looking up live flight..."));
     try {
         const data = await jsonFetch("/tracked/lookup", {
             method: "POST",
@@ -2457,12 +2784,19 @@ async function lookupAndTrack() {
         });
         if (data.found) {
             await saveTracked(data.track_as || data.callsign || callsign);
-            setTrackStatus(`Saved: ${data.summary || callsign}`);
+            setTrackStatus(i18nFormat(
+                "portal.tracking.saved_summary",
+                "Saved: {summary}",
+                { summary: data.summary || callsign }
+            ));
             $("callsign-input").value = "";
             return;
         }
         pendingCallsign = callsign;
-        setTrackStatus(`Flight not found now. Save anyway to track when it goes live?`);
+        setTrackStatus(i18nText(
+            "portal.tracking.not_found_save",
+            "Flight not found now. Save anyway to track when it goes live?"
+        ));
         showConfirm(true);
     } catch (e) {
         setTrackStatus(e.message, true);
@@ -2474,7 +2808,7 @@ async function clearTracked() {
         await saveTracked("");
         $("callsign-input").value = "";
         showConfirm(false);
-        setTrackStatus("Tracking cleared.");
+        setTrackStatus(i18nText("portal.tracking.cleared", "Tracking cleared."));
     } catch (e) {
         setTrackStatus(e.message, true);
     }
@@ -2486,7 +2820,11 @@ async function saveAnyway() {
         await saveTracked(pendingCallsign);
         $("callsign-input").value = "";
         showConfirm(false);
-        setTrackStatus(`Saved ${pendingCallsign}.`);
+        setTrackStatus(i18nFormat(
+            "portal.tracking.saved_callsign",
+            "Saved {callsign}.",
+            { callsign: pendingCallsign }
+        ));
         pendingCallsign = "";
     } catch (e) {
         setTrackStatus(e.message, true);
@@ -2503,7 +2841,10 @@ async function searchRoute() {
     const origin = $("origin-input").value.trim().toUpperCase();
     const destination = $("dest-input").value.trim().toUpperCase();
     if (!origin || !destination) return;
-    $("route-results").textContent = "Searching...";
+    $("route-results").textContent = i18nText(
+        "portal.tracking.searching",
+        "Searching..."
+    );
     try {
         const data = await jsonFetch("/route/search", {
             method: "POST",
@@ -2512,7 +2853,10 @@ async function searchRoute() {
         });
         const flights = data.flights || [];
         if (!flights.length) {
-            $("route-results").textContent = "No live flights found.";
+            $("route-results").textContent = i18nText(
+                "portal.tracking.no_live_flights",
+                "No live flights found."
+            );
             return;
         }
         $("route-results").innerHTML = flights.slice(0, 12).map((f) => {
@@ -2542,17 +2886,29 @@ function showSystemConfirm(show, action) {
     yes.classList.toggle("btn-danger", action === "shutdown" || action === "clear-disclaimer");
     yes.classList.toggle("btn-primary", action !== "shutdown" && action !== "clear-disclaimer");
     if (action === "restart-app") {
-        msg.textContent = "Relaunch FlightScnr? The display and portal will reconnect in a few seconds.";
-        yes.textContent = "Relaunch";
+        msg.textContent = i18nText(
+            "portal.system.confirm_relaunch",
+            "Relaunch FlightScnr? The display and portal will reconnect in a few seconds."
+        );
+        yes.textContent = i18nText("portal.system.relaunch", "Relaunch app");
     } else if (action === "reboot") {
-        msg.textContent = "Are you sure you want to reboot this Raspberry Pi?";
-        yes.textContent = "Reboot";
+        msg.textContent = i18nText(
+            "portal.system.confirm_reboot",
+            "Are you sure you want to reboot this Raspberry Pi?"
+        );
+        yes.textContent = i18nText("portal.system.reboot", "Reboot");
     } else if (action === "clear-disclaimer") {
-        msg.textContent = "Clear saved disclaimer acceptance? The next boot will wait for Accept with no countdown.";
-        yes.textContent = "Clear";
+        msg.textContent = i18nText(
+            "portal.system.confirm_clear_disclaimer",
+            "Clear saved disclaimer acceptance? The next boot will wait for Accept with no countdown."
+        );
+        yes.textContent = i18nText("portal.system.clear", "Clear");
     } else {
-        msg.textContent = "Are you sure you want to shut down this Raspberry Pi?";
-        yes.textContent = "Shutdown";
+        msg.textContent = i18nText(
+            "portal.system.confirm_shutdown",
+            "Are you sure you want to shut down this Raspberry Pi?"
+        );
+        yes.textContent = i18nText("portal.system.shutdown", "Shutdown");
     }
 }
 
@@ -2569,7 +2925,13 @@ async function confirmSystemAction() {
     if (action === "clear-disclaimer") {
         try {
             const data = await jsonFetch("/disclaimer/clear", { method: "POST" });
-            showStatus("system-status", data.message || "Disclaimer acceptance cleared.");
+            showStatus(
+                "system-status",
+                data.message || i18nText(
+                    "portal.system.disclaimer_cleared",
+                    "Disclaimer acceptance cleared."
+                )
+            );
             await loadDisclaimerStatus();
         } catch (e) {
             showStatus("system-status", e.message, true);
@@ -2577,14 +2939,22 @@ async function confirmSystemAction() {
         return;
     }
     setSystemButtonsDisabled(true);
-    const labels = { reboot: "reboot", shutdown: "shut down", "restart-app": "relaunch" };
+    const labels = {
+        reboot: i18nText("portal.system.reboot", "Reboot"),
+        shutdown: i18nText("portal.system.shutdown", "Shutdown"),
+        "restart-app": i18nText("portal.system.relaunch", "Relaunch app"),
+    };
     const label = labels[action] || action;
     try {
         const path = action === "restart-app" ? "/system/restart-app" : `/system/${action}`;
         const data = await jsonFetch(path, { method: "POST" });
         const fallback = action === "restart-app"
-            ? "FlightScnr is restarting…"
-            : `${label} scheduled.`;
+            ? i18nText("portal.system.restarting", "FlightScnr is restarting…")
+            : i18nFormat(
+                "portal.system.action_scheduled",
+                "{action} scheduled.",
+                { action: label }
+            );
         showStatus("system-status", data.message || fallback);
     } catch (e) {
         showStatus("system-status", e.message, true);
@@ -2598,14 +2968,22 @@ async function loadDisclaimerStatus() {
     try {
         const st = await jsonFetch("/disclaimer/json");
         if (st.remembered) {
-            line.textContent =
-                `Disclaimer acceptance: remembered (v${st.stored_version}) — next boot shows an eight-second countdown.`;
+            line.textContent = i18nFormat(
+                "portal.system.disclaimer_remembered",
+                "Disclaimer acceptance: remembered (v{version}) — next boot shows an eight-second countdown.",
+                { version: st.stored_version }
+            );
         } else {
-            line.textContent =
-                "Disclaimer acceptance: not remembered — next boot waits for Accept.";
+            line.textContent = i18nText(
+                "portal.system.disclaimer_not_remembered",
+                "Disclaimer acceptance: not remembered — next boot waits for Accept."
+            );
         }
     } catch (_) {
-        line.textContent = "Disclaimer acceptance: unavailable.";
+        line.textContent = i18nText(
+            "portal.system.disclaimer_unavailable",
+            "Disclaimer acceptance: unavailable."
+        );
     }
 }
 
@@ -2719,7 +3097,18 @@ function setQuiet12(prefix, hhmm) {
 
 function renderAtcStatus(st) {
     if (!$("atc_status_line")) return;
-    let line = `Status: ${st.state || "—"}`;
+    const states = {
+        "Playing (quiet override)": "portal.atc.state.playing_override",
+        "Playing": "portal.atc.state.playing",
+        "Quiet hours": "portal.atc.state.quiet_hours",
+        "Disabled": "portal.atc.state.disabled",
+        "Error": "portal.atc.state.error",
+        "Stopped": "portal.atc.state.stopped",
+    };
+    const state = i18nText(states[st.state], st.state || "—");
+    let line = i18nFormat("portal.atc.status", "Status: {state}", {
+        state,
+    });
     if (st.error) line += ` — ${st.error}`;
     if (st.playing_mount) line += ` (${st.playing_airport || ""} ${st.playing_mount})`;
     $("atc_status_line").textContent = line;
@@ -2730,7 +3119,10 @@ function _fillAtcChannelOptions(sel, channels, selectedMount) {
     if (!channels.length) {
         const opt = document.createElement("option");
         opt.value = "";
-        opt.textContent = "No known LiveATC feeds";
+        opt.textContent = i18nText(
+            "portal.atc.no_known_feeds",
+            "No known LiveATC feeds"
+        );
         sel.appendChild(opt);
         return;
     }
@@ -2763,13 +3155,13 @@ async function populateAtcChannels(airport, selectedMount) {
     if (!airport) {
         const opt = document.createElement("option");
         opt.value = "";
-        opt.textContent = "Select an airport";
+        opt.textContent = i18nText("portal.atc.select_airport", "Select an airport");
         sel.appendChild(opt);
         return;
     }
     const loading = document.createElement("option");
     loading.value = "";
-    loading.textContent = "Loading channels…";
+    loading.textContent = i18nText("portal.atc.loading_channels", "Loading channels…");
     sel.appendChild(loading);
 
     // Fast local list first. Background LiveATC search continues so Save/retune
@@ -2817,12 +3209,16 @@ async function loadAtc() {
     sel.innerHTML = "";
     const blank = document.createElement("option");
     blank.value = "";
-    blank.textContent = airports.length ? "Select airport" : "No airports in radar range";
+    blank.textContent = airports.length
+        ? i18nText("portal.atc.select_airport_short", "Select airport")
+        : i18nText("portal.atc.no_airports", "No airports in radar range");
     sel.appendChild(blank);
     for (const ap of airports) {
         const opt = document.createElement("option");
         opt.value = ap.ident;
-        const feedMark = ap.has_feeds ? "" : " (no feeds)";
+        const feedMark = ap.has_feeds
+            ? ""
+            : i18nText("portal.atc.no_feeds_suffix", " (no feeds)");
         opt.textContent = `${ap.ident} — ${ap.name || ap.ident}${feedMark}`;
         if (st.airport && st.airport === ap.ident) opt.selected = true;
         sel.appendChild(opt);
@@ -2864,7 +3260,21 @@ async function saveAtc(extra) {
             const opt = Array.from($("atc_channel").options).find((o) => o.value === liveMount);
             if (opt) $("atc_channel").value = liveMount;
         }
-        showStatus("atc-status", data.error || data.state || "Saved.");
+        const stateKeys = {
+            "Playing (quiet override)": "portal.atc.state.playing_override",
+            "Playing": "portal.atc.state.playing",
+            "Quiet hours": "portal.atc.state.quiet_hours",
+            "Disabled": "portal.atc.state.disabled",
+            "Error": "portal.atc.state.error",
+            "Stopped": "portal.atc.state.stopped",
+        };
+        showStatus(
+            "atc-status",
+            data.error || i18nText(stateKeys[data.state], data.state || i18nText(
+                "portal.runtime.saved",
+                "Saved."
+            ))
+        );
         if (data.error && data.state === "Error") {
             showStatus("atc-status", data.error, true);
         }
@@ -2895,11 +3305,17 @@ function showIrreversibleConfirm(step) {
     actions.classList.add("hidden");
     row.classList.remove("hidden");
     if (irreversibleStep === 1) {
-        msg.textContent = "This deletes everything FlightScnr stores on this Pi, then reinstalls from GitHub. The Pi will reboot. Continue?";
-        yes.textContent = "Continue";
+        msg.textContent = i18nText(
+            "portal.master_caution.confirm_first",
+            "This deletes everything FlightScnr stores on this Pi, then reinstalls from GitHub. The Pi will reboot. Continue?"
+        );
+        yes.textContent = i18nText("portal.master_caution.continue", "Continue");
     } else {
-        msg.textContent = "Last chance. This cannot be undone. Wipe everything and reinstall?";
-        yes.textContent = "Wipe & reinstall";
+        msg.textContent = i18nText(
+            "portal.master_caution.confirm_last",
+            "Last chance. This cannot be undone. Wipe everything and reinstall?"
+        );
+        yes.textContent = i18nText("portal.master_caution.wipe", "Wipe & reinstall");
     }
 }
 
@@ -2914,13 +3330,23 @@ async function confirmIrreversible() {
     try {
         const data = await jsonFetch("/system/factory-reset", { method: "POST" });
         if (!data.ok) {
-            showStatus("irreversible-status", data.message || "Clean install could not start.", true);
+            showStatus(
+                "irreversible-status",
+                data.message || i18nText(
+                    "portal.master_caution.could_not_start",
+                    "Clean install could not start."
+                ),
+                true
+            );
             $("btn-wipe-reinstall").disabled = false;
             return;
         }
         showStatus(
             "irreversible-status",
-            data.message || "Clean install started. This page will go offline; wait several minutes for reboot."
+            data.message || i18nText(
+                "portal.master_caution.started",
+                "Clean install started. This page will go offline; wait several minutes for reboot."
+            )
         );
     } catch (e) {
         showStatus("irreversible-status", e.message, true);
@@ -2950,13 +3376,26 @@ async function saveAutoUpdatePrefs() {
         applyUpdateInfo(data);
         if ($("auto_update_time")) $("auto_update_time").value = data.auto_update_time || "";
         if ($("hide_update_banner")) $("hide_update_banner").checked = !!data.hide_banner;
-        let msg = "Auto-install is off. Updates only happen when you tap Update Now.";
+        let msg = i18nText(
+            "portal.updates.auto_off",
+            "Auto-install is off. Updates only happen when you tap Update Now."
+        );
         if (data.auto_off_hours) {
             msg = data.auto_update_time
-                ? `Will auto-install silently around ${data.auto_update_time}.`
-                : "Will auto-install silently during off-hours when idle.";
+                ? i18nFormat(
+                    "portal.updates.auto_at_time",
+                    "Will auto-install silently around {time}.",
+                    { time: data.auto_update_time }
+                )
+                : i18nText(
+                    "portal.updates.auto_during_off_hours",
+                    "Will auto-install silently during off-hours when idle."
+                );
         } else if (data.hide_banner) {
-            msg = "Update banner hidden on device. Check here to install manually.";
+            msg = i18nText(
+                "portal.updates.banner_hidden",
+                "Update banner hidden on device. Check here to install manually."
+            );
         }
         showStatus("updates-status", msg);
     } catch (e) {
@@ -2989,8 +3428,14 @@ if ($("auto_wifi_setup_hotspot")) {
             showStatus(
                 "wifi-setup-pref-status",
                 data.auto_wifi_setup_hotspot !== false
-                    ? "Automatic Wi-Fi setup hotspot is on."
-                    : "Automatic Wi-Fi setup hotspot is off — NetworkManager will keep trying to reconnect."
+                    ? i18nText(
+                        "portal.system.wifi_setup.enabled",
+                        "Automatic Wi-Fi setup hotspot is on."
+                    )
+                    : i18nText(
+                        "portal.system.wifi_setup.disabled",
+                        "Automatic Wi-Fi setup hotspot is off — NetworkManager will keep trying to reconnect."
+                    )
             );
         } catch (e) {
             showStatus("wifi-setup-pref-status", e.message, true);
@@ -3005,7 +3450,10 @@ if ($("btn-wifi-start-setup")) {
             const data = await jsonFetch("/wifi/start-setup", { method: "POST" });
             showStatus(
                 "wifi-setup-pref-status",
-                data.message || "Opening Wi-Fi setup on the display…"
+                i18nText(
+                    "portal.system.wifi_setup.opening",
+                    data.message || "Opening Wi-Fi setup on the display…"
+                )
             );
         } catch (e) {
             showStatus("wifi-setup-pref-status", e.message, true);
@@ -3032,19 +3480,40 @@ $("btn-irreversible-confirm-yes").addEventListener("click", confirmIrreversible)
 $("btn-irreversible-confirm-no").addEventListener("click", () => showIrreversibleConfirm(0));
 
 $("btn-export-settings").addEventListener("click", () => {
-    showStatus("export-status", "Downloading settings…");
+    showStatus(
+        "export-status",
+        i18nText("portal.export.downloading", "Downloading settings…")
+    );
     // Navigate so the browser saves the attachment; timestamp avoids cache.
     window.location.href = "/settings/export?t=" + Date.now();
     setTimeout(() => {
-        showStatus("export-status", "Download started — check your browser downloads.");
+        showStatus(
+            "export-status",
+            i18nText(
+                "portal.export.download_started",
+                "Download started — check your browser downloads."
+            )
+        );
     }, 400);
 });
 
 $("btn-export-diagnostics").addEventListener("click", () => {
-    showStatus("export-status", "Building diagnostics package…");
+    showStatus(
+        "export-status",
+        i18nText(
+            "portal.export.building_diagnostics",
+            "Building diagnostics package…"
+        )
+    );
     window.location.href = "/diagnostics/export?t=" + Date.now();
     setTimeout(() => {
-        showStatus("export-status", "Diagnostics download started — check your browser downloads.");
+        showStatus(
+            "export-status",
+            i18nText(
+                "portal.export.diagnostics_started",
+                "Diagnostics download started — check your browser downloads."
+            )
+        );
     }, 600);
 });
 
@@ -3052,15 +3521,23 @@ $("btn-import-settings").addEventListener("click", async () => {
     const input = $("import-settings-file");
     const file = input && input.files && input.files[0];
     if (!file) {
-        showStatus("export-status", "Choose a .config file first.", true);
+        showStatus(
+            "export-status",
+            i18nText("portal.export.choose_config", "Choose a .config file first."),
+            true
+        );
         return;
     }
-    const ok = window.confirm(
+    const ok = window.confirm(i18nText(
+        "portal.export.confirm_import",
         "Apply settings from this file? Matching preferences on this Pi will be overwritten, and FlightScnr will relaunch."
-    );
+    ));
     if (!ok) return;
 
-    showStatus("export-status", "Uploading and applying…");
+    showStatus(
+        "export-status",
+        i18nText("portal.export.uploading", "Uploading and applying…")
+    );
     $("btn-import-settings").disabled = true;
     $("btn-export-settings").disabled = true;
     try {
@@ -3069,11 +3546,17 @@ $("btn-import-settings").addEventListener("click", async () => {
         const res = await fetch("/settings/import", { method: "POST", body });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) {
-            throw new Error(data.message || "Import failed");
+            throw new Error(data.message || i18nText(
+                "portal.export.import_failed",
+                "Import failed"
+            ));
         }
         showStatus(
             "export-status",
-            data.message || "Settings applied. App is restarting…"
+            data.message || i18nText(
+                "portal.export.applied_restarting",
+                "Settings applied. App is restarting…"
+            )
         );
     } catch (err) {
         showStatus("export-status", err.message || String(err), true);
@@ -3133,7 +3616,10 @@ if ($("btn-chime-preview")) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ hourly_chime_volume: volume }),
             });
-            showStatus("display-status", data.message || "Playing chime preview.");
+            showStatus(
+                "display-status",
+                i18nText("portal.display.preview_chime", "Playing chime preview.")
+            );
         } catch (err) {
             showStatus("display-status", err.message || String(err), true);
         }
@@ -3151,7 +3637,13 @@ if ($("btn-traffic-sfx-preview")) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ traffic_sfx_volume: volume }),
             });
-            showStatus("display-status", data.message || "Playing tracked sound preview.");
+            showStatus(
+                "display-status",
+                i18nText(
+                    "portal.display.preview_tracked",
+                    "Playing tracked sound preview."
+                )
+            );
         } catch (err) {
             showStatus("display-status", err.message || String(err), true);
         }
@@ -3169,7 +3661,13 @@ if ($("btn-military-sfx-preview")) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ military_sfx_volume: volume }),
             });
-            showStatus("display-status", data.message || "Playing military sound preview.");
+            showStatus(
+                "display-status",
+                i18nText(
+                    "portal.display.preview_military",
+                    "Playing military sound preview."
+                )
+            );
         } catch (err) {
             showStatus("display-status", err.message || String(err), true);
         }
@@ -3187,7 +3685,13 @@ if ($("btn-earthquake-voice-preview")) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ earthquake_voice_volume: volume }),
             });
-            showStatus("display-status", data.message || "Playing earthquake alert preview.");
+            showStatus(
+                "display-status",
+                i18nText(
+                    "portal.display.preview_earthquake",
+                    "Playing earthquake alert preview."
+                )
+            );
         } catch (err) {
             showStatus("display-status", err.message || String(err), true);
         }
@@ -3213,7 +3717,9 @@ if ($("atc_airport")) {
             ch.innerHTML = "";
             const opt = document.createElement("option");
             opt.value = "";
-            opt.textContent = airport ? "Loading channels…" : "Select an airport";
+            opt.textContent = airport
+                ? i18nText("portal.atc.loading_channels", "Loading channels…")
+                : i18nText("portal.atc.select_airport", "Select an airport");
             ch.appendChild(opt);
         }
         try {
@@ -3224,10 +3730,20 @@ if ($("atc_airport")) {
                 ch.innerHTML = "";
                 const opt = document.createElement("option");
                 opt.value = "";
-                opt.textContent = "Could not load channels";
+                opt.textContent = i18nText(
+                    "portal.atc.could_not_load_channels",
+                    "Could not load channels"
+                );
                 ch.appendChild(opt);
             }
-            showStatus("atc-status", e.message || "Channel list failed", true);
+            showStatus(
+                "atc-status",
+                e.message || i18nText(
+                    "portal.atc.channel_list_failed",
+                    "Channel list failed"
+                ),
+                true
+            );
         }
     });
 }
@@ -3243,7 +3759,9 @@ function renderBluetoothStatus(st) {
     const sum = $("bt-sum");
     if (!line) return;
     const name = st.name || st.mac || "";
-    let text = `Status: ${st.state || "—"}`;
+    let text = i18nFormat("portal.common.status.value", "Status: {status}", {
+        status: i18nFromSource(st.state || "—"),
+    });
     if (name) text += ` — ${name}`;
     if (st.mac && st.name) text += ` (${st.mac})`;
     else if (st.mac && !st.name) text += ` (${st.mac})`;
@@ -3251,8 +3769,14 @@ function renderBluetoothStatus(st) {
     line.textContent = text;
     const route = st.audio_route === "bluetooth" ? "Bluetooth" : "USB";
     if (routeLine) {
-        routeLine.textContent = `Output for ATC & chime: ${route}`
-            + (st.audio_route === "bluetooth" && name ? ` (${name})` : "");
+        routeLine.textContent = i18nFormat(
+            "portal.bluetooth.output",
+            "Output for ATC & chime: {route}{device}",
+            {
+                route,
+                device: st.audio_route === "bluetooth" && name ? ` (${name})` : "",
+            }
+        );
     }
     if (sum) {
         if (st.audio_route === "bluetooth" && st.connected) {
@@ -3270,7 +3794,10 @@ function renderBluetoothDevices(devices, preferredMac) {
     if (!host) return;
     const list = Array.isArray(devices) ? devices : [];
     if (!list.length) {
-        host.innerHTML = "No devices yet — tap Scan with the speaker in pairing mode.";
+        host.textContent = i18nText(
+            "portal.bluetooth.no_devices_pair",
+            "No devices yet — tap Scan with the speaker in pairing mode."
+        );
         return;
     }
     host.innerHTML = "";
@@ -3281,14 +3808,18 @@ function renderBluetoothDevices(devices, preferredMac) {
         const label = document.createElement("span");
         label.style.flex = "1 1 10rem";
         const flags = [];
-        if (d.connected) flags.push("connected");
-        else if (d.paired) flags.push("paired");
-        if (d.discovered) flags.push("nearby");
-        if (preferredMac && d.mac === preferredMac) flags.push("preferred");
+        if (d.connected) flags.push(i18nText("portal.bluetooth.connected", "connected"));
+        else if (d.paired) flags.push(i18nText("portal.bluetooth.paired", "paired"));
+        if (d.discovered) flags.push(i18nText("portal.bluetooth.nearby", "nearby"));
+        if (preferredMac && d.mac === preferredMac) {
+            flags.push(i18nText("portal.bluetooth.preferred", "preferred"));
+        }
         const mac = String(d.mac || "");
         const rawName = String(d.name || "").trim();
         const macLike = !rawName || /^([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}$/.test(rawName);
-        const title = macLike ? "Unknown device" : rawName;
+        const title = macLike
+            ? i18nText("portal.bluetooth.unknown_device", "Unknown device")
+            : rawName;
         const suffix = flags.length ? ` (${flags.join(", ")})` : "";
         if (macLike) {
             label.textContent = `${title}${suffix} — ${mac}`;
@@ -3307,14 +3838,16 @@ function renderBluetoothDevices(devices, preferredMac) {
         const connectBtn = document.createElement("button");
         connectBtn.type = "button";
         connectBtn.className = "btn btn-primary";
-        connectBtn.textContent = d.paired ? "Connect" : "Pair & Connect";
+        connectBtn.textContent = d.paired
+            ? i18nText("portal.bluetooth.connect", "Connect")
+            : i18nText("portal.bluetooth.pair_connect", "Pair & Connect");
         connectBtn.addEventListener("click", () => bluetoothConnect(d.mac, !d.paired));
         row.appendChild(connectBtn);
         if (d.paired || d.connected) {
             const forgetBtn = document.createElement("button");
             forgetBtn.type = "button";
             forgetBtn.className = "btn";
-            forgetBtn.textContent = "Forget";
+            forgetBtn.textContent = i18nText("portal.bluetooth.forget", "Forget");
             forgetBtn.addEventListener("click", () => bluetoothForget(d.mac));
             row.appendChild(forgetBtn);
         }
@@ -3333,7 +3866,13 @@ async function loadBluetooth() {
 
 async function bluetoothScan() {
     clearStatus("bluetooth-status");
-    showStatus("bluetooth-status", "Scanning… put the speaker in pairing mode.");
+    showStatus(
+        "bluetooth-status",
+        i18nText(
+            "portal.bluetooth.scanning",
+            "Scanning… put the speaker in pairing mode."
+        )
+    );
     const btn = $("btn-bt-scan");
     if (btn) btn.disabled = true;
     try {
@@ -3346,7 +3885,11 @@ async function bluetoothScan() {
         renderBluetoothDevices(st.devices || [], st.mac || "");
         showStatus(
             "bluetooth-status",
-            st.error || `Found ${(st.devices || []).length} device(s). Names appear as BlueZ resolves them — scan again if yours still shows as Unknown.`
+            st.error || i18nFormat(
+                "portal.bluetooth.found_devices",
+                "Found {count} device(s). Names appear as BlueZ resolves them — scan again if yours still shows as Unknown.",
+                { count: (st.devices || []).length }
+            )
         );
         if (st.error) showStatus("bluetooth-status", st.error, true);
     } catch (e) {
@@ -3358,7 +3901,12 @@ async function bluetoothScan() {
 
 async function bluetoothConnect(mac, pair) {
     clearStatus("bluetooth-status");
-    showStatus("bluetooth-status", pair ? "Pairing & connecting…" : "Connecting…");
+    showStatus(
+        "bluetooth-status",
+        pair
+            ? i18nText("portal.bluetooth.pairing", "Pairing & connecting…")
+            : i18nText("portal.bluetooth.connecting", "Connecting…")
+    );
     try {
         const st = await jsonFetch("/bluetooth/connect", {
             method: "POST",
@@ -3373,8 +3921,15 @@ async function bluetoothConnect(mac, pair) {
             showStatus(
                 "bluetooth-status",
                 st.connected
-                    ? `Using ${st.name || st.mac} for ATC and chime.`
-                    : st.error || st.state || "Done."
+                    ? i18nFormat(
+                        "portal.bluetooth.using_for_audio",
+                        "Using {device} for ATC and chime.",
+                        { device: st.name || st.mac }
+                    )
+                    : st.error || i18nFromSource(st.state) || i18nText(
+                        "portal.bluetooth.done",
+                        "Done."
+                    )
             );
         }
     } catch (e) {
@@ -3392,7 +3947,10 @@ async function bluetoothDisconnect() {
         });
         renderBluetoothStatus(st);
         renderBluetoothDevices(st.devices || [], st.mac || "");
-        showStatus("bluetooth-status", st.error || "Disconnected.");
+        showStatus(
+            "bluetooth-status",
+            st.error || i18nText("portal.bluetooth.disconnected", "Disconnected.")
+        );
         if (st.error) showStatus("bluetooth-status", st.error, true);
     } catch (e) {
         showStatus("bluetooth-status", e.message, true);
@@ -3401,13 +3959,28 @@ async function bluetoothDisconnect() {
 
 async function bluetoothUsePreferred() {
     clearStatus("bluetooth-status");
-    showStatus("bluetooth-status", "Connecting preferred speaker…");
+    showStatus(
+        "bluetooth-status",
+        i18nText(
+            "portal.bluetooth.connecting_preferred",
+            "Connecting preferred speaker…"
+        )
+    );
     try {
         const st = await jsonFetch("/bluetooth/use", { method: "POST" });
         renderBluetoothStatus(st);
         renderBluetoothDevices(st.devices || [], st.mac || "");
         if (st.error && !st.connected) showStatus("bluetooth-status", st.error, true);
-        else showStatus("bluetooth-status", st.connected ? `Using ${st.name || st.mac}.` : st.state || "Done.");
+        else showStatus(
+            "bluetooth-status",
+            st.connected
+                ? i18nFormat(
+                    "portal.bluetooth.using_device",
+                    "Using {device}.",
+                    { device: st.name || st.mac }
+                )
+                : i18nFromSource(st.state) || i18nText("portal.bluetooth.done", "Done.")
+        );
     } catch (e) {
         showStatus("bluetooth-status", e.message, true);
     }
@@ -3415,7 +3988,13 @@ async function bluetoothUsePreferred() {
 
 async function bluetoothUseUsb() {
     clearStatus("bluetooth-status");
-    showStatus("bluetooth-status", "Switching to USB / local audio…");
+    showStatus(
+        "bluetooth-status",
+        i18nText(
+            "portal.bluetooth.switching_usb",
+            "Switching to USB / local audio…"
+        )
+    );
     try {
         const st = await jsonFetch("/bluetooth/route", {
             method: "POST",
@@ -3425,14 +4004,23 @@ async function bluetoothUseUsb() {
         renderBluetoothStatus(st);
         renderBluetoothDevices(st.devices || [], st.mac || "");
         if (st.error) showStatus("bluetooth-status", st.error, true);
-        else showStatus("bluetooth-status", "Using USB / local audio for ATC and chime.");
+        else showStatus(
+            "bluetooth-status",
+            i18nText(
+                "portal.bluetooth.using_usb",
+                "Using USB / local audio for ATC and chime."
+            )
+        );
     } catch (e) {
         showStatus("bluetooth-status", e.message, true);
     }
 }
 
 async function bluetoothForget(mac) {
-    if (!confirm("Forget this Bluetooth speaker on the Pi?")) return;
+    if (!confirm(i18nText(
+        "portal.bluetooth.confirm_forget",
+        "Forget this Bluetooth speaker on the Pi?"
+    ))) return;
     clearStatus("bluetooth-status");
     try {
         const st = await jsonFetch("/bluetooth/forget", {
@@ -3442,7 +4030,10 @@ async function bluetoothForget(mac) {
         });
         renderBluetoothStatus(st);
         renderBluetoothDevices(st.devices || [], st.mac || "");
-        showStatus("bluetooth-status", "Forgot speaker.");
+        showStatus(
+            "bluetooth-status",
+            i18nText("portal.bluetooth.forgot", "Forgot speaker.")
+        );
     } catch (e) {
         showStatus("bluetooth-status", e.message, true);
     }
@@ -3454,6 +4045,13 @@ if ($("btn-bt-usb")) $("btn-bt-usb").addEventListener("click", bluetoothUseUsb);
 if ($("btn-bt-disconnect")) $("btn-bt-disconnect").addEventListener("click", bluetoothDisconnect);
 
 if ($("traffic_labels")) $("traffic_labels").addEventListener("change", syncTagLeadersControl);
+if ($("btn-language-region")) $("btn-language-region").addEventListener("click", saveLanguageRegion);
+if ($("date_order")) $("date_order").addEventListener("change", updateDateOrderPreview);
+if ($("display_language")) {
+    $("display_language").addEventListener("change", (event) => {
+        loadLanguageRegion(event.target.value).catch(() => {});
+    });
+}
 
 document.addEventListener("DOMContentLoaded", () => {
     wireRgbGroup("theme");
@@ -3533,27 +4131,74 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             const d = await (await fetch("/lofi/pack/status")).json();
             const busy = d.state === "downloading" || d.state === "installing";
-            const label = d.label || "starter playlist";
+            const defaultPack = d.pack_id === "lofi-pack-v1";
+            const label = defaultPack ? i18nText(
+                "portal.lofi.pack.starter_playlist",
+                d.label || "Starter playlist"
+            ) : (d.label || i18nText(
+                "portal.lofi.pack.starter_playlist",
+                "Starter playlist"
+            ));
             const sizeMb = d.size_mb ? ` (~${d.size_mb} MB)` : " (~190 MB)";
             const btn = $("btn-lofi-pack");
             if (btn) {
                 btn.textContent = d.installed
-                    ? `Re-download ${label}${sizeMb}`
-                    : `Download ${label}${sizeMb}`;
+                    ? i18nFormat(
+                        "portal.lofi.pack.redownload",
+                        "Re-download {label}{size}",
+                        { label, size: sizeMb }
+                    )
+                    : i18nFormat(
+                        "portal.lofi.pack.download_dynamic",
+                        "Download {label}{size}",
+                        { label, size: sizeMb }
+                    );
             }
             const hint = $("lofi_pack_hint");
             if (hint) {
                 if (d.installed && !busy && d.state !== "error") {
-                    const expect = d.tracks ? ` (${d.tracks} in release)` : "";
-                    hint.textContent =
-                        `Installed: ${d.count} pack track${d.count === 1 ? "" : "s"}${expect}. Re-download to replace with the latest release.`;
+                    const expect = d.tracks ? i18nFormat(
+                        "portal.lofi.pack.release_count",
+                        " ({count} in release)",
+                        { count: d.tracks }
+                    ) : "";
+                    const installedKey = d.count === 1
+                        ? "portal.lofi.pack.installed.one"
+                        : "portal.lofi.pack.installed.other";
+                    const installedFallback = d.count === 1
+                        ? "Installed: {count} pack track{release}. Re-download to replace with the latest release."
+                        : "Installed: {count} pack tracks{release}. Re-download to replace with the latest release.";
+                    hint.textContent = i18nFormat(
+                        installedKey,
+                        installedFallback,
+                        {
+                            count: d.count,
+                            release: expect,
+                        }
+                    );
                 } else if (d.count > 0 && !d.installed) {
-                    hint.textContent =
-                        `Found ${d.count} pack track${d.count === 1 ? "" : "s"} but the starter playlist is not fully installed — download to get the full set.`;
+                    const partialKey = d.count === 1
+                        ? "portal.lofi.pack.partial.one"
+                        : "portal.lofi.pack.partial.other";
+                    const partialFallback = d.count === 1
+                        ? "Found {count} pack track but the starter playlist is not fully installed — download to get the full set."
+                        : "Found {count} pack tracks but the starter playlist is not fully installed — download to get the full set.";
+                    hint.textContent = i18nFormat(
+                        partialKey,
+                        partialFallback,
+                        { count: d.count }
+                    );
                 } else if (!d.installed) {
-                    const desc = d.description ? `${d.description} ` : "";
-                    hint.textContent =
-                        desc + "Download once from GitHub Releases — tracks install to this Pi and play locally under ATC.";
+                    const rawDescription = defaultPack ? i18nText(
+                        "portal.lofi.pack.default_description",
+                        d.description || "45 original lofi compositions by Reuben Thiessen (CC BY-NC-SA 4.0)."
+                    ) : (d.description || "");
+                    const desc = rawDescription ? `${rawDescription} ` : "";
+                    hint.textContent = i18nFormat(
+                        "portal.lofi.pack.download_hint",
+                        "{description}Download once from GitHub Releases — tracks install to this Pi and play locally under ATC.",
+                        { description: desc }
+                    );
                 }
             }
             if (btn) btn.disabled = busy;
@@ -3562,11 +4207,27 @@ document.addEventListener("DOMContentLoaded", () => {
                 const pct = d.total > 0 ? Math.round(100 * d.received / d.total) : 0;
                 $("lofi_pack_bar").style.width = pct + "%";
                 $("lofi_pack_msg").textContent = d.state === "installing"
-                    ? "Unpacking tracks…"
-                    : `Downloading… ${pct}% (${Math.round(d.received / 1048576)} MB)`;
+                    ? i18nText("portal.lofi.unpacking", "Unpacking tracks…")
+                    : i18nFormat(
+                        "portal.lofi.pack.downloading_progress",
+                        "Downloading… {percent}% ({megabytes} MB)",
+                        {
+                            percent: pct,
+                            megabytes: Math.round(d.received / 1048576),
+                        }
+                    );
                 setTimeout(refreshLofiPack, 1000);
             } else if (d.state === "error") {
-                $("lofi_pack_msg").textContent = "Download failed: " + (d.message || "unknown error");
+                $("lofi_pack_msg").textContent = i18nFormat(
+                    "portal.lofi.download_failed",
+                    "Download failed: {error}",
+                    {
+                        error: d.message || i18nText(
+                            "portal.lofi.unknown_error",
+                            "unknown error"
+                        ),
+                    }
+                );
             } else if (d.state === "done") {
                 $("lofi_pack_bar").style.width = "100%";
                 loadLofiTracks();
@@ -3611,7 +4272,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 const badge = document.createElement("span");
                 badge.className = "lofi-badge";
-                badge.textContent = builtin ? "built-in" : "yours";
+                badge.textContent = builtin
+                    ? i18nText("portal.lofi.builtin", "built-in")
+                    : i18nText("portal.lofi.yours", "yours");
                 row.appendChild(badge);
 
                 if (builtin) {
@@ -3620,7 +4283,10 @@ document.addEventListener("DOMContentLoaded", () => {
                     const input = document.createElement("input");
                     input.type = "checkbox";
                     input.checked = !disabled.has(name);
-                    input.title = "Include in the rotation";
+                    input.title = i18nText(
+                        "portal.lofi.include_rotation",
+                        "Include in the rotation"
+                    );
                     input.addEventListener("click", (e) => e.stopPropagation());
                     input.addEventListener("change", async () => {
                         await fetch("/lofi/toggle_disabled", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({name})});
@@ -3635,7 +4301,10 @@ document.addEventListener("DOMContentLoaded", () => {
                     const del = document.createElement("button");
                     del.type = "button";
                     del.className = "lofi-remove";
-                    del.title = "Remove this upload";
+                    del.title = i18nText(
+                        "portal.lofi.remove_upload",
+                        "Remove this upload"
+                    );
                     del.textContent = "\u2715";
                     del.addEventListener("click", async (e) => {
                         e.stopPropagation();
@@ -3656,7 +4325,7 @@ document.addEventListener("DOMContentLoaded", () => {
             (d.bundled || []).forEach(n => addRow(n, true));
             (d.user || []).forEach(n => addRow(n, false));
             if (!box.childNodes.length) {
-                box.textContent = "No tracks yet.";
+                box.textContent = i18nText("portal.lofi.no_tracks", "No tracks yet.");
                 box.style.padding = ".6rem";
             }
             lofiSetRowHighlight();
@@ -3665,16 +4334,29 @@ document.addEventListener("DOMContentLoaded", () => {
     if ($("btn-lofi-upload")) $("btn-lofi-upload").addEventListener("click", async () => {
         const input = $("lofi_file");
         const msg = $("lofi_upload_msg");
-        if (!input || !input.files || !input.files.length) { if (msg) msg.textContent = "Choose an MP3 first."; return; }
+        if (!input || !input.files || !input.files.length) {
+            if (msg) msg.textContent = i18nText(
+                "portal.lofi.choose_mp3",
+                "Choose an MP3 first."
+            );
+            return;
+        }
         const fd = new FormData();
         fd.append("track", input.files[0]);
-        if (msg) msg.textContent = "Uploading…";
+        if (msg) msg.textContent = i18nText("portal.lofi.uploading", "Uploading…");
         try {
             const r = await fetch("/lofi/upload", {method: "POST", body: fd});
             const d = await r.json();
-            if (msg) msg.textContent = d.message || (r.ok ? "Added." : "Upload failed.");
+            if (msg) msg.textContent = r.ok
+                ? i18nText("portal.lofi.added", "Added.")
+                : d.message || i18nText("portal.lofi.upload_failed", "Upload failed.");
             if (r.ok) { input.value = ""; loadLofiTracks(); }
-        } catch (_) { if (msg) msg.textContent = "Upload failed."; }
+        } catch (_) {
+            if (msg) msg.textContent = i18nText(
+                "portal.lofi.upload_failed",
+                "Upload failed."
+            );
+        }
     });
 
     // --- Settings search: keyword match on labels, jump + flash ---
@@ -3693,12 +4375,14 @@ document.addEventListener("DOMContentLoaded", () => {
         function buildIndex() {
             index = [];
             document.querySelectorAll("details.card").forEach((det) => {
-                const sec = sectionTitle(det) || "Settings";
+                const sec = sectionTitle(det) || i18nText("portal.search.section_fallback", "Settings");
                 const sum = det.querySelector(":scope > summary");
                 const sumHint = sum && sum.querySelector(".sum") ? sum.querySelector(".sum").textContent : "";
                 if (sum) index.push({
                     text: (sec + " " + sumHint).toLowerCase(),
-                    label: sec, sec: "Section", el: sum,
+                    label: sec,
+                    sec: i18nText("portal.search.section", "Section"),
+                    el: sum,
                 });
                 det.querySelectorAll("label").forEach((lab) => {
                     const t = lab.textContent.replace(/\s+/g, " ").trim();
@@ -3729,7 +4413,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!current.length) {
                 const d = document.createElement("div");
                 d.className = "search-empty";
-                d.textContent = "No settings match";
+                d.textContent = i18nText("portal.search.no_results", "No settings match");
                 box.appendChild(d);
             } else current.forEach((e, i) => {
                 const b = document.createElement("button");
@@ -3763,42 +4447,54 @@ document.addEventListener("DOMContentLoaded", () => {
         const body = $("targets_body");
         if (!body) return;
         const CATS = [
-            ["plane", "Planes"], ["heli", "Helicopters"],
-            ["drone", "Drones"], ["vessel", "Vessels"],
+            ["plane", "portal.targets.planes", "Planes"],
+            ["heli", "portal.targets.helicopters", "Helicopters"],
+            ["drone", "portal.targets.drones", "Drones"],
+            ["vessel", "portal.targets.vessels", "Vessels"],
         ];
-        const FORMS = [["icon", "Icon"], ["triangle", "Triangle"], ["dot", "Dot"]];
-        const MODES = [["letters", "Letters"], ["degrees", "Degrees"], ["both", "Both"]];
+        const FORMS = [
+            ["icon", "portal.targets.symbol.icon", "Icon"],
+            ["triangle", "portal.targets.symbol.triangle", "Triangle"],
+            ["dot", "portal.targets.symbol.dot", "Dot"],
+        ];
+        const MODES = [
+            ["letters", "portal.targets.labels.letters", "Letters"],
+            ["degrees", "portal.targets.labels.degrees", "Degrees"],
+            ["both", "portal.targets.labels.both", "Both"],
+        ];
         const COLOR_IDS = CATS.map(([cat]) => "tgt_" + cat).concat(["tgt_compass", "tgt_blip"]);
         function colorRow(id) {
-            return '<div class="chk"><label for="' + id + '_auto">Auto color</label>' +
+            return '<div class="chk"><label data-i18n="portal.targets.auto_color" for="' + id + '_auto">Auto color</label>' +
                 '<span class="switch"><input id="' + id + '_auto" type="checkbox" checked><span class="track"></span></span></div>' +
-                '<div class="chk"><label for="' + id + '_color">Custom color</label>' +
+                '<div class="chk"><label data-i18n="portal.targets.custom_color" for="' + id + '_color">Custom color</label>' +
                 '<input id="' + id + '_color" type="color" value="#ffb428" disabled></div>';
         }
-        function rangeRow(id, label, lo, hi, val) {
-            return '<label for="' + id + '">' + label + ' <span id="' + id + '_label">' + val + '%</span></label>' +
+        function rangeRow(id, key, label, lo, hi, val) {
+            return '<label for="' + id + '"><span data-i18n="' + key + '">' + label + '</span> <span id="' + id + '_label">' + val + '%</span></label>' +
                 '<input id="' + id + '" type="range" min="' + lo + '" max="' + hi + '" step="5" value="' + val + '" ' +
                 'oninput="document.getElementById(\'' + id + '_label\').textContent = this.value + \'%\'">';
         }
-        function selectRow(id, label, options) {
-            let opts = options.map(([v, t]) => '<option value="' + v + '">' + t + "</option>").join("");
-            return '<label for="' + id + '">' + label + "</label><select id=\"" + id + '">' + opts + "</select>";
+        function selectRow(id, key, label, options) {
+            let opts = options.map(([value, optionKey, text]) =>
+                '<option data-i18n="' + optionKey + '" value="' + value + '">' + text + "</option>"
+            ).join("");
+            return '<label for="' + id + '"><span data-i18n="' + key + '">' + label + "</span></label><select id=\"" + id + '">' + opts + "</select>";
         }
         let html = "";
-        for (const [cat, title] of CATS) {
-            html += '<p style="margin:.9rem 0 .2rem;font-weight:600">' + title + "</p>";
+        for (const [cat, titleKey, title] of CATS) {
+            html += '<p data-i18n="' + titleKey + '" style="margin:.9rem 0 .2rem;font-weight:600">' + title + "</p>";
             html += colorRow("tgt_" + cat);
-            html += rangeRow("tgt_" + cat + "_size", "Size", 50, 150, 100);
-            html += selectRow("tgt_" + cat + "_form", "Symbol", FORMS);
+            html += rangeRow("tgt_" + cat + "_size", "portal.targets.size", "Size", 50, 150, 100);
+            html += selectRow("tgt_" + cat + "_form", "portal.targets.symbol", "Symbol", FORMS);
         }
-        html += '<p style="margin:.9rem 0 .2rem;font-weight:600">Compass rose</p>';
+        html += '<p data-i18n="portal.targets.compass" style="margin:.9rem 0 .2rem;font-weight:600">Compass rose</p>';
         html += colorRow("tgt_compass");
-        html += rangeRow("tgt_compass_opacity", "Opacity", 20, 100, 100);
-        html += selectRow("tgt_compass_labels", "Labels", MODES);
-        html += '<p style="margin:.9rem 0 .2rem;font-weight:600">Blips</p>';
+        html += rangeRow("tgt_compass_opacity", "portal.targets.opacity", "Opacity", 20, 100, 100);
+        html += selectRow("tgt_compass_labels", "portal.targets.labels", "Labels", MODES);
+        html += '<p data-i18n="portal.targets.blips" style="margin:.9rem 0 .2rem;font-weight:600">Blips</p>';
         html += colorRow("tgt_blip");
-        html += rangeRow("tgt_blip_size", "Size", 50, 150, 100);
-        html += rangeRow("tgt_blip_opacity", "Opacity", 20, 100, 100);
+        html += rangeRow("tgt_blip_size", "portal.targets.size", "Size", 50, 150, 100);
+        html += rangeRow("tgt_blip_opacity", "portal.targets.opacity", "Opacity", 20, 100, 100);
         body.innerHTML = html;
 
         function syncColorEnabled(id) {
@@ -3880,9 +4576,12 @@ document.addEventListener("DOMContentLoaded", () => {
                     headers: {"Content-Type": "application/json"},
                     body: JSON.stringify(payload),
                 });
-                if (st) st.textContent = "Saved.";
+                if (st) st.textContent = i18nText("portal.runtime.saved", "Saved.");
             } catch (_) {
-                if (st) st.textContent = "Save failed.";
+                if (st) st.textContent = i18nText(
+                    "portal.runtime.save_failed",
+                    "Save failed."
+                );
             }
         });
     })();

@@ -29,7 +29,20 @@ from datetime import datetime
 import pygame
 
 from display.round_touch import draw, settings, theme
+from i18n import tr
 from utilities import sun_moon
+
+# sun_moon.phase_name() returns English identifiers; map them to catalog keys.
+_PHASE_KEYS = {
+    "New Moon": "moon.phase.new",
+    "Waxing Crescent": "moon.phase.waxing_crescent",
+    "First Quarter": "moon.phase.first_quarter",
+    "Waxing Gibbous": "moon.phase.waxing_gibbous",
+    "Full Moon": "moon.phase.full",
+    "Waning Gibbous": "moon.phase.waning_gibbous",
+    "Last Quarter": "moon.phase.last_quarter",
+    "Waning Crescent": "moon.phase.waning_crescent",
+}
 
 # Recompute at most hourly; also on location change (see get_moon_data).
 REFRESH_S = 3600.0
@@ -413,7 +426,10 @@ def _draw_arc_pills(surface: pygame.Surface, data: dict) -> None:
 
     # Top pill: "Waxing Gibbous · 98%" curved along the arc.
     pct = int(round(data.get("illumination", 0.0) * 100))
-    top_text = f"{data.get('phase_name', '—')} · {pct}%"
+    phase_raw = data.get("phase_name")
+    phase_key = _PHASE_KEYS.get(phase_raw)
+    phase_label = tr(phase_key) if phase_key else (phase_raw or "—")
+    top_text = f"{phase_label} · {pct}%"
     top_items = [body_font.render(ch, True, text_color) for ch in top_text]
     mid = -math.pi / 2
     half = _arc_span([s.get_width() for s in top_items], r_mid) / 2 + ang(theme.s(14))

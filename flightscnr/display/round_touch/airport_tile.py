@@ -27,8 +27,20 @@ import pygame
 
 from display.round_touch import draw as draw_mod
 from display.round_touch import theme
+from i18n import tr
 
 logger = logging.getLogger("flightscnr.display")
+
+# metar_mod returns English plain words for these two cases (the rest is
+# technical: degrees, kt, SM, FEW/BKN/OVC codes). Map only the plain words to
+# catalog keys; everything else passes through unchanged. Keep in sync with
+# utilities.metar.wind_text/sky_text.
+_METAR_WORD_KEYS = {"Calm": "metar.calm", "Clear": "metar.clear"}
+
+
+def _metar_localize(value: str) -> str:
+    key = _METAR_WORD_KEYS.get(value)
+    return tr(key) if key else value
 
 # The tile stays up 10 s after the METAR loads (or fetch settles empty);
 # FETCH_CAP_S bounds a hung fetch so the tile can never linger forever.
@@ -179,11 +191,11 @@ def _service_chips(ident: str) -> list[str]:
         return []
     chips = []
     if towered:
-        chips.append("Towered")
+        chips.append(tr("airport.chip.towered"))
     if fuel:
-        chips.append("Fuel")
+        chips.append(tr("airport.chip.fuel"))
     if beacon:
-        chips.append("Beacon")
+        chips.append(tr("airport.chip.beacon"))
     return chips
 
 
@@ -286,18 +298,18 @@ def draw(surface: pygame.Surface) -> pygame.Rect | None:
     footer = ""
     if m:
         rows = [
-            ("WIND", metar_mod.wind_text(m)),
-            ("VIS", metar_mod.visibility_text(m)),
-            ("SKY", metar_mod.sky_text(m)),
-            ("TEMP", metar_mod.temp_text(m, unit=_temp_unit())),
-            ("ALT", metar_mod.altimeter_text(m)),
+            (tr("airport.metar.wind"), _metar_localize(metar_mod.wind_text(m))),
+            (tr("airport.metar.vis"), metar_mod.visibility_text(m)),
+            (tr("airport.metar.sky"), _metar_localize(metar_mod.sky_text(m))),
+            (tr("airport.metar.temp"), metar_mod.temp_text(m, unit=_temp_unit())),
+            (tr("airport.metar.alt"), metar_mod.altimeter_text(m)),
         ]
         footer = metar_mod.age_text(m)
     elif not _fetch_done:
-        footer = "fetching METAR…"
+        footer = tr("airport.fetching_metar")
     else:
         chips = _service_chips(ident)
-        footer = " · ".join(chips) if chips else "No METAR available"
+        footer = " · ".join(chips) if chips else tr("airport.no_metar")
 
     pad = theme.s(10)
     gap = theme.s(3)

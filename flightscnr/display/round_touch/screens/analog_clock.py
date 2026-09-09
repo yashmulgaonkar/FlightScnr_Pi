@@ -21,6 +21,7 @@ from typing import NamedTuple
 import pygame
 
 from display.round_touch import draw, settings, theme
+from i18n import tr
 
 # Reference layout was 600×600 with center 300; scale via dial radius.
 _REF_R = 270.0
@@ -279,9 +280,9 @@ def draw_analog_clock(surface: pygame.Surface, *, night_vision: bool = False) ->
             if hour_num in (2, 4):
                 continue
             display = "0" if hour_num == 0 else str(hour_num)
-            tr = 220 * scale
-            tx = cx + tr * math.cos(angle)
-            ty = cy + tr * math.sin(angle)
+            num_r = 220 * scale
+            tx = cx + num_r * math.cos(angle)
+            ty = cy + num_r * math.sin(angle)
             if any(r.collidepoint(tx, ty) for r in tick_exclude):
                 continue
             glyph = draw.render_text_cached(num_font, display, pal.ink)
@@ -305,7 +306,7 @@ def draw_analog_clock(surface: pygame.Surface, *, night_vision: bool = False) ->
     ax += 20
     surface.blit(brand, brand.get_rect(center=(ax, ay)))
 
-    year_l = draw.render_text_cached(label_font, "YEAR", pal.muted)
+    year_l = draw.render_text_cached(label_font, tr("analog.year"), pal.muted)
     yx, yy = ref(440, 240)
     surface.blit(year_l, year_l.get_rect(center=(yx, yy)))
 

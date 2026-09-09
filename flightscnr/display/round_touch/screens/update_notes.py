@@ -12,11 +12,11 @@
 from __future__ import annotations
 
 from display.round_touch import draw, nav, theme
+from i18n import tr
 from display.round_touch.screens import common
 
 FOOTER_BUTTONS = ("now", "tonight", "dismiss", "radar")
 
-_UNAVAILABLE = "Release notes unavailable"
 
 
 def footer_labels() -> tuple[str, ...]:
@@ -47,8 +47,8 @@ def _title() -> str:
     except Exception:
         tag = ""
     if tag:
-        return f"v{tag} what's new"
-    return "What's new"
+        return tr("update_notes.whats_new_version", tag=tag)
+    return tr("update_notes.whats_new")
 
 
 def draw_update_notes(surface, scroll_offset: int = 0) -> int:
@@ -61,12 +61,12 @@ def draw_update_notes(surface, scroll_offset: int = 0) -> int:
     line_gap = theme.s(2)
     para_gap = theme.s(8)
 
-    nav.draw_curved_breadcrumb(surface, ["Radar", "Update"])
+    nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("update_notes.breadcrumb")])
     nav.draw_footer_buttons(surface, list(FOOTER_BUTTONS))
 
     title = _title()
     notes = _plain_notes()
-    paragraphs = [p for p in notes.split("\n")] if notes else [_UNAVAILABLE]
+    paragraphs = [p for p in notes.split("\n")] if notes else [tr("update_notes.unavailable")]
     rows: list[tuple[str, object, tuple]] = [(title, title_font, theme.LABEL)]
     body_color = theme.MUTED if notes else theme.HINT
     for para in paragraphs:

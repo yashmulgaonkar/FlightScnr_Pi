@@ -25,6 +25,7 @@ except ImportError:
 
 from display.round_touch import aircraft, draw, nav, route_map, settings, theme
 from display.round_touch.screens import common
+from i18n import tr
 from utilities.airline_branding import display_flight_id_for_flight
 from utilities.icao_types import format_aircraft_type
 from utilities.overhead import load_tracked_callsign
@@ -88,8 +89,8 @@ def draw_tracking_cleared_popup(surface: pygame.Surface) -> None:
     body_font = draw.load_font(theme.s(13))
     btn_font = draw.load_font(theme.s(13), bold=True)
     lines = [
-        title_font.render("Tracking cleared", True, theme.MUTED),
-        body_font.render("Flight no longer available.", True, theme.HINT),
+        title_font.render(tr("tracked.cleared_title"), True, theme.MUTED),
+        body_font.render(tr("tracked.cleared_body"), True, theme.HINT),
     ]
     w = max(l.get_width() for l in lines) + theme.s(44)
     panel = pygame.Rect(0, 0, max(w, theme.s(230)), theme.s(118))
@@ -148,8 +149,8 @@ def draw_follow_loading(surface: pygame.Surface, callsign: str) -> None:
     """Immediate feedback after Follow starts, before live data resolves."""
     title_font = draw.load_font(theme.s(20), bold=True)
     hint_font = draw.load_font(theme.s(13))
-    title = title_font.render(f"Following {callsign}", True, theme.MUTED)
-    hint = hint_font.render("Locating flight\u2026", True, theme.HINT)
+    title = title_font.render(tr("tracked.following", callsign=callsign), True, theme.MUTED)
+    hint = hint_font.render(tr("tracked.locating"), True, theme.HINT)
     surface.blit(title, title.get_rect(
         center=(theme.CENTER_X, theme.CENTER_Y - theme.s(12))))
     surface.blit(hint, hint.get_rect(
@@ -258,7 +259,7 @@ def draw_live_details(surface: pygame.Surface, data: dict) -> None:
         status_color = _pulse_live_color()
     elif status == "LANDED":
         status_color = theme.TAG_ALT_DESCEND
-    mid_parts = [p for p in (plane_type, status) if p]
+    mid_parts = [p for p in (plane_type, _status_display(status)) if p]
     if mid_parts:
         mid = "  ·  ".join(mid_parts)
         color = status_color if status in ("LIVE", "LANDED") else theme.MUTED
@@ -397,7 +398,7 @@ def draw_follow_photo_popup(surface: pygame.Surface, data: dict | None) -> None:
         card_w = max(photo.get_width(), title_img.get_width()) + pad * 2
         card_h = photo.get_height() + title_img.get_height() + pad * 3
     else:
-        missing = hint_font.render("No photo available", True, theme.MUTED)
+        missing = hint_font.render(tr("tracked.no_photo"), True, theme.MUTED)
         card_w = max(missing.get_width(), title_img.get_width()) + pad * 2
         card_h = title_img.get_height() + missing.get_height() + pad * 3
         photo = missing
@@ -786,11 +787,26 @@ def _status_label(data) -> str:
     return "LIVE"
 
 
+# Status stays an English identifier for comparisons; only the rendered label
+# is translated, resolved at draw time so a live language switch takes effect.
+_STATUS_KEYS = {
+    "LIVE": "tracked.status.live",
+    "LANDED": "tracked.status.landed",
+    "SCHEDULED": "tracked.status.scheduled",
+    "ESTIMATED": "tracked.status.estimated",
+}
+
+
+def _status_display(status: str) -> str:
+    key = _STATUS_KEYS.get(status)
+    return tr(key) if key else status
+
+
 def _eta_line(data) -> str | None:
     time_remaining = data.get("time_remaining")
     if not time_remaining:
         return None
-    return f"Estimated Time Remaining: {time_remaining}"
+    return tr("tracked.eta_remaining", time=time_remaining)
 
 
 def _ticker_parts(data) -> list[str]:
@@ -849,8 +865,8 @@ def _scheduled_rows(data) -> list[tuple[str, tuple[int, int, int]]]:
     route_parts = route_display_lines(origin, dest)
     route = route_parts[0] if len(route_parts) == 1 else f"{route_parts[0]} {route_parts[1]}"
     if dep:
-        return [(f"Departs {dep}  {route}", theme.ROUTE)]
-    return [(f"Scheduled  {route}", theme.ROUTE)]
+        return [(tr("tracked.departs", dep=dep, route=route), theme.ROUTE)]
+    return [(tr("tracked.scheduled_route", route=route), theme.ROUTE)]
 
 
 def _build_stats_rows(
@@ -862,12 +878,13 @@ def _build_stats_rows(
 
     rows: list[tuple[str, tuple[int, int, int], bool, bool]] = []
     status = _status_label(data)
+    status_disp = _status_display(status)
     if status == "LANDED":
-        rows.append((status, theme.SWEEP, False, False))
+        rows.append((status_disp, theme.SWEEP, False, False))
     elif status == "LIVE":
-        rows.append((status, theme.LIVE, False, True))
+        rows.append((status_disp, theme.LIVE, False, True))
     else:
-        rows.append((status, theme.TAG_TYPE, False, False))
+        rows.append((status_disp, theme.TAG_TYPE, False, False))
 
     eta = _eta_line(data)
     if eta:
@@ -1269,7 +1286,7 @@ def draw_tracked(
     display_id = raw_callsign
     if tracked_data:
         display_id = display_flight_id_for_flight(tracked_data)
-    trail = ["Radar", "Track"]
+    trail = [tr("common.radar"), tr("tracked.breadcrumb_track")]
     if display_id and display_id != "—":
         trail.append(display_id)
     nav.draw_curved_breadcrumb(surface, trail)

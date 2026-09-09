@@ -23,19 +23,11 @@ REBOOT_PROGRESS_PATH = os.path.join(DATA_DIR, "reboot-in-progress")
 # Stale after a completed reboot (file survives on disk across boots).
 _REBOOT_PROGRESS_MAX_AGE_S = 120.0
 
+# (title key, detail key) per reason; the display layer resolves them via tr().
 _REBOOT_COPY = {
-    "x11": (
-        "Reboot in progress",
-        "Enabling pinch-to-zoom…",
-    ),
-    "user": (
-        "Reboot in progress",
-        "Display will come back shortly.",
-    ),
-    "shutdown": (
-        "Shutting down",
-        "Display and portal will power off.",
-    ),
+    "x11": ("settings.reboot_progress.title", "reboot.enabling_pinch"),
+    "user": ("settings.reboot_progress.title", "settings.reboot_progress.detail"),
+    "shutdown": ("reboot.shutting_down", "settings.confirm.shutdown.detail"),
 }
 
 

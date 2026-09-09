@@ -23,6 +23,7 @@ import pygame
 
 from display.round_touch import draw as draw_mod
 from display.round_touch import theme
+from i18n import tr
 
 logger = logging.getLogger("flightscnr.display")
 
@@ -129,11 +130,11 @@ def items() -> list[dict]:
     idx = favourite_locations.active_index()
     out: list[dict] = []
     if idx == favourite_locations.CUSTOM_INDEX:
-        out.append({"id": "custom", "label": "Custom", "selected": True})
+        out.append({"id": "custom", "label": tr("settings.favourite.custom"), "selected": True})
     out.append(
         {
             "id": "home",
-            "label": "Home",
+            "label": tr("settings.favourite.home"),
             "selected": idx == favourite_locations.HOME_INDEX,
         }
     )
@@ -141,7 +142,7 @@ def items() -> list[dict]:
         loc_id = str(loc.get("id") or "").strip()
         if not loc_id:
             continue
-        name = str(loc.get("name") or "Saved").strip() or "Saved"
+        name = str(loc.get("name") or tr("favourite.saved_default")).strip() or tr("favourite.saved_default")
         out.append({"id": loc_id, "label": name, "selected": i == idx})
     return out
 
@@ -187,7 +188,7 @@ def draw(surface: pygame.Surface) -> pygame.Rect | None:
     gap = theme.s(4)
     close_size = theme.s(26)
     row_h = max(theme.s(22), row_font.get_height() + theme.s(8))
-    title = "Favorites"
+    title = tr("favourite.title")
     title_img = title_font.render(title, True, glyph_rgb)
 
     label_w = max(

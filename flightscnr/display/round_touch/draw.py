@@ -14,6 +14,7 @@ import os
 import pygame
 
 from display.round_touch import theme
+from i18n import tr
 
 
 _font_cache = {}
@@ -394,12 +395,12 @@ def draw_error(surface: pygame.Surface, message: str):
     body = load_font(theme.FONT_BODY)
     detail = load_font(theme.FONT_DETAIL)
     y = theme.CENTER_Y - theme.s(100)
-    y = draw_center_line(surface, "Display Error", y, title, theme.TAG_ALT_DESCEND)
+    y = draw_center_line(surface, tr("draw.display_error"), y, title, theme.TAG_ALT_DESCEND)
     y += theme.s(12)
     for line in _wrap_message(message, 40):
         y = draw_center_line(surface, line, y, body, theme.LABEL)
     y += theme.s(12)
-    draw_center_line(surface, "Tap or swipe to return to radar", y, detail, theme.HINT)
+    draw_center_line(surface, tr("draw.return_to_radar"), y, detail, theme.HINT)
     y += theme.s(8)
     draw_center_line(surface, "Check: journalctl -u flightscnr -f", y, detail, theme.MUTED)
 

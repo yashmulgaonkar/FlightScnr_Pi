@@ -252,8 +252,10 @@ def _portal_sync_settings():
 def _portal_no_store_json(response):
     """Avoid browser/proxy caching of live settings JSON."""
     path = request.path or "/"
-    if path.endswith("/json") or path.startswith("/atc/") or path.startswith(
-        "/bluetooth/"
+    if (
+        path.endswith(("/json", ".json"))
+        or path.startswith("/atc/")
+        or path.startswith("/bluetooth/")
     ):
         response.headers["Cache-Control"] = "no-store, max-age=0"
         response.headers["Pragma"] = "no-cache"
@@ -349,7 +351,57 @@ def wifi_start_setup():
 def index():
     if _wifi_portal_active():
         return redirect("/wifi")
-    return render_template("index.html")
+    from display.round_touch import settings
+    from i18n import catalog_for
+
+    selection = catalog_for(settings.display_language())
+    return render_template(
+        "index.html", effective_language=selection.effective_language
+    )
+
+
+@app.get("/i18n/catalog.json")
+def i18n_catalog_json():
+    """The one validated effective catalog used by both Python and browser."""
+    from datetime import datetime
+
+    from display.round_touch import settings
+    from i18n import catalog_for, catalog_payload, format_date
+
+    requested = request.args.get("language") or settings.display_language()
+    payload = catalog_payload(requested)
+    selected = catalog_for(requested)
+    english = catalog_for("en")
+    source_keys = {}
+    ambiguous_sources = set()
+    for key, source in english.messages.items():
+        if not key.startswith("portal."):
+            continue
+        normalized = " ".join(source.split())
+        if not normalized:
+            continue
+        if normalized in source_keys and source_keys[normalized] != key:
+            ambiguous_sources.add(normalized)
+            continue
+        source_keys[normalized] = key
+    for source in ambiguous_sources:
+        source_keys.pop(source, None)
+    # Compatibility bridge for static upstream markup that has not yet gained
+    # an explicit data-i18n attribute. Values are semantic catalog keys, never
+    # translations, and ambiguous English source strings are deliberately omitted.
+    payload["source_keys"] = source_keys
+    now = datetime.now()
+    requested_date_order = str(
+        request.args.get("date_order") or settings.date_format()
+    )
+    payload["date_order"] = (
+        requested_date_order if requested_date_order in ("us", "eu") else "us"
+    )
+    payload["date_previews"] = {
+        "us": format_date(now, "us", catalog=selected),
+        "eu": format_date(now, "eu", catalog=selected),
+    }
+    return jsonify(payload)
 
 
 @app.get("/closest/json")
@@ -896,6 +948,7 @@ def display_json():
             "auto_idle_clock": settings.auto_idle_clock_enabled(),
             "display_rotation": settings.display_rotation(),
             "clock_12hr": settings.use_12hr_clock(),
+            "display_language": settings.display_language(),
             "date_format": settings.date_format(),
             "default_clock": settings.default_clock(),
             "default_clock_off_hours": settings.default_clock_off_hours(),
@@ -950,8 +1003,11 @@ def display_save():
         settings.set_display_rotation(data.get("display_rotation"))
     if "clock_12hr" in data:
         settings.set_use_12hr_clock(bool(data.get("clock_12hr")))
-    if "date_format" in data:
-        settings.set_date_format(str(data.get("date_format") or "us"))
+    if "display_language" in data or "date_format" in data:
+        settings.set_language_region(
+            str(data.get("display_language", settings.display_language())),
+            str(data.get("date_format", settings.date_format())),
+        )
     elif "date_format_eu" in data:
         settings.set_use_european_date(bool(data.get("date_format_eu")))
     if "default_clock" in data:
@@ -1036,6 +1092,7 @@ def display_save():
             "auto_idle_clock": settings.auto_idle_clock_enabled(),
             "display_rotation": settings.display_rotation(),
             "clock_12hr": settings.use_12hr_clock(),
+            "display_language": settings.display_language(),
             "date_format": settings.date_format(),
             "default_clock": settings.default_clock(),
             "default_clock_off_hours": settings.default_clock_off_hours(),

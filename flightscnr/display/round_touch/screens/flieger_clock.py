@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import math
 import time
+from datetime import datetime
 
 import pygame
 
 from display.round_touch import draw, theme, weather_data, weather_icons
+from i18n import format_weekday, tr
 
 _FACE = (30, 30, 30)
 _INK = (255, 255, 255)
@@ -281,7 +283,7 @@ def draw_flieger_clock(surface: pygame.Surface) -> None:
     minute = t.tm_min + sec / 60.0
     hour = (t.tm_hour % 12) + minute / 60.0
 
-    day_str = time.strftime("%a", t).upper()[:3]
+    day_str = format_weekday(datetime.fromtimestamp(now)).upper()[:3]
     date_str = time.strftime("%d", t)
     win_h = dial_r * 0.10
     day_w = dial_r * 0.18
@@ -346,8 +348,8 @@ def draw_flieger_clock(surface: pygame.Surface) -> None:
             night=night_icon,
         )
 
-    _weather_well(top, code_now, "TODAY", night_icon=night)
-    _weather_well(left, code_next, "TOMORROW", night_icon=False)
+    _weather_well(top, code_now, tr("common.today").upper(), night_icon=night)
+    _weather_well(left, code_next, tr("common.tomorrow").upper(), night_icon=False)
 
     sec_ang = math.radians(t.tm_sec * 6.0)
     _red_seconds_hand(surface, bottom[0], bottom[1], sec_ang, dial_r)

@@ -75,6 +75,61 @@ def test_it_comes_back_after_a_restart(monkeypatch, tmp_path):
     assert weather_data._CACHE["ts"] == stamp
 
 
+def test_pre_i18n_cache_is_migrated_without_provider_fetch(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    stamp = time.time() - 300
+    legacy = {
+        "temp": 12,
+        "unit": "C",
+        "ready": True,
+        "weather_code": 1000,
+        "sunrise": "06:12",
+        "sunset": "20:34",
+        "days": [
+            {
+                "label": "Today",
+                "weather_code": 1000,
+                "weather_label": "Clear",
+                "sunrise": "06:12",
+                "sunset": "20:34",
+            },
+            {"label": "Tue", "weather_code": 1101},
+        ],
+    }
+    (tmp_path / "weather_cache.json").write_text(
+        json.dumps({"ts": stamp, "date": "2026-08-31", "payload": legacy})
+    )
+    monkeypatch.setitem(weather_data._CACHE, "payload", None)
+
+    weather_data._load_cache()
+    restored = weather_data.snapshot()
+
+    assert restored["sunrise"] == "06:12"
+    assert restored["sunset"] == "20:34"
+    assert restored["days"][0]["date"] == "2026-08-31"
+    assert restored["days"][1]["date"] == "2026-09-01"
+    assert "weather_label" not in weather_data._CACHE["payload"]["days"][0]
+
+
+def test_future_cache_schema_is_ignored(monkeypatch, tmp_path):
+    _use_tmp(monkeypatch, tmp_path)
+    (tmp_path / "weather_cache.json").write_text(
+        json.dumps(
+            {
+                "schema_version": weather_data.CACHE_SCHEMA_VERSION + 1,
+                "ts": time.time(),
+                "date": "2026-08-31",
+                "payload": PAYLOAD,
+            }
+        )
+    )
+    monkeypatch.setitem(weather_data._CACHE, "payload", None)
+
+    weather_data._load_cache()
+
+    assert weather_data._CACHE["payload"] is None
+
+
 def test_a_stale_reading_is_not_restored(monkeypatch, tmp_path):
     _use_tmp(monkeypatch, tmp_path)
     old = time.time() - (weather_data._DISK_MAX_AGE_S + 600)

@@ -24,7 +24,8 @@ class SettingsBackupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "round_touch_settings.json").write_text(
-                '{"brightness_percent": 80}', encoding="utf-8"
+                '{"brightness_percent": 80, "display_language": "nl"}',
+                encoding="utf-8",
             )
             (root / "secrets.json").write_text(
                 '{"FR24_API_KEY": "abc"}', encoding="utf-8"
@@ -34,6 +35,10 @@ class SettingsBackupTests(unittest.TestCase):
             self.assertEqual(payload["version"], 1)
             self.assertEqual(
                 payload["settings"]["round_touch_settings"]["brightness_percent"], 80
+            )
+            self.assertEqual(
+                payload["settings"]["round_touch_settings"]["display_language"],
+                "nl",
             )
             self.assertEqual(payload["settings"]["secrets"]["FR24_API_KEY"], "abc")
             self.assertIsNone(payload["settings"]["alert_prefs"])
@@ -61,7 +66,8 @@ class SettingsBackupTests(unittest.TestCase):
     def test_apply_writes_sections_and_skips_null(self):
         with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as dst:
             Path(src, "round_touch_settings.json").write_text(
-                '{"brightness_percent": 42}', encoding="utf-8"
+                '{"brightness_percent": 42, "display_language": "de"}',
+                encoding="utf-8",
             )
             Path(src, "weather_prefs.json").write_text(
                 '{"temperature_units": "metric"}', encoding="utf-8"
@@ -80,6 +86,7 @@ class SettingsBackupTests(unittest.TestCase):
                 (Path(dst) / "round_touch_settings.json").read_text(encoding="utf-8")
             )
             self.assertEqual(restored["brightness_percent"], 42)
+            self.assertEqual(restored["display_language"], "de")
             # Untouched because null in export
             kept = json.loads(
                 (Path(dst) / "alert_prefs.json").read_text(encoding="utf-8")

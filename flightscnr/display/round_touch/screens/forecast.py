@@ -12,6 +12,7 @@
 import pygame
 
 from display.round_touch import draw, nav, theme, weather_data, weather_icons
+from i18n import tr
 
 FOOTER_BUTTONS = ("radar",)
 
@@ -31,7 +32,10 @@ def tap_footer_action(x: int, y: int) -> str | None:
 
 def draw_forecast(surface):
     draw.fill_background_textured(surface)
-    nav.draw_curved_breadcrumb(surface, ["Radar", "Clock", "Forecast"])
+    nav.draw_curved_breadcrumb(
+        surface,
+        [tr("common.radar"), tr("common.clock"), tr("common.forecast")],
+    )
     nav.draw_footer_buttons(surface, list(FOOTER_BUTTONS))
 
     wx = weather_data.refresh() or weather_data.snapshot()
@@ -40,7 +44,9 @@ def draw_forecast(surface):
     detail_font = draw.load_font(theme.FONT_DETAIL)
 
     y = nav.content_top_y() + theme.s(4)
-    y = draw.draw_center_line(surface, "Forecast", y, title_font, theme.SWEEP)
+    y = draw.draw_center_line(
+        surface, tr("forecast.title"), y, title_font, theme.SWEEP
+    )
 
     if not wx or not wx.get("ready"):
         y += theme.s(12)
@@ -52,10 +58,12 @@ def draw_forecast(surface):
     days = wx.get("days") or []
     if not days:
         y += theme.s(12)
-        y = draw.draw_center_line(surface, "Forecast unavailable", y, body_font, theme.HINT)
+        y = draw.draw_center_line(
+            surface, tr("forecast.unavailable"), y, body_font, theme.HINT
+        )
         draw.draw_center_line(
             surface,
-            "Will retry automatically",
+            tr("forecast.retry_automatically"),
             y,
             detail_font,
             theme.HINT,
@@ -77,8 +85,8 @@ def draw_forecast(surface):
 
     for i, day in enumerate(days[:3]):
         cx = col_x[i]
-        label = day.get("label") or f"Day {i + 1}"
-        label_color = theme.SWEEP if label == "Today" else theme.LABEL
+        label = day.get("label") or tr("forecast.day_number", number=i + 1)
+        label_color = theme.SWEEP if day.get("is_today") else theme.LABEL
         rendered = detail_font.render(label, True, label_color)
         surface.blit(rendered, rendered.get_rect(midtop=(cx, top_y)))
 
@@ -100,7 +108,11 @@ def draw_forecast(surface):
 
         precip = day.get("precip_pct")
         if precip is not None:
-            rain = detail_font.render(f"Rain {int(precip)}%", True, theme.HINT)
+            rain = detail_font.render(
+                tr("forecast.rain_percent", percent=int(precip)),
+                True,
+                theme.HINT,
+            )
             surface.blit(rain, rain.get_rect(midtop=(cx, row_y)))
 
     weather_icons.draw_attribution(surface)
