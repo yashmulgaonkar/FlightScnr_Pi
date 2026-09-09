@@ -243,17 +243,15 @@ RADAR_HUD_LAYOUT_OFFSET_MAX = 96
 
 # Baked top-pill offsets (from device arrange pass, 2026-07-31).
 RADAR_HUD_LAYOUT_TOP_DEFAULT = {
-    "wx_icon": [-29, 31],
+    "wx_icon": [-24, 40],
     "temp": [42, -29],
     "wind": [5, -5],
-    "aqi": [-4, 0],
 }
 
 # Baked bottom-pill offsets (from device arrange pass, 2026-07-31).
 RADAR_HUD_LAYOUT_BOTTOM_DEFAULT = {
-    "wx_icon": [2, -6],
+    "wx_icon": [9, -13],
     "wind": [4, 0],
-    "aqi": [-4, 0],
 }
 
 # Offsets baked when the pill held three right-side icons. The HUD now spaces
@@ -1042,10 +1040,6 @@ def _load():
                 state.get("radar_hud_layout_top"), "radar_hud_layout_top"
             )
         )
-        # Inject baked AQI nudge when older saves never stored an aqi offset.
-        if "aqi" not in layout:
-            layout["aqi"] = list(RADAR_HUD_LAYOUT_TOP_DEFAULT["aqi"])
-            migrated = True
         if state.get("radar_hud_layout_top") != layout:
             state["radar_hud_layout_top"] = layout
             migrated = True
@@ -1058,9 +1052,6 @@ def _load():
                 state.get("radar_hud_layout_bottom"), "radar_hud_layout_bottom"
             )
         )
-        if "aqi" not in layout_b:
-            layout_b["aqi"] = list(RADAR_HUD_LAYOUT_BOTTOM_DEFAULT["aqi"])
-            migrated = True
         if state.get("radar_hud_layout_bottom") != layout_b:
             state["radar_hud_layout_bottom"] = layout_b
             migrated = True

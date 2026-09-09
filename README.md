@@ -1,6 +1,8 @@
 # FlightScnr Pi
 
-A [round **4″ touch display**](https://www.waveshare.com/4inch-dsi-lcd-c.htm?&aff_id=108718) flight and marine tracker for Raspberry Pi. Dark radar UI, animated sweep, map tiles, gesture navigation, LiveATC audio, and a local **web portal** for setup — no SSH required for day-to-day use. Modeled after [FlightScnr](https://github.com/yashmulgaonkar/FlightScnr).
+A round **4″ touch display** flight and marine tracker for Raspberry Pi. Dark radar UI, animated sweep, map tiles, gesture navigation, LiveATC audio, and a local **web portal** for setup — no SSH required for day-to-day use. Modeled after [FlightScnr](https://github.com/yashmulgaonkar/FlightScnr).
+
+**Display:** [Waveshare 4inch DSI LCD (C)](https://www.waveshare.com/4inch-dsi-lcd-c.htm?&aff_id=108718) (720×720) and the newer [4-DSI-TOUCH-C](https://www.waveshare.com/4-dsi-touch-c.htm?&aff_id=108718) (same resolution; different bezel, fits the same housing). The new panel needs a different firmware overlay or it stays black — see [Quick install](#quick-install) and [#207](https://github.com/yashmulgaonkar/FlightScnr_Pi/issues/207). On **4-DSI-TOUCH-C**, the display **power cable is mandatory** (do not rely on DSI power alone).
 
 ![FlightScnr Pi on a round display](docs/images/flightscnrpi.jpg)
 
@@ -228,7 +230,20 @@ Use `| bash -s -- --hard` only if other local edits also block the pull.
 ## Quick install
 
 1. Gather parts and assemble the unit — see [Hardware](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Hardware) and [Hardware Assembly](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Hardware-Assembly).
-2. Flash Raspberry Pi OS (64-bit, with desktop), enable the Waveshare panel overlay, then:
+2. Flash Raspberry Pi OS (64-bit, with desktop), then enable the matching Waveshare panel overlay in boot `config.txt` (`/boot/firmware/config.txt` on Bookworm+):
+
+```text
+dtoverlay=vc4-kms-v3d
+```
+
+| Panel | Product page | Overlay (DSI1 / typical Pi 4) |
+| ----- | ------------ | ----------------------------- |
+| **4inch DSI LCD (C)** (original) | [waveshare.com/4inch-dsi-lcd-c.htm](https://www.waveshare.com/4inch-dsi-lcd-c.htm?&aff_id=108718) | `dtoverlay=vc4-kms-dsi-waveshare-panel,4_0_inchC` |
+| **4-DSI-TOUCH-C** (newer look; same housing) | [waveshare.com/4-dsi-touch-c.htm](https://www.waveshare.com/4-dsi-touch-c.htm?&aff_id=108718) | `dtoverlay=vc4-kms-dsi-waveshare-panel-v2,4_0_inch_c` |
+
+Use only one panel overlay. On **4-DSI-TOUCH-C**, connect the display **power cable** — it is required (the panel will not run from the DSI ribbon alone). On Pi 5 / CM, if the screen stays blank, try the DSI0 form of the same overlay (see [Software Setup](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Software-Setup)). Thanks to [@Matzebhv](https://github.com/Matzebhv) for the newer-panel overlay in [#207](https://github.com/yashmulgaonkar/FlightScnr_Pi/issues/207).
+
+Then:
 
 ```bash
 git clone https://github.com/yashmulgaonkar/FlightScnr_Pi.git ~/FlightScnr_Pi
