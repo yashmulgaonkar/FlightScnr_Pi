@@ -84,9 +84,20 @@ class RadarHudSettingsTests(unittest.TestCase):
                 settings.radar_hud_layout_top(),
                 settings.copy_radar_hud_layout_top_default(),
             )
-            self.assertEqual(settings.radar_hud_layout_offset("wx_icon"), (-29, 31))
-            self.assertEqual(settings.radar_hud_layout_offset("temp"), (42, -29))
-            self.assertEqual(settings.radar_hud_layout_offset("wind"), (5, -5))
+            top = settings.copy_radar_hud_layout_top_default()
+            self.assertEqual(
+                settings.radar_hud_layout_offset("wx_icon"),
+                tuple(top["wx_icon"]),
+            )
+            self.assertEqual(
+                settings.radar_hud_layout_offset("temp"),
+                tuple(top["temp"]),
+            )
+            self.assertEqual(
+                settings.radar_hud_layout_offset("wind"),
+                tuple(top["wind"]),
+            )
+            self.assertEqual(settings.radar_hud_layout_offset("aqi"), (0, 0))
             self.assertEqual(settings.radar_hud_layout_offset("clock"), (0, 0))
 
     def test_arrange_gated_by_env(self):
@@ -119,9 +130,67 @@ class RadarHudSettingsTests(unittest.TestCase):
                 settings.radar_hud_layout_bottom(),
                 settings.copy_radar_hud_layout_bottom_default(),
             )
-            self.assertEqual(settings.radar_hud_layout_offset("wx_icon"), (2, -6))
-            self.assertEqual(settings.radar_hud_layout_offset("wind"), (4, 0))
+            bottom = settings.copy_radar_hud_layout_bottom_default()
+            self.assertEqual(
+                settings.radar_hud_layout_offset("wx_icon"),
+                tuple(bottom["wx_icon"]),
+            )
+            self.assertEqual(
+                settings.radar_hud_layout_offset("wind"),
+                tuple(bottom["wind"]),
+            )
+            self.assertEqual(settings.radar_hud_layout_offset("aqi"), (0, 0))
             self.assertEqual(settings.radar_hud_layout_offset("clock"), (0, 0))
+
+    def test_load_layout_without_aqi_does_not_keyerror(self):
+        """Regression: baked defaults omit aqi; injection must not assume the key."""
+        import json
+        import tempfile
+
+        from display.round_touch import settings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "round_touch_settings.json")
+            Path(path).write_text(
+                json.dumps(
+                    {
+                        "radar_hud_layout_top": {
+                            "wx_icon": [-24, 40],
+                            "temp": [42, -29],
+                            "wind": [5, -5],
+                        },
+                        "radar_hud_layout_bottom": {
+                            "wx_icon": [9, -13],
+                            "wind": [4, 0],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(settings, "SETTINGS_PATH", path), mock.patch.object(
+                settings, "DATA_DIR", tmp
+            ), mock.patch.object(settings, "RELOAD_REQUEST_PATH", path + ".reload"):
+                loaded = settings._load()
+            self.assertNotIn("aqi", loaded["radar_hud_layout_top"])
+            self.assertNotIn("aqi", loaded["radar_hud_layout_bottom"])
+
+    def test_fresh_settings_then_reload_does_not_keyerror(self):
+        """Fresh install writes layouts without aqi; second _load must not crash."""
+        import tempfile
+
+        from display.round_touch import settings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "round_touch_settings.json")
+            with mock.patch.object(settings, "SETTINGS_PATH", path), mock.patch.object(
+                settings, "DATA_DIR", tmp
+            ), mock.patch.object(settings, "RELOAD_REQUEST_PATH", path + ".reload"):
+                first = settings._load()
+                self.assertTrue(Path(path).is_file())
+                self.assertNotIn("aqi", first.get("radar_hud_layout_top") or {})
+                second = settings._load()
+            self.assertNotIn("aqi", second.get("radar_hud_layout_top") or {})
+            self.assertNotIn("aqi", second.get("radar_hud_layout_bottom") or {})
 
 
 class HourlyChimeGuardTests(unittest.TestCase):

@@ -1027,10 +1027,6 @@ def _load():
                 state.get("radar_hud_layout_top"), "radar_hud_layout_top"
             )
         )
-        # Inject baked AQI nudge when older saves never stored an aqi offset.
-        if "aqi" not in layout:
-            layout["aqi"] = list(RADAR_HUD_LAYOUT_TOP_DEFAULT["aqi"])
-            migrated = True
         if state.get("radar_hud_layout_top") != layout:
             state["radar_hud_layout_top"] = layout
             migrated = True
@@ -1043,9 +1039,6 @@ def _load():
                 state.get("radar_hud_layout_bottom"), "radar_hud_layout_bottom"
             )
         )
-        if "aqi" not in layout_b:
-            layout_b["aqi"] = list(RADAR_HUD_LAYOUT_BOTTOM_DEFAULT["aqi"])
-            migrated = True
         if state.get("radar_hud_layout_bottom") != layout_b:
             state["radar_hud_layout_bottom"] = layout_b
             migrated = True
