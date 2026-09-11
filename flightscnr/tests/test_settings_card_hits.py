@@ -162,6 +162,12 @@ class TestThemeCrayonGrid:
         info.theme_toggle_expanded(info.RGB_GROUP_RUNWAY)
         assert info._theme_content_height() == h0
 
+    def test_text_color_groups_are_on_colors_page(self):
+        assert info.RGB_GROUP_TEXT_DARK in info._RGB_GROUP_ORDER
+        assert info.RGB_GROUP_TEXT_LIGHT in info._RGB_GROUP_ORDER
+        assert "Flight Number" in info._RGB_GROUP_TITLES[info.RGB_GROUP_TEXT_DARK]
+        assert "Flight Number" in info._RGB_GROUP_TITLES[info.RGB_GROUP_TEXT_LIGHT]
+
 
 class TestRowsStartAtContentTop:
     def test_rows_top_is_content_top(self):

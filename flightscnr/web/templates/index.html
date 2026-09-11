@@ -257,6 +257,30 @@
                 <input id="runway_color" type="color" title="Runway centerline">
             </div>
             <p class="hint">Sets RUNWAY_DARKMAP — runway centerline color on the dark basemap (skipped on VFR).</p>
+            <label>Runway Centerline Color for Light Map</label>
+            <div class="rgb-row" id="runway_light_rgb">
+                <label>R <input id="runway_light_r" type="number" min="0" max="255" step="1"></label>
+                <label>G <input id="runway_light_g" type="number" min="0" max="255" step="1"></label>
+                <label>B <input id="runway_light_b" type="number" min="0" max="255" step="1"></label>
+                <input id="runway_light_color" type="color" title="Runway centerline light map">
+            </div>
+            <p class="hint">Sets RUNWAY_LIGHT — runway centerline color on light basemaps (skipped on VFR).</p>
+            <label>Flight Number Color for Dark Map</label>
+            <div class="rgb-row" id="tag_text_dark_rgb">
+                <label>R <input id="text_dark_r" type="number" min="0" max="255" step="1"></label>
+                <label>G <input id="text_dark_g" type="number" min="0" max="255" step="1"></label>
+                <label>B <input id="text_dark_b" type="number" min="0" max="255" step="1"></label>
+                <input id="text_dark_color" type="color" title="Flight number dark map">
+            </div>
+            <p class="hint">Top identity line on aircraft radar tags (flight number / callsign) for dark basemaps.</p>
+            <label>Flight Number Color for Light Map</label>
+            <div class="rgb-row" id="tag_text_light_rgb">
+                <label>R <input id="text_light_r" type="number" min="0" max="255" step="1"></label>
+                <label>G <input id="text_light_g" type="number" min="0" max="255" step="1"></label>
+                <label>B <input id="text_light_b" type="number" min="0" max="255" step="1"></label>
+                <input id="text_light_color" type="color" title="Flight number light map">
+            </div>
+            <p class="hint">Same tag identity line on light / VFR / street basemaps. Type and altitude rows are unchanged.</p>
             <label for="map_style">Map style</label>
             <select id="map_style">
                 <option value="dark">Dark: Carto</option>
@@ -1432,6 +1456,9 @@ async function loadAll() {
         $("max_height").value = String(r.max_height_ft ?? 100000);
         setRgbInputs("theme", r.theme_rgb || [0, 255, 0]);
         setRgbInputs("runway", r.runway_darkmap_rgb || [225, 128, 0]);
+        setRgbInputs("runway_light", r.runway_light_rgb || [35, 55, 95]);
+        setRgbInputs("text_dark", r.tag_text_dark_rgb || [0, 255, 0]);
+        setRgbInputs("text_light", r.tag_text_light_rgb || [15, 23, 42]);
         if ($("map_style")) $("map_style").value = r.map_style || "dark";
         if ($("vfr_opacity")) {
             $("vfr_opacity").value = String(r.vfr_map_opacity ?? 45);
@@ -1865,6 +1892,9 @@ async function saveRadar() {
                 max_height_ft: Number($("max_height").value),
                 theme_rgb: readRgbInputs("theme"),
                 runway_darkmap_rgb: readRgbInputs("runway"),
+                runway_light_rgb: readRgbInputs("runway_light"),
+                tag_text_dark_rgb: readRgbInputs("text_dark"),
+                tag_text_light_rgb: readRgbInputs("text_light"),
                 show_compass_rose: $("show_compass").checked,
                 show_range_rings: $("show_range_rings") ? $("show_range_rings").checked : true,
                 color_by_altitude: $("color_by_altitude") ? $("color_by_altitude").checked : false,
@@ -2111,6 +2141,9 @@ async function saveAndReloadSettings(statusId) {
                 max_height_ft: Number($("max_height").value),
                 theme_rgb: readRgbInputs("theme"),
                 runway_darkmap_rgb: readRgbInputs("runway"),
+                runway_light_rgb: readRgbInputs("runway_light"),
+                tag_text_dark_rgb: readRgbInputs("text_dark"),
+                tag_text_light_rgb: readRgbInputs("text_light"),
                 show_compass_rose: $("show_compass").checked,
                 show_range_rings: $("show_range_rings") ? $("show_range_rings").checked : true,
                 color_by_altitude: $("color_by_altitude") ? $("color_by_altitude").checked : false,
@@ -3458,6 +3491,9 @@ if ($("traffic_labels")) $("traffic_labels").addEventListener("change", syncTagL
 document.addEventListener("DOMContentLoaded", () => {
     wireRgbGroup("theme");
     wireRgbGroup("runway");
+    wireRgbGroup("runway_light");
+    wireRgbGroup("text_dark");
+    wireRgbGroup("text_light");
     loadAll();
     checkUpdates();
     startDump1090LivePoll();

@@ -58,6 +58,48 @@ class RadarHudSettingsTests(unittest.TestCase):
             self.assertTrue(settings.toggle_radar_hud_dark())
             self.assertFalse(settings.toggle_radar_hud_dark())
 
+    def test_tag_text_rgb_defaults_and_setters(self):
+        from display.round_touch import color_presets, settings, theme
+
+        with mock.patch.object(settings, "_save"):
+            settings._state["tag_text_dark_rgb"] = list(
+                color_presets.DEFAULT_TAG_TEXT_DARK_RGB
+            )
+            settings._state["tag_text_light_rgb"] = list(
+                color_presets.DEFAULT_TAG_TEXT_LIGHT_RGB
+            )
+            settings.apply_theme_colors()
+            self.assertEqual(
+                settings.tag_text_dark_rgb(), color_presets.DEFAULT_TAG_TEXT_DARK_RGB
+            )
+            self.assertEqual(
+                settings.tag_text_light_rgb(), color_presets.DEFAULT_TAG_TEXT_LIGHT_RGB
+            )
+
+            settings.set_tag_text_dark_rgb(10, 20, 30)
+            settings.set_tag_text_light_rgb(200, 210, 220)
+            self.assertEqual(theme.TAG_TEXT_DARK, (10, 20, 30))
+            self.assertEqual(theme.TAG_TEXT_LIGHT, (200, 210, 220))
+
+    def test_migrate_adds_tag_text_rgb(self):
+        from display.round_touch import color_presets
+
+        state = {
+            "theme_palette_v": color_presets.THEME_PALETTE_V,
+            "theme_custom": True,
+            "custom_theme_rgb": [0, 255, 0],
+            "theme_index": 2,
+        }
+        self.assertTrue(color_presets.migrate_theme_index(state))
+        self.assertEqual(
+            state["tag_text_dark_rgb"], list(color_presets.DEFAULT_TAG_TEXT_DARK_RGB)
+        )
+        self.assertEqual(
+            state["tag_text_light_rgb"], list(color_presets.DEFAULT_TAG_TEXT_LIGHT_RGB)
+        )
+        self.assertNotIn("hud_text_dark_rgb", state)
+        self.assertNotIn("hud_text_light_rgb", state)
+
     def test_chime_toggle(self):
         from display.round_touch import settings
 

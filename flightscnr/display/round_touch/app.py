@@ -3929,6 +3929,20 @@ class RoundTouchDisplay:
             rgb[channel] = value
             settings.set_runway_light_rgb(*rgb, persist=persist)
             return True
+        if group == info.RGB_GROUP_TEXT_DARK:
+            rgb = list(settings.tag_text_dark_rgb())
+            if rgb[channel] == value:
+                return False
+            rgb[channel] = value
+            settings.set_tag_text_dark_rgb(*rgb, persist=persist)
+            return True
+        if group == info.RGB_GROUP_TEXT_LIGHT:
+            rgb = list(settings.tag_text_light_rgb())
+            if rgb[channel] == value:
+                return False
+            rgb[channel] = value
+            settings.set_tag_text_light_rgb(*rgb, persist=persist)
+            return True
         rgb = list(settings.theme_rgb())
         if rgb[channel] == value:
             return False
@@ -3943,6 +3957,10 @@ class RoundTouchDisplay:
             settings.set_runway_darkmap_rgb(r, g, b, persist=True)
         elif group == info.RGB_GROUP_RUNWAY_LIGHT:
             settings.set_runway_light_rgb(r, g, b, persist=True)
+        elif group == info.RGB_GROUP_TEXT_DARK:
+            settings.set_tag_text_dark_rgb(r, g, b, persist=True)
+        elif group == info.RGB_GROUP_TEXT_LIGHT:
+            settings.set_tag_text_light_rgb(r, g, b, persist=True)
         else:
             settings.set_custom_theme_rgb(r, g, b, persist=True)
         self._note_activity()

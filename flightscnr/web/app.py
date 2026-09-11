@@ -1493,6 +1493,9 @@ def radar_json():
             "max_height_ft": settings.max_height_ft(),
             "theme_rgb": list(settings.theme_rgb()),
             "runway_darkmap_rgb": list(settings.runway_darkmap_rgb()),
+            "runway_light_rgb": list(settings.runway_light_rgb()),
+            "tag_text_dark_rgb": list(settings.tag_text_dark_rgb()),
+            "tag_text_light_rgb": list(settings.tag_text_light_rgb()),
             "show_compass_rose": settings.show_compass_rose(),
             "show_range_rings": settings.show_range_rings(),
             "color_by_altitude": settings.color_by_altitude(),
@@ -1656,6 +1659,24 @@ def radar_save():
             settings.set_runway_darkmap_rgb(int(rgb[0]), int(rgb[1]), int(rgb[2]))
         except (TypeError, ValueError, IndexError):
             return jsonify({"ok": False, "message": "runway_darkmap_rgb must be [r,g,b]"}), 400
+    if "runway_light_rgb" in data:
+        rgb = data.get("runway_light_rgb") or []
+        try:
+            settings.set_runway_light_rgb(int(rgb[0]), int(rgb[1]), int(rgb[2]))
+        except (TypeError, ValueError, IndexError):
+            return jsonify({"ok": False, "message": "runway_light_rgb must be [r,g,b]"}), 400
+    if "tag_text_dark_rgb" in data:
+        rgb = data.get("tag_text_dark_rgb") or []
+        try:
+            settings.set_tag_text_dark_rgb(int(rgb[0]), int(rgb[1]), int(rgb[2]))
+        except (TypeError, ValueError, IndexError):
+            return jsonify({"ok": False, "message": "tag_text_dark_rgb must be [r,g,b]"}), 400
+    if "tag_text_light_rgb" in data:
+        rgb = data.get("tag_text_light_rgb") or []
+        try:
+            settings.set_tag_text_light_rgb(int(rgb[0]), int(rgb[1]), int(rgb[2]))
+        except (TypeError, ValueError, IndexError):
+            return jsonify({"ok": False, "message": "tag_text_light_rgb must be [r,g,b]"}), 400
     if "show_compass_rose" in data:
         settings.set_show_compass_rose(bool(data.get("show_compass_rose")))
     if "show_range_rings" in data:

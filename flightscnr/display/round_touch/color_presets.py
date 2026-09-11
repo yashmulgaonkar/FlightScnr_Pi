@@ -54,6 +54,10 @@ DEFAULT_CUSTOM_RGB = THEMES[DEFAULT_THEME_INDEX]["sweep"]
 DEFAULT_RUNWAY_DARKMAP_RGB = (255, 255, 255)
 # Default light-basemap runway centerline (dark navy for pale charts).
 DEFAULT_RUNWAY_LIGHT_RGB = (35, 55, 95)
+# Radar blip flight-number row — dark basemap (default green accent).
+DEFAULT_TAG_TEXT_DARK_RGB = (0, 255, 0)
+# Radar blip flight-number row — pale/light basemap (near-black).
+DEFAULT_TAG_TEXT_LIGHT_RGB = (15, 23, 42)
 
 # Bump when THEME_NAMES / index order changes so saved indices can remapped.
 THEME_PALETTE_V = 3
@@ -148,6 +152,28 @@ def migrate_theme_index(state: dict) -> bool:
         changed = True
     else:
         state["runway_light_rgb"] = list(normalize_rgb(state.get("runway_light_rgb")))
+
+    # Rename brief hud_text_* keys (never released) → tag_text_* for blip IDs.
+    if "tag_text_dark_rgb" not in state and "hud_text_dark_rgb" in state:
+        state["tag_text_dark_rgb"] = list(normalize_rgb(state.get("hud_text_dark_rgb")))
+        changed = True
+    if "tag_text_light_rgb" not in state and "hud_text_light_rgb" in state:
+        state["tag_text_light_rgb"] = list(normalize_rgb(state.get("hud_text_light_rgb")))
+        changed = True
+    state.pop("hud_text_dark_rgb", None)
+    state.pop("hud_text_light_rgb", None)
+
+    if "tag_text_dark_rgb" not in state:
+        state["tag_text_dark_rgb"] = list(DEFAULT_TAG_TEXT_DARK_RGB)
+        changed = True
+    else:
+        state["tag_text_dark_rgb"] = list(normalize_rgb(state.get("tag_text_dark_rgb")))
+
+    if "tag_text_light_rgb" not in state:
+        state["tag_text_light_rgb"] = list(DEFAULT_TAG_TEXT_LIGHT_RGB)
+        changed = True
+    else:
+        state["tag_text_light_rgb"] = list(normalize_rgb(state.get("tag_text_light_rgb")))
 
     state["theme_palette_v"] = THEME_PALETTE_V
     # Always treat accent as custom RGB after presets were removed.

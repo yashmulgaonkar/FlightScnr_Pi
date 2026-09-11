@@ -163,6 +163,9 @@ AIRPORT = (120, 150, 175)
 RUNWAY_DARKMAP = (225, 128, 0)
 # Higher-contrast runway lines on light CARTO basemap.
 RUNWAY_LIGHT = (35, 55, 95)
+# Radar blip flight-number / callsign row (user-tunable; dark vs light basemap).
+TAG_TEXT_DARK = (0, 255, 0)
+TAG_TEXT_LIGHT = (15, 23, 42)
 ALERT_MILITARY = (255, 40, 40)   # red — military tracks (flashing)
 # Vivid aqua — watch list. Punchier than LIVE (56, 168, 255), not climb (0, 255, 255).
 ALERT_WATCH = (0, 200, 255)

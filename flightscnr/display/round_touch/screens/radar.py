@@ -972,6 +972,13 @@ def _vessel_tag_lines(flight):
     ], block_h
 
 
+def _flight_number_tag_color() -> tuple[int, int, int]:
+    """User-tunable color for the aircraft blip identity (flight number) row."""
+    if _pale_basemap():
+        return tuple(theme.TAG_TEXT_LIGHT[:3])
+    return tuple(theme.TAG_TEXT_DARK[:3])
+
+
 def _aircraft_tag_lines(flight):
     """(lines, block_h) for an aircraft, or None when it should not be labelled."""
     if not settings.show_aircraft_labels():
@@ -998,7 +1005,7 @@ def _aircraft_tag_lines(flight):
         if not str(callsign).startswith("*"):
             callsign = f"* {callsign}"
     raw_lines = [
-        (callsign, _overlay_color_for_basemap(theme.GRID), main_font, offsets[0]),
+        (callsign, _flight_number_tag_color(), main_font, offsets[0]),
         (plane_type, _overlay_color_for_basemap(theme.TAG_TYPE), sub_font, offsets[1]),
         (alt, _overlay_color_for_basemap(alt_color), sub_font, offsets[2]),
     ]
@@ -1184,7 +1191,7 @@ def _amber_icon_basemap() -> bool:
 _LIGHT_MAP_ICON = (234, 88, 12)         # dark amber (Light: Carto / VFR)
 _LIGHT_MAP_ICON_UNKNOWN = (146, 64, 14)  # darker amber for unmapped types
 _LIGHT_MAP_TRACKED = (22, 163, 74)      # vivid green (tracked)
-_LIGHT_MAP_CALLSIGN = (15, 23, 42)      # near-black tags
+_LIGHT_MAP_CALLSIGN = (15, 23, 42)      # near-black tags (default for pale maps)
 _LIGHT_MAP_TYPE = (30, 64, 175)         # indigo
 _LIGHT_MAP_ALT_UP = (14, 116, 144)      # deep teal
 _LIGHT_MAP_ALT_DOWN = (126, 34, 206)    # deep purple
