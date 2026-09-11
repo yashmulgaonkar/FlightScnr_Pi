@@ -78,15 +78,16 @@ TRAFFIC_LABEL_LABELS = {
     "both": "Aircraft and Marine",
     "off": "OFF",
 }
-# Radar aircraft identity line: marketing flight number, ATC callsign, or both
-# (time-alternating on the same line when they differ).
-AIRCRAFT_TAG_ID_MODES = ("flight_number", "callsign", "both")
+# Radar aircraft identity line: marketing flight number, ATC callsign, tail, or
+# time-alternating through whichever of those differ.
+AIRCRAFT_TAG_ID_MODES = ("flight_number", "callsign", "tail", "alternate")
 AIRCRAFT_TAG_ID_LABELS = {
     "flight_number": "Flight number",
     "callsign": "Callsign",
-    "both": "Both (alternate)",
+    "tail": "Tail number",
+    "alternate": "Alternate",
 }
-# Seconds between identity swaps when aircraft_tag_id == both.
+# Seconds between identity swaps when aircraft_tag_id == alternate.
 AIRCRAFT_TAG_ID_ALTERNATE_S = 2.5
 # Split-flap board row identity: tail number, marketing flight, or ATC callsign.
 FLIP_BOARD_ID_MODES = ("tail", "flight_number", "callsign")
@@ -860,7 +861,11 @@ def _load():
         state["traffic_labels"] = labels
     state["show_aircraft_tag"] = state["traffic_labels"] != "off"
     tag_id = str(state.get("aircraft_tag_id") or "").strip().lower()
-    if tag_id not in AIRCRAFT_TAG_ID_MODES:
+    if tag_id == "both":
+        # Legacy two-way alternate → three-way (flight / callsign / tail).
+        state["aircraft_tag_id"] = "alternate"
+        migrated = True
+    elif tag_id not in AIRCRAFT_TAG_ID_MODES:
         state["aircraft_tag_id"] = "flight_number"
         migrated = True
     else:
@@ -2379,8 +2384,10 @@ def set_show_aircraft_tag(enabled: bool):
 
 
 def aircraft_tag_id() -> str:
-    """Aircraft tag identity: flight_number, callsign, or both (alternate)."""
+    """Aircraft tag identity: flight_number, callsign, tail, or alternate."""
     mode = str(_state.get("aircraft_tag_id") or "").strip().lower()
+    if mode == "both":
+        return "alternate"
     if mode in AIRCRAFT_TAG_ID_MODES:
         return mode
     return "flight_number"
@@ -2392,6 +2399,8 @@ def aircraft_tag_id_label() -> str:
 
 def set_aircraft_tag_id(mode: str) -> str:
     raw = str(mode or "").strip().lower()
+    if raw == "both":
+        raw = "alternate"
     if raw not in AIRCRAFT_TAG_ID_MODES:
         raw = "flight_number"
     _state["aircraft_tag_id"] = raw

@@ -128,20 +128,57 @@ def test_aircraft_tag_identity_callsign_keeps_icao_prefix():
     assert aircraft_tag_identity(flight, mode="flight_number") == "UA34"
 
 
-def test_aircraft_tag_identity_both_alternates():
-    flight = {"flight_number": "UA5796", "callsign": "SKW5796"}
+def test_aircraft_tag_identity_tail_mode():
+    flight = {
+        "flight_number": "UA5796",
+        "callsign": "SKW5796",
+        "registration": "N12345",
+    }
+    assert aircraft_tag_identity(flight, mode="tail") == "N12345"
+
+
+def test_aircraft_tag_identity_tail_falls_back_to_callsign():
+    flight = {"callsign": "SKW5796"}
+    assert aircraft_tag_identity(flight, mode="tail") == "SKW5796"
+
+
+def test_aircraft_tag_identity_alternate_cycles_three():
+    flight = {
+        "flight_number": "UA5796",
+        "callsign": "SKW5796",
+        "registration": "N12345",
+    }
+    assert aircraft_tag_identity(flight, mode="alternate", now=0.0, alternate_s=2.5) == "UA5796"
+    assert aircraft_tag_identity(flight, mode="alternate", now=2.5, alternate_s=2.5) == "SKW5796"
+    assert aircraft_tag_identity(flight, mode="alternate", now=5.0, alternate_s=2.5) == "N12345"
+    assert aircraft_tag_identity(flight, mode="alternate", now=7.5, alternate_s=2.5) == "UA5796"
+
+
+def test_aircraft_tag_identity_legacy_both_alias():
+    flight = {
+        "flight_number": "UA5796",
+        "callsign": "SKW5796",
+        "registration": "N12345",
+    }
     assert aircraft_tag_identity(flight, mode="both", now=0.0, alternate_s=2.5) == "UA5796"
     assert aircraft_tag_identity(flight, mode="both", now=2.5, alternate_s=2.5) == "SKW5796"
-    assert aircraft_tag_identity(flight, mode="both", now=5.0, alternate_s=2.5) == "UA5796"
+    assert aircraft_tag_identity(flight, mode="both", now=5.0, alternate_s=2.5) == "N12345"
 
 
-def test_aircraft_tag_identity_both_no_alternate_when_same():
+def test_aircraft_tag_identity_alternate_skips_duplicates():
+    # GA: callsign matches registration — only one unique identity.
+    flight = {"callsign": "N123AB", "registration": "N123AB"}
+    assert aircraft_tag_identity(flight, mode="alternate", now=0.0) == "N123AB"
+    assert aircraft_tag_identity(flight, mode="alternate", now=10.0) == "N123AB"
+
+
+def test_aircraft_tag_identity_alternate_no_alternate_when_same():
     flight = {"flight_number": "SKW5510", "callsign": "SKW5510"}
-    assert aircraft_tag_identity(flight, mode="both", now=0.0) == "SKW5510"
-    assert aircraft_tag_identity(flight, mode="both", now=10.0) == "SKW5510"
+    assert aircraft_tag_identity(flight, mode="alternate", now=0.0) == "SKW5510"
+    assert aircraft_tag_identity(flight, mode="alternate", now=10.0) == "SKW5510"
 
 
-def test_aircraft_tag_identity_both_callsign_only():
+def test_aircraft_tag_identity_alternate_callsign_only():
     flight = {"callsign": "N123AB"}
-    assert aircraft_tag_identity(flight, mode="both", now=0.0) == "N123AB"
-    assert aircraft_tag_identity(flight, mode="both", now=10.0) == "N123AB"
+    assert aircraft_tag_identity(flight, mode="alternate", now=0.0) == "N123AB"
+    assert aircraft_tag_identity(flight, mode="alternate", now=10.0) == "N123AB"
