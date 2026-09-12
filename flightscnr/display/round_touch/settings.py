@@ -22,6 +22,9 @@ RELOAD_REQUEST_PATH = os.path.join(DATA_DIR, "round_touch_settings.reload")
 _settings_mtime: float | None = None
 # True when _state matches disk. Slider drags set this False until persist.
 _disk_synced = True
+# Display-process-only minimum-altitude override for adaptive auto-floor.
+# Never persisted: restart/crash always returns to the operator setting.
+_runtime_min_height_ft: int | None = None
 
 
 class _SettingsState(dict):
@@ -50,6 +53,8 @@ class _SettingsState(dict):
         super().update(other)
 
 MIN_HEIGHT_OPTIONS = (0, 100, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000)
+# Adaptive auto-floor always moves in exact 500 ft increments.
+AUTO_FLOOR_STEP_FT = 500
 # AIS vessels slower than or equal to this (kt) are hidden; 0 = no speed floor.
 VESSEL_MIN_SPEED_OPTIONS = (0, 1, 2, 3, 5, 8, 10, 15)
 # Aircraft slower than or equal to this GS (kt) are hidden; 0 = no speed floor.
@@ -380,6 +385,8 @@ _defaults = {
     "min_height_ft": 1000,
     "max_height_ft": 100000,
     "auto_idle_clock": True,
+    # Lower the radar floor in 500 ft runtime-only steps before auto-idling.
+    "auto_lower_altitude_floor_on_empty": False,
     "default_clock": "digital",
     # Clock face while Off-Hours window is active (force-clock / idle / open).
     "default_clock_off_hours": "digital",
@@ -1266,6 +1273,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("max_height_ft"),
         state.get("brightness_percent"),
         state.get("auto_idle_clock"),
+        bool(state.get("auto_lower_altitude_floor_on_empty", False)),
         str(state.get("default_clock") or "digital"),
         str(state.get("default_clock_off_hours") or "digital"),
         state.get("flight_detail_timeout_s"),
@@ -1391,7 +1399,7 @@ def sync_from_disk() -> bool:
 
 def reload() -> bool:
     """Reload settings from disk if file changed externally."""
-    global _state, _settings_mtime, _disk_synced
+    global _state, _settings_mtime, _disk_synced, _runtime_min_height_ft
     force = _consume_reload_request()
     # Do not clobber in-memory slider edits (brightness / VFR opacity / theme RGB)
     # that have not been flushed to disk yet — otherwise values flicker every poll.
@@ -1416,6 +1424,8 @@ def reload() -> bool:
         return force
 
     incoming = {**_defaults, **data}
+    old_configured_min = configured_min_height_ft()
+    incoming_configured_min = _snap_min_height(incoming.get("min_height_ft", 1000))
     if not force and _settings_snapshot(incoming) == _settings_snapshot(_state):
         try:
             _settings_mtime = os.path.getmtime(SETTINGS_PATH)
@@ -1424,6 +1434,14 @@ def reload() -> bool:
         return False
 
     _state = _load()
+    # Manual portal changes, or disabling either parent feature, cancel a
+    # process-local adaptive override before config mirrors are re-synced.
+    if _runtime_min_height_ft is not None and (
+        incoming_configured_min != old_configured_min
+        or not bool(_state.get("auto_idle_clock", True))
+        or not bool(_state.get("auto_lower_altitude_floor_on_empty", False))
+    ):
+        _runtime_min_height_ft = None
     try:
         _settings_mtime = os.path.getmtime(SETTINGS_PATH)
     except OSError:
@@ -1457,8 +1475,39 @@ def _sync_config_max_height():
         pass
 
 
-def min_height_ft() -> int:
+def configured_min_height_ft() -> int:
+    """Persisted operator-selected minimum altitude floor."""
     return _snap_min_height(_state.get("min_height_ft", 1000))
+
+
+def min_height_ft() -> int:
+    """Effective floor, including any display-process runtime override."""
+    if _runtime_min_height_ft is not None:
+        return _snap_min_height(_runtime_min_height_ft)
+    return configured_min_height_ft()
+
+
+def min_height_override_active() -> bool:
+    return _runtime_min_height_ft is not None
+
+
+def set_runtime_min_height_ft(value: int) -> int:
+    """Set a non-persistent floor, capped by the configured standard."""
+    global _runtime_min_height_ft
+    configured = configured_min_height_ft()
+    target = max(0, min(configured, int(value)))
+    target = _snap_min_height(target)
+    _runtime_min_height_ft = None if target >= configured else target
+    _sync_config_min_height()
+    return min_height_ft()
+
+
+def clear_min_height_override() -> int:
+    """Restore the persisted operator floor without writing settings to disk."""
+    global _runtime_min_height_ft
+    _runtime_min_height_ft = None
+    _sync_config_min_height()
+    return min_height_ft()
 
 
 def max_height_ft() -> int:
@@ -1466,6 +1515,7 @@ def max_height_ft() -> int:
 
 
 def cycle_min_height():
+    clear_min_height_override()
     opts = MIN_HEIGHT_OPTIONS
     current = min_height_ft()
     idx = opts.index(current) if current in opts else 0
@@ -1477,6 +1527,7 @@ def cycle_min_height():
 
 
 def set_min_height_ft(value: int):
+    clear_min_height_override()
     _state["min_height_ft"] = _snap_min_height(value)
     _ensure_height_band()
     _sync_config_min_height()
@@ -2653,12 +2704,58 @@ def auto_idle_clock_enabled() -> bool:
 
 def toggle_auto_idle_clock():
     _state["auto_idle_clock"] = not auto_idle_clock_enabled()
+    if not _state["auto_idle_clock"]:
+        clear_min_height_override()
     _save(_state)
 
 
 def set_auto_idle_clock_enabled(enabled: bool):
     _state["auto_idle_clock"] = bool(enabled)
+    if not _state["auto_idle_clock"]:
+        clear_min_height_override()
     _save(_state)
+
+
+def auto_lower_altitude_floor_on_empty_enabled() -> bool:
+    return bool(_state.get("auto_lower_altitude_floor_on_empty", False))
+
+
+def toggle_auto_lower_altitude_floor_on_empty():
+    _state["auto_lower_altitude_floor_on_empty"] = (
+        not auto_lower_altitude_floor_on_empty_enabled()
+    )
+    if not _state["auto_lower_altitude_floor_on_empty"]:
+        clear_min_height_override()
+    _save(_state)
+
+
+def set_auto_lower_altitude_floor_on_empty(enabled: bool):
+    _state["auto_lower_altitude_floor_on_empty"] = bool(enabled)
+    if not _state["auto_lower_altitude_floor_on_empty"]:
+        clear_min_height_override()
+    _save(_state)
+
+
+def step_down_min_height_ft() -> int:
+    """F2 action: lower effective floor exactly 500 ft, minimum 0."""
+    return set_runtime_min_height_ft(max(0, min_height_ft() - AUTO_FLOOR_STEP_FT))
+
+
+def step_up_min_height_ft() -> int:
+    """F3 action: raise exactly 500 ft, never above configured standard."""
+    return set_runtime_min_height_ft(
+        min(configured_min_height_ft(), min_height_ft() + AUTO_FLOOR_STEP_FT)
+    )
+
+
+def next_lower_min_height_ft() -> int:
+    return max(0, min_height_ft() - AUTO_FLOOR_STEP_FT)
+
+
+def next_higher_min_height_ft() -> int:
+    return min(
+        configured_min_height_ft(), min_height_ft() + AUTO_FLOOR_STEP_FT
+    )
 
 
 def auto_wifi_setup_hotspot_enabled() -> bool:

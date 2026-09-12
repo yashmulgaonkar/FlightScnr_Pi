@@ -211,6 +211,11 @@
                 <option value="4500">4500</option>
                 <option value="5000">5000</option>
             </select>
+            <div class="chk">
+                <label for="smart_autofloor">Smart AutoFloor (requires Auto Idle Clock)</label>
+                <span class="switch"><input id="smart_autofloor" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">Inactive while Auto Idle Clock is off. When active, temporarily lowers the radar floor by 500 ft after 5 seconds with no visible aircraft traffic, down to 0 ft. AIS vessels do not affect AutoFloor. The Min altitude floor above remains the saved Standard and is restored as aircraft traffic climbs back up.</p>
             <label for="max_height">Max altitude ceiling (ft)</label>
             <select id="max_height">
                 <option value="1000">1000</option>
@@ -1454,6 +1459,9 @@ async function loadAll() {
         populateRangeSelect(r.range_presets_mi);
         syncMinSpeedUnitLabels();
         $("min_height").value = String(r.min_height_ft ?? 1000);
+        if ($("smart_autofloor")) {
+            $("smart_autofloor").checked = !!r.auto_lower_altitude_floor_on_empty;
+        }
         $("max_height").value = String(r.max_height_ft ?? 100000);
         setRgbInputs("theme", r.theme_rgb || [0, 255, 0]);
         setRgbInputs("runway", r.runway_darkmap_rgb || [225, 128, 0]);
@@ -1890,6 +1898,7 @@ async function saveRadar() {
                 distance_units: distanceUnitFromSelect(),
                 scale_index: Number($("range_index").value),
                 min_height_ft: Number($("min_height").value),
+                auto_lower_altitude_floor_on_empty: $("smart_autofloor") ? $("smart_autofloor").checked : false,
                 max_height_ft: Number($("max_height").value),
                 theme_rgb: readRgbInputs("theme"),
                 runway_darkmap_rgb: readRgbInputs("runway"),
@@ -2139,6 +2148,7 @@ async function saveAndReloadSettings(statusId) {
                 distance_units: distanceUnitFromSelect(),
                 scale_index: Number($("range_index").value),
                 min_height_ft: Number($("min_height").value),
+                auto_lower_altitude_floor_on_empty: $("smart_autofloor") ? $("smart_autofloor").checked : false,
                 max_height_ft: Number($("max_height").value),
                 theme_rgb: readRgbInputs("theme"),
                 runway_darkmap_rgb: readRgbInputs("runway"),

@@ -293,14 +293,35 @@ def _aqi_bits(
     return w, label_img, value_img, value_rgb
 
 
+def _floor_bits(
+    color: tuple[int, int, int],
+) -> tuple[int, pygame.Surface | None, pygame.Surface | None]:
+    """Return AutoFloor HUD surfaces only while the runtime floor is overridden."""
+    if (
+        not settings.auto_lower_altitude_floor_on_empty_enabled()
+        or not settings.min_height_override_active()
+    ):
+        return 0, None, None
+    try:
+        floor_ft = int(settings.min_height_ft())
+    except (TypeError, ValueError):
+        return 0, None, None
+    label_font = draw_mod.load_font(max(7, theme.s(8)), bold=True)
+    value_font = _ampm_font()
+    label_img = label_font.render("FLOOR", True, color)
+    value_img = value_font.render(f"{floor_ft} ft", True, color)
+    return max(label_img.get_width(), value_img.get_width()), label_img, value_img
+
+
 def _geometry(wx: dict | None = None) -> dict:
     """Place HUD items along the curved pill arc with the clock centered.
 
-    Left of clock: weather (icon+temp) · wind · AQI · home
+    Left of clock: weather (icon+temp) · wind · AQI ·
+    AutoFloor FLOOR (only while runtime-overridden) · home
     Right of clock: volume · chime · alert · ATC · LoFi
 
     The pill half-span is ``max(left, right)`` so the clock stays at ``mid``
-    even when AQI widens the left cluster.
+    even when AQI or an active AutoFloor override widens the left cluster.
     """
     cx, cy = theme.CENTER_X, theme.CENTER_Y
     r_mid = int(theme.VISIBLE_RADIUS * 0.84)
@@ -320,12 +341,14 @@ def _geometry(wx: dict | None = None) -> dict:
     weather_w = _weather_cluster_width(wx_icon_w, temp_w, bottom=bottom)
     wind_w, _, _ = _wind_bits(wx, arrow_px, color)
     aqi_w, _, _, _ = _aqi_bits(wx, color)
+    floor_w, _, _ = _floor_bits(color)
     clock_w, _, _ = _clock_bits(color)
     has_wx_icon = wx_icon_w > 0
     has_temp = temp_w > 0
     has_weather = weather_w > 0
     has_wind = wind_w > 0
     has_aqi = aqi_w > 0
+    has_floor = floor_w > 0
 
     major_gap = theme.s(8)
     # Left environmental cluster: keep pieces readable without crowding.
@@ -345,6 +368,8 @@ def _geometry(wx: dict | None = None) -> dict:
         )
     if has_aqi:
         left_pieces.append(("aqi", aqi_w, major_gap))
+    if has_floor:
+        left_pieces.append(("floor", floor_w, major_gap))
     # Home sits immediately left of the clock (always present).
     left_pieces.append(("home", slot_px, major_gap))
 
@@ -456,6 +481,7 @@ def _geometry(wx: dict | None = None) -> dict:
     wind_c = centers.get("wind", (cx, y_fallback))
     aqi_c = centers.get("aqi", (cx, y_fallback))
     home_c = centers.get("home", (cx, y_fallback))
+    floor_c = centers.get("floor", (cx, y_fallback))
     clock_c = centers["clock"]
     speaker_c = centers["speaker"]
     chime_c = centers["chime"]
@@ -532,6 +558,7 @@ def _geometry(wx: dict | None = None) -> dict:
         "wind_c": wind_c,
         "aqi_c": aqi_c,
         "home_c": home_c,
+        "floor_c": floor_c,
         "chime_c": chime_c,
         "alert_c": alert_c,
         "atc_c": atc_c,
@@ -544,6 +571,7 @@ def _geometry(wx: dict | None = None) -> dict:
         "has_weather": has_weather,
         "has_wind": has_wind,
         "has_aqi": has_aqi,
+        "has_floor": has_floor,
         "base_centers": base,
     }
 
@@ -910,6 +938,24 @@ def _draw_aqi_cluster(
     surface.blit(value_img, value_img.get_rect(midtop=(cx, y)))
 
 
+def _draw_floor_cluster(
+    surface: pygame.Surface,
+    center: tuple[int, int],
+    color: tuple[int, int, int],
+) -> None:
+    """Draw AutoFloor effective altitude as FLOOR + value in the HUD pill."""
+    w, label_img, value_img = _floor_bits(color)
+    if w <= 0 or label_img is None or value_img is None:
+        return
+    cx, cy = center
+    gap = theme.s(1)
+    total_h = label_img.get_height() + gap + value_img.get_height()
+    y = cy - total_h // 2
+    surface.blit(label_img, label_img.get_rect(midtop=(cx, y)))
+    y += label_img.get_height() + gap
+    surface.blit(value_img, value_img.get_rect(midtop=(cx, y)))
+
+
 def _draw_clock_cluster(
     surface: pygame.Surface,
     center: tuple[int, int],
@@ -1133,6 +1179,8 @@ def draw_hud(
                 pts.append(g["wind_c"])
             if g.get("has_aqi"):
                 pts.append(g["aqi_c"])
+            if g.get("has_floor"):
+                pts.append(g["floor_c"])
             xs = [p[0] for p in pts]
             ys = [p[1] for p in pts]
             pad = g["band"] // 2 + theme.s(4)
@@ -1151,6 +1199,8 @@ def draw_hud(
             _draw_wind_cluster(surface, g["wind_c"], arrow_px, color, wx)
         if g.get("has_aqi"):
             _draw_aqi_cluster(surface, g["aqi_c"], color, wx)
+        if g.get("has_floor"):
+            _draw_floor_cluster(surface, g["floor_c"], color)
         _blit_icon(
             surface,
             "airport",

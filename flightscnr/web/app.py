@@ -1489,7 +1489,8 @@ def radar_json():
             "range_value": scale.format_display_value(idx, units),
             "range_presets_mi": list(scale.PRESET_STATUTE_MILES),
             "range_presets": {u: list(v) for u, v in scale.UNIT_BANDS.items()},
-            "min_height_ft": settings.min_height_ft(),
+            "min_height_ft": settings.configured_min_height_ft(),
+            "auto_lower_altitude_floor_on_empty": settings.auto_lower_altitude_floor_on_empty_enabled(),
             "max_height_ft": settings.max_height_ft(),
             "theme_rgb": list(settings.theme_rgb()),
             "runway_darkmap_rgb": list(settings.runway_darkmap_rgb()),
@@ -1642,6 +1643,10 @@ def radar_save():
             pass
     if "min_height_ft" in data:
         settings.set_min_height_ft(int(data.get("min_height_ft")))
+    if "auto_lower_altitude_floor_on_empty" in data:
+        settings.set_auto_lower_altitude_floor_on_empty(
+            bool(data.get("auto_lower_altitude_floor_on_empty"))
+        )
     if "max_height_ft" in data:
         settings.set_max_height_ft(int(data.get("max_height_ft")))
     if "theme_rgb" in data:

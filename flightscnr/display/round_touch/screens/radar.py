@@ -859,7 +859,7 @@ def _draw_tag_leader(
     )
 
 
-def _above_min_height(flight) -> bool:
+def _above_min_height(flight, *, min_height_ft: int | None = None) -> bool:
     if flight.get("kind") == "vessel":
         return vessel_declutter.should_show_on_radar(flight)
     try:
@@ -880,11 +880,33 @@ def _above_min_height(flight) -> bool:
                 return False
     except Exception:
         pass
+
+    if min_height_ft is None:
+        try:
+            from config import passes_altitude_filter
+            return passes_altitude_filter(flight.get("altitude"))
+        except ImportError:
+            return True
+
+    # Hypothetical AutoFloor probes must not mutate the process-wide altitude
+    # filter. Mirror config.passes_altitude_filter() with an explicit minimum
+    # while preserving the configured maximum-altitude ceiling.
     try:
-        from config import passes_altitude_filter
-        return passes_altitude_filter(flight.get("altitude"))
+        from config import MAX_ALTITUDE_FT
     except ImportError:
-        return True
+        MAX_ALTITUDE_FT = 100000
+    try:
+        minimum = int(min_height_ft)
+    except (TypeError, ValueError):
+        minimum = 0
+    alt_ft = flight.get("altitude")
+    if alt_ft is None:
+        return minimum <= 0
+    try:
+        altitude = int(alt_ft)
+    except (TypeError, ValueError):
+        return minimum <= 0
+    return minimum <= altitude < int(MAX_ALTITUDE_FT)
 
 
 def _blit_tag_block(
@@ -1130,11 +1152,11 @@ def _draw_labels(surface, inner_items, blips):
         drawn.append(place.rect)
 
 
-def _visible_flights(flights):
+def _visible_flights(flights, *, min_height_ft: int | None = None):
     visible = []
     max_km = geo.fetch_max_km()
     for f in flights:
-        if not _above_min_height(f):
+        if not _above_min_height(f, min_height_ft=min_height_ft):
             continue
         lat = f.get("plane_latitude")
         lon = f.get("plane_longitude")
@@ -1403,6 +1425,26 @@ def visible_in_range_count(flights) -> int:
     """In-range aircraft on radar (excludes rim blips), matching FlightScnr idle-clock logic."""
     count = 0
     for flight in _visible_flights(flights):
+        if not aircraft_alert.is_shown_on_radar(flight):
+            continue
+        lat = flight.get("plane_latitude")
+        lon = flight.get("plane_longitude")
+        if lat is None or lon is None:
+            continue
+        if geo.local_offset_km(lat, lon)[2] <= geo.inner_ring_max_km():
+            count += 1
+    return count
+
+
+def visible_in_range_count_at_floor(flights, min_height_ft: int) -> int:
+    """Count normal in-range traffic at a hypothetical minimum-altitude floor.
+
+    Uses the same radar visibility path as normal rendering, including ground-
+    vehicle, speed, alert and range filters, but passes the probe floor explicitly
+    so worker-thread rendering can never observe a temporary global floor.
+    """
+    count = 0
+    for flight in _visible_flights(flights, min_height_ft=int(min_height_ft)):
         if not aircraft_alert.is_shown_on_radar(flight):
             continue
         lat = flight.get("plane_latitude")
