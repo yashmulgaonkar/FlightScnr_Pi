@@ -30,8 +30,8 @@ def tap_footer_action(x: int, y: int) -> str | None:
 
 
 def draw_forecast(surface):
-    draw.fill_background(surface)
-    nav.draw_breadcrumb(surface, ["Radar", "Clock", "Forecast"])
+    draw.fill_background_textured(surface)
+    nav.draw_curved_breadcrumb(surface, ["Radar", "Clock", "Forecast"])
     nav.draw_footer_buttons(surface, list(FOOTER_BUTTONS))
 
     wx = weather_data.refresh() or weather_data.snapshot()

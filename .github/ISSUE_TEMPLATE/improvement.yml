@@ -1,0 +1,47 @@
+name: 🔧 Improvement
+description: Change that improves existing behavior
+title: "[Improvement]: "
+labels: ["kind:improvement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for refining something that already exists (UX, performance, reliability, clarity).
+        For a brand-new capability, use the **Wishlist** template instead.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What feels awkward or incomplete today, and why it matters.
+      placeholder: |
+        The radar already has a "Show compass rose" toggle, but there is no equivalent for…
+    validations:
+      required: true
+
+  - type: textarea
+    id: request
+    attributes:
+      label: Proposed change
+      description: Concrete behavior or UI you want (settings, portal checkbox, on-device control, etc.).
+      placeholder: |
+        Add a `show_range_rings` setting (mirroring `show_compass_rose`) with a matching checkbox in the web portal…
+    validations:
+      required: true
+
+  - type: textarea
+    id: touchpoints
+    attributes:
+      label: Where this would touch (optional)
+      description: If you've browsed the code, list files or patterns that look relevant.
+      placeholder: |
+        - settings.py — add key + getter/setter, same pattern as …
+        - screens/radar.py — wrap drawing in if …
+        - web/templates/index.html — checkbox + JS wiring
+      render: markdown
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered (optional)
+      description: Workarounds or other approaches you thought about.

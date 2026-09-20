@@ -22,6 +22,7 @@ import json
 import logging
 import math
 import os
+import socket
 
 logger = logging.getLogger(__name__)
 
@@ -133,8 +134,8 @@ OPENSKY_API_CLIENT_SECRET = os.environ.get("OPENSKY_API_CLIENT_SECRET", "")
 # ignored. Empty or unset falls back to the historical default order.
 _ROUTE_SOURCE_DEFAULT_ORDER = ("airlabs", "flightaware", "opensky")
 _ROUTE_SOURCE_VALID = frozenset(_ROUTE_SOURCE_DEFAULT_ORDER)
- 
- 
+
+
 def _parse_route_source_order(raw: str) -> tuple[str, ...]:
     if not (raw or "").strip():
         return _ROUTE_SOURCE_DEFAULT_ORDER
@@ -144,9 +145,51 @@ def _parse_route_source_order(raw: str) -> tuple[str, ...]:
         if name and name in _ROUTE_SOURCE_VALID and name not in seen:
             seen.append(name)
     return tuple(seen) if seen else _ROUTE_SOURCE_DEFAULT_ORDER
- 
- 
+
+
 ROUTE_SOURCE_ORDER = _parse_route_source_order(os.environ.get("ROUTE_SOURCE_ORDER", ""))
+
+# ADS-B Exchange — optional extra free/cheap live-position fallback, tried
+# after OpenSky. Endpoint/plan varies (RapidAPI vs. self-hosted feeder read);
+# leave ADSBEXCHANGE_API_KEY empty to disable without touching the order list.
+ADSBEXCHANGE_API_KEY = os.environ.get("ADSBEXCHANGE_API_KEY", "")
+ADSBEXCHANGE_API_BASE = os.environ.get(
+    "ADSBEXCHANGE_API_BASE", "https://adsbexchange-com1.p.rapidapi.com/v2"
+).rstrip("/")
+
+# Order in which *live position* fallbacks are tried for the extended
+# tracking map, as a comma-separated list of: dump1090, adsbfi, opensky,
+# adsbexchange, fr24. Mirrors ROUTE_SOURCE_ORDER's parsing rules — omit an
+# entry to disable it, unknown entries are ignored, empty/unset falls back
+# to the default order below. First entry that returns a fresh position wins.
+_POSITION_SOURCE_DEFAULT_ORDER = ("dump1090", "adsbfi", "opensky", "adsbexchange", "fr24")
+_POSITION_SOURCE_VALID = frozenset(_POSITION_SOURCE_DEFAULT_ORDER)
+
+def _parse_position_source_order(raw: str) -> tuple[str, ...]:
+    if not (raw or "").strip():
+        return _POSITION_SOURCE_DEFAULT_ORDER
+    seen: list[str] = []
+    for name in raw.split(","):
+        name = name.strip().lower()
+        if name and name in _POSITION_SOURCE_VALID and name not in seen:
+            seen.append(name)
+    return tuple(seen) if seen else _POSITION_SOURCE_DEFAULT_ORDER
+
+
+POSITION_SOURCE_ORDER = _parse_position_source_order(
+    os.environ.get("POSITION_SOURCE_ORDER", "")
+)
+
+# Extended live-tracking map (Radar > Track > Live / Follow): radius is
+# derived from current ground speed (distance covered in
+# LIVE_TRACKING_PREVIEW_MINUTES), with low-speed compression, then clamped
+# to [MIN, MAX]. MIN matches LIVE_TRACKING_TAXI_RADIUS_MI (2 mi ≈ 3.22 km).
+LIVE_TRACKING_PREVIEW_MINUTES = float(os.environ.get("LIVE_TRACKING_PREVIEW_MINUTES", "5"))
+LIVE_TRACKING_MIN_RADIUS_KM = float(os.environ.get("LIVE_TRACKING_MIN_RADIUS_KM", "3.22"))
+LIVE_TRACKING_MAX_RADIUS_KM = float(os.environ.get("LIVE_TRACKING_MAX_RADIUS_KM", "120"))
+# Below this ground speed (kt), Follow uses a fixed map radius (mi).
+LIVE_TRACKING_TAXI_MAX_SPEED_KT = float(os.environ.get("LIVE_TRACKING_TAXI_MAX_SPEED_KT", "50"))
+LIVE_TRACKING_TAXI_RADIUS_MI = float(os.environ.get("LIVE_TRACKING_TAXI_RADIUS_MI", "2"))
 
 # NASA FIRMS free MAP_KEY for wildfire detections on the radar.
 # https://firms.modaps.eosdis.nasa.gov/api/map_key/
@@ -313,10 +356,15 @@ FORECAST_DAYS = int(os.environ.get("FORECAST_DAYS", "3"))
 WEB_PORT = int(os.environ.get("WEB_PORT", "80"))
 
 
-def web_portal_url(hostname: str) -> str:
-    """LAN URL for the web portal (omits :80)."""
-    name = (hostname or "raspberrypi").split(".")[0].strip() or "raspberrypi"
-    host = f"{name}.local"
+def web_portal_url(hostname: str = "") -> str:
+    """LAN URL for the web portal (omits :80). Uses this device's hostname."""
+    name = (hostname or "").split(".")[0].strip()
+    if not name:
+        try:
+            name = (socket.gethostname() or "").split(".")[0].strip()
+        except OSError:
+            name = ""
+    host = f"{name}.local" if name else "localhost"
     if WEB_PORT == 80:
         return f"http://{host}"
     return f"http://{host}:{WEB_PORT}"
@@ -359,11 +407,70 @@ def _btn_env(name: str) -> int:
 # builds are unaffected; read them off the app log (joy event ... button=N).
 JOYSTICK_BTN_SWIPE_LEFT = _btn_env("JOYSTICK_BTN_SWIPE_LEFT")
 JOYSTICK_BTN_SWIPE_RIGHT = _btn_env("JOYSTICK_BTN_SWIPE_RIGHT")
+# Up/down reach About, the clock, and page scrolling — and since Settings moved
+# beside About, they are the only way to reach it without a touchscreen.
+JOYSTICK_BTN_SWIPE_UP = _btn_env("JOYSTICK_BTN_SWIPE_UP")
+JOYSTICK_BTN_SWIPE_DOWN = _btn_env("JOYSTICK_BTN_SWIPE_DOWN")
 JOYSTICK_BTN_RADAR = _btn_env("JOYSTICK_BTN_RADAR")
 JOYSTICK_BTN_ZOOM_IN = _btn_env("JOYSTICK_BTN_ZOOM_IN")
 JOYSTICK_BTN_ZOOM_OUT = _btn_env("JOYSTICK_BTN_ZOOM_OUT")
 # Flight detail: show airline logo when no aircraft photo (False = photo-only / text).
 SHOW_AIRLINE_LOGOS = _bool(os.environ.get("SHOW_AIRLINE_LOGOS", "False"))
+
+# Radar target tags: multiplier on the tag fonts and the block metrics derived
+# from them. Range-ring distance labels are deliberately unaffected.
+RADAR_TAG_FONT_SCALE_MIN = 0.5
+RADAR_TAG_FONT_SCALE_MAX = 2.0
+
+
+def _parse_tag_font_scale(raw: str) -> float:
+    """Validate RADAR_TAG_FONT_SCALE, defaulting to 1.0 (today's size)."""
+    text = (raw or "").strip()
+    if not text:
+        return 1.0
+    try:
+        value = float(text)
+    except (TypeError, ValueError):
+        logger.warning("RADAR_TAG_FONT_SCALE=%r is not a number — using 1.0", text)
+        return 1.0
+    if not RADAR_TAG_FONT_SCALE_MIN <= value <= RADAR_TAG_FONT_SCALE_MAX:
+        logger.warning(
+            "RADAR_TAG_FONT_SCALE=%s is outside %s-%s — using 1.0",
+            text,
+            RADAR_TAG_FONT_SCALE_MIN,
+            RADAR_TAG_FONT_SCALE_MAX,
+        )
+        return 1.0
+    return value
+
+
+RADAR_TAG_FONT_SCALE = _parse_tag_font_scale(os.environ.get("RADAR_TAG_FONT_SCALE", ""))
+
+# Out-of-range targets on the radar rim: dot | plane. Normalized here only —
+# display.round_touch.settings.rim_target_style() reads this value as-is.
+RIM_STYLES = ("plane", "dot")
+
+
+def _parse_rim_style(raw: str) -> str:
+    """Validate RADAR_RIM_STYLE, defaulting to the aircraft icon.
+
+    Unset means an existing install that never opted in, so it keeps the icon
+    it already had rather than silently changing on upgrade.
+    """
+    style = (raw or "").strip().lower()
+    if style in RIM_STYLES:
+        return style
+    if style:
+        logger.warning(
+            "RADAR_RIM_STYLE=%r is not one of %s — using 'plane'",
+            style,
+            ", ".join(RIM_STYLES),
+        )
+    return "plane"
+
+
+RADAR_RIM_STYLE = _parse_rim_style(os.environ.get("RADAR_RIM_STYLE", ""))
+
 
 # --- AIS vessel radar declutter (config.h) ---
 # One-line vessel name only (no type/speed); never show MMSI as a label.
@@ -403,7 +510,7 @@ def square_framebuffer_side() -> int:
 BUTTONS_DIR = os.environ.get("BUTTONS_DIR", "").strip()
 SDL_VIDEODRIVER = os.environ.get("SDL_VIDEODRIVER", "")
 
-DISTANCE_UNITS = os.environ.get("DISTANCE_UNITS", "metric")
+DISTANCE_UNITS = os.environ.get("DISTANCE_UNITS", "imperial")
 CLOCK_FORMAT = os.environ.get("CLOCK_FORMAT", "24hr")
 BRIGHTNESS = int(os.environ.get("BRIGHTNESS", "100"))
 BRIGHTNESS_NIGHT = int(os.environ.get("BRIGHTNESS_NIGHT", "50"))
@@ -430,6 +537,7 @@ def passes_altitude_filter(alt_ft) -> bool:
         return MIN_ALTITUDE <= 0
     return MIN_ALTITUDE <= alt < MAX_ALTITUDE_FT
 JOURNEY_CODE_SELECTED = _require("JOURNEY_CODE_SELECTED")
+# 0 / unset: overhead keeps 7 days. Unbounded growth stalled the display loop.
 STATS_LOG_DAYS = int(os.environ.get("STATS_LOG_DAYS", "0"))
 _raw_filler = os.environ.get("JOURNEY_BLANK_FILLER", "").strip()
 JOURNEY_BLANK_FILLER = f" {_raw_filler} " if _raw_filler else " ? "

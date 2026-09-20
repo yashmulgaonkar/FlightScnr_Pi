@@ -510,6 +510,103 @@ class PlayerTests(unittest.TestCase):
         self.assertFalse(st["playing"])
         self.assertIn("disabled", (st.get("error") or "").lower())
 
+    def test_apply_enabled_on_starts_and_sets_want_playing(self):
+        from utilities import atc_audio
+
+        proc = self._fake_proc()
+        with mock.patch.object(atc_audio, "in_quiet_hours", return_value=False), mock.patch(
+            "utilities.atc_audio.subprocess.Popen", return_value=proc
+        ), mock.patch("utilities.atc_audio.time.sleep"):
+            st = atc_audio.apply_enabled(True)
+        self.assertTrue(st["playing"])
+        self.settings.set_atc_enabled.assert_called_with(True)
+        self.settings.set_atc_want_playing.assert_called_with(True)
+
+    def test_apply_enabled_off_stops_and_clears_want_playing(self):
+        from utilities import atc_audio
+
+        proc = self._fake_proc()
+        with mock.patch.object(atc_audio, "in_quiet_hours", return_value=False), mock.patch(
+            "utilities.atc_audio.subprocess.Popen", return_value=proc
+        ), mock.patch("utilities.atc_audio.time.sleep"), mock.patch(
+            "utilities.atc_audio.os.killpg"
+        ):
+            atc_audio.start(override=True)
+            st = atc_audio.apply_enabled(False)
+        self.assertFalse(st["playing"])
+        self.settings.set_atc_enabled.assert_called_with(False)
+        self.settings.set_atc_want_playing.assert_called_with(False)
+
+    def test_second_start_same_feed_reuses_stream(self):
+        """Echo regression: toggle + keepalive must never stack two mpvs."""
+        from utilities import atc_audio
+
+        proc = self._fake_proc()
+        with mock.patch.object(atc_audio, "in_quiet_hours", return_value=False), mock.patch(
+            "utilities.atc_audio.subprocess.Popen", return_value=proc
+        ) as popen, mock.patch("utilities.atc_audio.time.sleep"):
+            atc_audio.start(override=True)
+            st = atc_audio.start(override=True)
+        self.assertTrue(st["playing"])
+        self.assertEqual(popen.call_count, 1)
+
+    def test_concurrent_starts_spawn_one_mpv(self):
+        """Two threads racing into start() serialize on the transport lock."""
+        import threading
+
+        from utilities import atc_audio
+
+        proc = self._fake_proc()
+
+        def slow_popen(*args, **kwargs):
+            import time as _t
+
+            _t.sleep(0.05)
+            return proc
+
+        with mock.patch.object(atc_audio, "in_quiet_hours", return_value=False), mock.patch(
+            "utilities.atc_audio.subprocess.Popen", side_effect=slow_popen
+        ) as popen:
+            threads = [
+                threading.Thread(target=lambda: atc_audio.start(override=True))
+                for _ in range(2)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
+        self.assertEqual(popen.call_count, 1)
+        self.assertTrue(atc_audio.is_playing())
+
+    def test_duplicate_mpv_race_concedes_to_lower_pid(self):
+        """Cross-process race: the newer mpv (higher pid) kills itself."""
+        from utilities import atc_audio
+
+        proc = self._fake_proc()  # pid 4242
+        killed = []
+        with mock.patch.object(atc_audio, "in_quiet_hours", return_value=False), mock.patch(
+            "utilities.atc_audio.subprocess.Popen", return_value=proc
+        ), mock.patch("utilities.atc_audio.time.sleep"), mock.patch.object(
+            atc_audio, "_reap_atc_mpv_orphans"
+        ), mock.patch.object(
+            atc_audio, "_atc_mpv_pids", return_value=[100]
+        ), mock.patch.object(
+            atc_audio, "_kill_pids", side_effect=lambda pids, **kw: killed.extend(pids)
+        ):
+            atc_audio.start(override=True)
+        self.assertIn(proc.pid, killed)
+        self.assertNotIn(100, killed)
+
+    def test_toggle_power_flips_enabled(self):
+        from utilities import atc_audio
+
+        self.settings.atc_enabled.return_value = False
+        with mock.patch.object(
+            atc_audio, "apply_enabled", return_value={"playing": True}
+        ) as apply:
+            atc_audio.toggle_power()
+        apply.assert_called_once_with(True, override=True)
+
     def test_stop_kills_process_group(self):
         from utilities import atc_audio
 
@@ -568,6 +665,49 @@ class PlayerTests(unittest.TestCase):
         ) as stop:
             atc_audio.reconcile_enabled_state()
         stop.assert_called_once_with(clear_override=False)
+
+    def test_keepalive_syncs_disk_before_stale_reconcile(self):
+        """Portal memory can lag disk; sync before killing a live stream."""
+        from utilities import atc_audio
+
+        self.settings.atc_enabled.return_value = False
+        self.settings.atc_want_playing.return_value = False
+
+        def _sync():
+            self.settings.atc_enabled.return_value = True
+            self.settings.atc_want_playing.return_value = True
+
+        self.settings.sync_from_disk.side_effect = _sync
+        self.settings.atc_airport.return_value = "KSFO"
+        with mock.patch.object(atc_audio, "is_playing", return_value=True), mock.patch.object(
+            atc_audio, "reconcile_enabled_state"
+        ) as reconcile, mock.patch.object(atc_audio, "start") as start:
+            st = atc_audio.maybe_keepalive()
+        reconcile.assert_not_called()
+        start.assert_not_called()
+        self.assertTrue(st.get("playing") or "playing" in st)
+        self.settings.sync_from_disk.assert_called()
+
+    def test_reconcile_syncs_disk_before_stopping(self):
+        from utilities import atc_audio
+
+        self.settings.atc_enabled.return_value = False
+        self.settings.atc_want_playing.return_value = False
+
+        def _sync():
+            self.settings.atc_enabled.return_value = True
+            self.settings.atc_want_playing.return_value = True
+
+        self.settings.sync_from_disk.side_effect = _sync
+        with mock.patch.object(atc_audio, "is_playing", return_value=True), mock.patch.object(
+            atc_audio, "stop", return_value={"playing": False}
+        ) as stop, mock.patch.object(
+            atc_audio, "status", return_value={"playing": True}
+        ):
+            st = atc_audio.reconcile_enabled_state()
+        stop.assert_not_called()
+        self.assertTrue(st["playing"])
+        self.settings.sync_from_disk.assert_called()
 
     def test_set_volume_uses_ipc_when_playing(self):
         from utilities import atc_audio
@@ -769,7 +909,7 @@ class PlayerTests(unittest.TestCase):
         popen.assert_called_once()
 
     def test_on_radar_center_changed_no_autostart_when_stopped(self):
-        """Explicit Stop (want_playing cleared) only updates selection."""
+        """Disabled ATC (want_playing cleared) only updates selection."""
         from utilities import atc_audio
 
         self.settings.atc_enabled.return_value = True
@@ -917,7 +1057,35 @@ class VisibleAirportsRadiusTests(unittest.TestCase):
         ):
             radius = atc_audio._radar_airport_radius_km()
         self.assertEqual(scale_mod.active_index(), last_idx)
-        self.assertGreater(radius, scale_mod.SCALE_BANDS[1]["coverage_km"])
+        self.assertGreater(radius, scale_mod.bands()[1]["coverage_km"])
+
+    def test_radius_follows_display_unit_bands(self):
+        from display.round_touch import scale as scale_mod
+        from display.round_touch import settings, theme
+        from utilities import atc_audio
+
+        scale_mod.select(4)
+        screen_r = theme.VISIBLE_RADIUS - theme.BEYOND_RING_MARGIN
+        edge_factor = float(screen_r) / float(theme.GRID_OUTER_RADIUS)
+        with mock.patch(
+            "display.round_touch.settings.scale_index", return_value=4
+        ), mock.patch.object(settings, "distance_units", return_value="km"):
+            km_radius = atc_audio._radar_airport_radius_km()
+        with mock.patch(
+            "display.round_touch.settings.scale_index", return_value=4
+        ), mock.patch.object(settings, "distance_units", return_value="mi"):
+            mi_radius = atc_audio._radar_airport_radius_km()
+        self.assertAlmostEqual(
+            km_radius,
+            scale_mod.bands("km")[4]["coverage_km"] * edge_factor,
+            places=3,
+        )
+        self.assertAlmostEqual(
+            mi_radius,
+            scale_mod.bands("mi")[4]["coverage_km"] * edge_factor,
+            places=3,
+        )
+        self.assertGreater(abs(km_radius - mi_radius), 0.5)
 
     def test_visible_airports_queries_settings_radius(self):
         from utilities import atc_audio

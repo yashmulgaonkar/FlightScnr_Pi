@@ -24,19 +24,47 @@ except ImportError:
     UI_SCALE = 1.0
 
 
+try:
+    from config import RADAR_TAG_FONT_SCALE as _CONFIG_TAG_FONT_SCALE
+except ImportError:
+    _CONFIG_TAG_FONT_SCALE = 1.0
+
+# Multiplier for radar target tags only. Range-ring distance labels use plain
+# s() so they stay a fixed reference when tags are resized.
+TAG_FONT_SCALE = float(_CONFIG_TAG_FONT_SCALE)
+
+
+_S_CACHE: dict[float, int] = {}
+
+
 def s(value: float) -> int:
-    return max(1, int(round(value * SCALE)))
+    # Called ~131 times per settings frame, each over a round(); the answer
+    # only changes when the framebuffer does. _apply_framebuffer_side clears
+    # this, which is the only place SCALE moves.
+    cached = _S_CACHE.get(value)
+    if cached is not None:
+        return cached
+    result = max(1, int(round(value * SCALE)))
+    _S_CACHE[value] = result
+    return result
+
+
+def tag_s(value: float) -> int:
+    """s() for radar tag metrics, scaled by RADAR_TAG_FONT_SCALE."""
+    return max(1, int(round(value * SCALE * TAG_FONT_SCALE)))
 
 
 def _apply_framebuffer_side(side: int) -> None:
     """Recompute layout constants for a square draw buffer."""
+    _S_CACHE.clear()
     global SIZE, SCALE, CENTER_X, CENTER_Y, BEZEL_INSET, VISIBLE_RADIUS
     global GRID_OUTER_RADIUS, CARDINAL_NORTH_OFFSET_Y, CARDINAL_SOUTH_OFFSET_Y
     global CARDINAL_DIAGONAL_INSET, SCALE_GAP_FROM_OUTER_RING, SCALE_GAP_OUTER_RING_KM
     global GRID_DASH_LEN, GRID_DASH_GAP, AIRCRAFT_ICON_RADIUS, AIRCRAFT_LABEL_GAP
-    global BEYOND_RING_MARGIN, SWEEP_RADIUS, TAP_PICK_RADIUS
+    global BEYOND_RING_MARGIN, SWEEP_RADIUS, TAP_PICK_RADIUS, RIM_BLIP_RADIUS
     global FONT_TITLE, FONT_BODY, FONT_DETAIL, FONT_CLOCK, FONT_CLOCK_AMPM
     global FONT_CARDINAL, FONT_CARDINAL_DIAG, FONT_TAG, FONT_TAG_SUB
+    global FONT_SCALE_LABEL, TAG_ROW_TUCK, TAG_ROW_STEP_MAIN_MIN, TAG_ROW_STEP_SUB_MIN
 
     SIZE = side
     # UI_SCALE < 1 keeps chrome compact on large panels, leaving more of the
@@ -59,6 +87,11 @@ def _apply_framebuffer_side(side: int) -> None:
     AIRCRAFT_LABEL_GAP = s(3)
     BEYOND_RING_MARGIN = s(3)
     SWEEP_RADIUS = VISIBLE_RADIUS - BEYOND_RING_MARGIN
+    # Out-of-range targets in "dot" style. Drawn as a whole circle centred
+    # BEYOND_RING_MARGIN inside the rim; apply_round_bezel() crops whatever
+    # overhangs, so a radius above that margin leaves a D flat against the edge.
+    # Half unit: the only value that lands on a 24px diameter at 720px.
+    RIM_BLIP_RADIUS = s(6.5)
     TAP_PICK_RADIUS = s(36)
     FONT_TITLE = s(28)
     FONT_BODY = s(22)
@@ -68,8 +101,16 @@ def _apply_framebuffer_side(side: int) -> None:
     FONT_CARDINAL = s(15)
     FONT_CARDINAL_DIAG = s(15)
     # Radar callsign / type / alt tags (aircraft + vessels) — keep compact.
-    FONT_TAG = s(12)
-    FONT_TAG_SUB = s(11)
+    FONT_TAG = tag_s(12)
+    FONT_TAG_SUB = tag_s(11)
+    # Range-ring distance labels ("1mi", "20mi") — fixed, so resizing tags
+    # leaves the scale reference alone.
+    FONT_SCALE_LABEL = s(12)
+    # Row spacing for the tag block. These scale with the fonts, otherwise the
+    # floors pin the block height and shrinking the text buys no space back.
+    TAG_ROW_TUCK = tag_s(4)
+    TAG_ROW_STEP_MAIN_MIN = tag_s(9)
+    TAG_ROW_STEP_SUB_MIN = tag_s(8)
 
 
 def set_framebuffer_side(side: int) -> None:
@@ -86,6 +127,17 @@ def set_framebuffer_side(side: int) -> None:
         draw.invalidate_bezel_cache()
     except ImportError:
         pass
+
+
+def set_tag_font_scale(value: float) -> None:
+    """Resize radar target tags at runtime.
+
+    config validates RADAR_TAG_FONT_SCALE at startup; this is the entry point
+    for experimenting and for tests, so it only guards against a useless value.
+    """
+    global TAG_FONT_SCALE
+    TAG_FONT_SCALE = max(0.1, float(value))
+    _apply_framebuffer_side(SIZE)
 
 
 _apply_framebuffer_side(square_framebuffer_side())
@@ -121,12 +173,17 @@ AIRPORT = (120, 150, 175)
 RUNWAY_DARKMAP = (225, 128, 0)
 # Higher-contrast runway lines on light CARTO basemap.
 RUNWAY_LIGHT = (35, 55, 95)
-ALERT_MILITARY = (255, 40, 40)   # red — military tracks
-ALERT_OTHER = (56, 160, 255)     # blue — emergency squawk / watch list
-ALERT_EMERGENCY = ALERT_OTHER
+# Radar blip flight-number / callsign row (user-tunable; dark vs light basemap).
+TAG_TEXT_DARK = (0, 255, 0)
+TAG_TEXT_LIGHT = (15, 23, 42)
+ALERT_MILITARY = (255, 40, 40)   # red — military tracks (flashing)
+# Vivid aqua — watch list. Punchier than LIVE (56, 168, 255), not climb (0, 255, 255).
+ALERT_WATCH = (0, 200, 255)
+ALERT_OTHER = ALERT_WATCH
+# Same red as military, but icons stay solid (no yellow pulse).
+ALERT_EMERGENCY = ALERT_MILITARY
 ALERT_FLASH = (255, 80, 80)      # bright red pulse (military rim / icons)
-ALERT_FLASH_OTHER = (120, 200, 255)  # bright blue pulse
-ALERT_WATCH = ALERT_OTHER
+ALERT_FLASH_OTHER = (80, 220, 255)  # bright aqua pulse (watch)
 
 SCALE_LABEL_BEARING_DEG = 245.5
 RING_COUNT = 3

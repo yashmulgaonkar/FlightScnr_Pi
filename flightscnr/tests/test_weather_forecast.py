@@ -11,6 +11,7 @@
 
 import os
 import sys
+import time
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -61,11 +62,11 @@ class TestForecastDayRollover:
         monkeypatch.setattr(
             weather_data,
             "grab_temperature_and_humidity",
-            lambda: (70, 40),
+            lambda **kw: (70, 40),
             raising=False,
         )
 
-        def fake_grab_forecast(_tag):
+        def fake_grab_forecast(_tag, **kw):
             return [_interval(calls["day"])]
 
         monkeypatch.setitem(
@@ -76,7 +77,7 @@ class TestForecastDayRollover:
         import utilities.temperature as temp_mod
 
         temp_mod.grab_forecast = fake_grab_forecast
-        temp_mod.grab_temperature_and_humidity = lambda: (70, 40)
+        temp_mod.grab_temperature_and_humidity = lambda **kw: (70, 40)
 
         def unit_symbol():
             return "F"
@@ -135,3 +136,140 @@ class TestHourlyWeatherRefresh:
         t_next = datetime(2026, 8, 1, 11, 1, 0)
         assert weather_data.tick_scheduled_refresh(t_next, background=False) is True
         assert calls == [False, True]
+
+
+def _ready_payload() -> dict:
+    return {
+        "temp": 68,
+        "humidity": 40,
+        "unit": "F",
+        "days": [{"label": "Today", "high": 72, "low": 50, "weather_code": 1000}],
+        "sunrise": "06:00",
+        "sunset": "20:00",
+        "weather_label": "Clear",
+        "weather_code": 1000,
+        "wind_speed": 2,
+        "wind_direction": 180,
+        "wind_unit": "m/s",
+        "aqi": None,
+        "ready": True,
+    }
+
+
+def _stub_weather_prefs(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "weather_prefs", type(sys)("weather_prefs"))
+    import weather_prefs
+
+    weather_prefs.unit_symbol = lambda: "F"
+    weather_prefs.temperature_units = lambda: "imperial"
+
+
+def _stub_failed_grabs(monkeypatch) -> None:
+    import utilities.temperature as temp_mod
+
+    monkeypatch.setattr(temp_mod, "grab_temperature_and_humidity", lambda **kw: (None, None))
+    monkeypatch.setattr(temp_mod, "grab_forecast", lambda *a, **kw: [])
+    monkeypatch.setattr(temp_mod, "current_weather_code", lambda **kw: None)
+    monkeypatch.setattr(temp_mod, "current_wind", lambda **kw: (None, None, "m/s"))
+    monkeypatch.setattr(weather_data, "_merge_aqi", lambda payload, force=False: payload)
+
+
+class TestWeatherKeepCacheOn429:
+    def test_request_manual_refresh_does_not_wipe_caches(self, tmp_path, monkeypatch):
+        import utilities.temperature as temp_mod
+
+        monkeypatch.setattr(temp_mod, "_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr(
+            temp_mod, "_REFRESH_REQUEST_PATH", str(tmp_path / "weather_refresh.request")
+        )
+        monkeypatch.setattr(temp_mod, "allow_immediate_fetch", lambda: None)
+        wipes = []
+        monkeypatch.setattr(temp_mod, "invalidate_caches", lambda: wipes.append("all"))
+
+        temp_mod.request_manual_refresh()
+
+        assert wipes == []
+        assert (tmp_path / "weather_refresh.request").is_file()
+
+    def test_refresh_keeps_ready_payload_when_grabs_fail(self, monkeypatch):
+        _stub_weather_prefs(monkeypatch)
+        _stub_failed_grabs(monkeypatch)
+        ready = _ready_payload()
+        weather_data._CACHE = {
+            "ts": time.time(),
+            "payload": ready,
+            "date": weather_data._today(),
+        }
+
+        out = weather_data.refresh(force=True)
+
+        assert out is not None
+        assert out.get("ready") is True
+        assert out.get("temp") == 68
+        assert weather_data._CACHE["payload"]["temp"] == 68
+
+    def test_refresh_current_keeps_ready_payload_when_grab_fails(self, monkeypatch):
+        _stub_weather_prefs(monkeypatch)
+        _stub_failed_grabs(monkeypatch)
+        ready = _ready_payload()
+        weather_data._CACHE = {
+            "ts": time.time(),
+            "payload": ready,
+            "date": weather_data._today(),
+        }
+
+        out = weather_data.refresh_current(force=True)
+
+        assert out is not None
+        assert out.get("ready") is True
+        assert out.get("temp") == 68
+
+    def test_scheduled_forecast_slot_does_not_wipe_on_failed_fetch(self, monkeypatch):
+        import utilities.temperature as temp_mod
+
+        _stub_weather_prefs(monkeypatch)
+        _stub_failed_grabs(monkeypatch)
+        monkeypatch.setattr(temp_mod, "allow_immediate_fetch", lambda: None)
+        monkeypatch.setattr(temp_mod, "allow_temp_fetch", lambda: None)
+        wipes = []
+        monkeypatch.setattr(weather_data, "invalidate_cache", lambda: wipes.append("merged"))
+        monkeypatch.setattr(temp_mod, "invalidate_caches", lambda: wipes.append("all"))
+        monkeypatch.setattr(temp_mod, "invalidate_temp_cache", lambda: wipes.append("temp"))
+        ready = _ready_payload()
+        weather_data._CACHE = {
+            "ts": time.time(),
+            "payload": ready,
+            "date": weather_data._today(),
+        }
+
+        out = weather_data._run_current_slot_refresh(include_forecast=True)
+
+        assert wipes == []
+        assert out is not None
+        assert out.get("ready") is True
+        assert out.get("temp") == 68
+
+    def test_scheduled_half_hour_slot_does_not_wipe_on_failed_fetch(self, monkeypatch):
+        import utilities.temperature as temp_mod
+
+        _stub_weather_prefs(monkeypatch)
+        _stub_failed_grabs(monkeypatch)
+        monkeypatch.setattr(temp_mod, "allow_immediate_fetch", lambda: None)
+        monkeypatch.setattr(temp_mod, "allow_temp_fetch", lambda: None)
+        wipes = []
+        monkeypatch.setattr(weather_data, "invalidate_cache", lambda: wipes.append("merged"))
+        monkeypatch.setattr(temp_mod, "invalidate_caches", lambda: wipes.append("all"))
+        monkeypatch.setattr(temp_mod, "invalidate_temp_cache", lambda: wipes.append("temp"))
+        ready = _ready_payload()
+        weather_data._CACHE = {
+            "ts": time.time(),
+            "payload": ready,
+            "date": weather_data._today(),
+        }
+
+        out = weather_data._run_current_slot_refresh(include_forecast=False)
+
+        assert wipes == []
+        assert out is not None
+        assert out.get("ready") is True
+        assert out.get("temp") == 68

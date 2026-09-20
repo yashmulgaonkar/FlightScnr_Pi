@@ -75,7 +75,7 @@ def _download_and_build() -> dict[str, str]:
         db = _build_map_from_csv(raw.decode("utf-8", errors="replace"))
         with open(CACHE_FILE, "w", encoding="utf-8") as f:
             json.dump(db, f)
-        print(f"[ICAO types] Database built — {len(db)} entries cached")
+        print(f"[ICAO types] Database built - {len(db)} entries cached")
         return db
     except Exception as e:
         print(f"[ICAO types] Download failed: {e}")

@@ -65,15 +65,67 @@ def _draw_silhouette(surface, cx, cy, heading_deg, color, scale: float):
         pygame.draw.polygon(surface, color, pts)
 
 
+def target_category(flight) -> str:
+    """Targets-page category: plane / heli / drone / vessel."""
+    if flight and flight.get("kind") == "vessel":
+        return "vessel"
+    try:
+        from display.round_touch import aircraft_type_icons
+
+        cat = aircraft_type_icons.icon_category(flight)
+    except Exception:
+        return "plane"
+    if "helicopter" in cat:
+        return "heli"
+    if "drone" in cat:
+        return "drone"
+    return "plane"
+
+
+def _draw_form_triangle(surface, cx, cy, heading_deg, color, size) -> None:
+    """Minimal arrowhead pointing along the heading."""
+    import math as _math
+
+    rad = _math.radians(float(heading_deg))
+    fx, fy = _math.sin(rad), -_math.cos(rad)
+    half = size * 0.5
+    tip = (cx + fx * half, cy + fy * half)
+    base_l = (
+        cx - fx * half * 0.8 - fy * half * 0.62,
+        cy - fy * half * 0.8 + fx * half * 0.62,
+    )
+    base_r = (
+        cx - fx * half * 0.8 + fy * half * 0.62,
+        cy - fy * half * 0.8 - fx * half * 0.62,
+    )
+    pygame.draw.polygon(surface, color, [tip, base_l, base_r])
+
+
 def draw_plane_icon(surface, cx, cy, heading_deg, color, compact=False, flight=None):
     """Filled top-down aircraft or vessel icon."""
+    from display.round_touch import settings
+
+    cat = target_category(flight)
+    pct = settings.target_size_pct(cat) / 100.0
+    form = settings.target_form(cat)
+    if form == "dot":
+        r = max(2, int(round((theme.s(5) if compact else theme.s(8)) * pct)))
+        pygame.draw.circle(surface, color, (int(cx), int(cy)), r)
+        return
+    if form == "triangle":
+        base = theme.s(16) if compact else theme.s(26)
+        _draw_form_triangle(
+            surface, float(cx), float(cy), heading_deg, color,
+            max(6, base * pct),
+        )
+        return
     if flight and flight.get("kind") == "vessel":
         draw_ship_icon(surface, cx, cy, heading_deg, color, compact=compact, flight=flight)
         return
 
     from display.round_touch import aircraft_type_icons
 
-    size = theme.s(22) if compact else theme.s(34)
+    size = int(round((theme.s(22) if compact else theme.s(34)) * pct))
     if aircraft_type_icons.draw_icon(
         surface,
         flight,
@@ -83,7 +135,7 @@ def draw_plane_icon(surface, cx, cy, heading_deg, color, compact=False, flight=N
         size=size,
     ):
         return
-    scale = 0.40 if compact else 0.68
+    scale = (0.40 if compact else 0.68) * pct
     _draw_silhouette(surface, cx, cy, heading_deg, color, scale)
 
 
@@ -99,8 +151,9 @@ _SHIP_ARROW = (
 
 def draw_ship_icon(surface, cx, cy, heading_deg, color, compact=False, flight=None):
     """Vessel glyph: heading chevron when moving; quiet dot when parked/compact."""
-    from display.round_touch import vessel_declutter
+    from display.round_touch import settings, vessel_declutter
 
+    vpct = settings.target_size_pct("vessel") / 100.0
     parked = vessel_declutter.is_parked(flight) if flight else bool(flight and flight.get("stationary"))
     if parked or compact:
         # Hierarchy: parked dots stay smaller / quieter than moving hulls.
@@ -108,11 +161,12 @@ def draw_ship_icon(surface, cx, cy, heading_deg, color, compact=False, flight=No
             r = theme.s(5)
         else:
             r = theme.s(4) if compact else theme.s(6)
+        r = max(2, int(round(r * vpct)))
         pygame.draw.circle(surface, color, (int(cx), int(cy)), r)
         pygame.draw.circle(surface, theme.BG, (int(cx), int(cy)), max(1, r - 2), 1)
         return
 
-    scale = theme.s(5) / 10.0
+    scale = theme.s(5) / 10.0 * vpct
     pts = [_map_local(x * scale, y * scale, cx, cy, heading_deg) for x, y in _SHIP_ARROW]
     if len(pts) >= 3:
         pygame.draw.polygon(surface, color, pts)
@@ -145,6 +199,7 @@ def draw_progress_plane(surface, cx, cy, color, flight=None, *, size: int | None
 
 
 def format_altitude(alt_ft) -> str:
+    """Format altitude in feet for radar / detail tags (always ft, never FL)."""
     if alt_ft is None:
         return "—"
     try:
@@ -153,8 +208,6 @@ def format_altitude(alt_ft) -> str:
         return "—"
     if alt <= 0:
         return "—"
-    if alt >= 18000:
-        return f"FL{round(alt / 100)}"
     return f"{alt:,}ft"
 
 

@@ -72,14 +72,11 @@ def _to_entry(plane: dict, min_altitude: int) -> dict | None:
     if not _valid_position(lat, lon):
         return None
 
+    # Min/max altitude is radar declutter only — applied in overhead._grab
+    # before peek_data(). Ingest everything so the flip board can still see
+    # approaches below MIN_HEIGHT.
     alt_ft = _parse_alt_ft(plane)
-    try:
-        from config import passes_altitude_filter
-        if not passes_altitude_filter(alt_ft):
-            return None
-    except ImportError:
-        if alt_ft < min_altitude or alt_ft >= 100000:
-            return None
+    _ = min_altitude  # kept for call-site compat; not used as a floor here
 
     callsign = (plane.get("flight") or "").strip()
     plane_type = plane.get("t") or ""
@@ -114,6 +111,9 @@ def _to_entry(plane: dict, min_altitude: int) -> dict | None:
     return {
         "callsign": callsign,
         "icao_hex": icao_hex,
+        # adsb.fi serves the readsb/tar1090 schema, which carries the tail
+        # number in "r". Free of charge — it rides the position response.
+        "registration": (plane.get("r") or "").strip().upper(),
         "airline": airline,
         "plane": plane_type,
         "origin": "",
@@ -121,6 +121,10 @@ def _to_entry(plane: dict, min_altitude: int) -> dict | None:
         "plane_latitude": float(lat),
         "plane_longitude": float(lon),
         "altitude": alt_ft,
+        # readsb reports a parked or rolling aircraft as alt_baro "ground",
+        # which _parse_alt_ft flattens to 0 ft. Keep the distinction: the
+        # arrival board needs to tell a touchdown from a low overflight.
+        "on_ground": plane.get("alt_baro") == "ground",
         "ground_speed": gs,
         "heading": heading,
         "vertical_speed": vert,

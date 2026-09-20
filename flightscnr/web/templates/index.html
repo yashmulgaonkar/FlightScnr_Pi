@@ -30,6 +30,8 @@
         input,select,button{font-family:inherit;}
         input,select{width:100%;padding:.6rem .65rem;border-radius:9px;border:1px solid var(--fline);
         background:var(--field);color:#fff;font-size:1rem;outline:none;}
+        input[type=color]{width:2.6rem;height:2.4rem;padding:.15rem;flex:none;cursor:pointer;}
+        input[type=color]:disabled{opacity:.4;cursor:not-allowed;}
         input:focus,select:focus{border-color:var(--accent2);box-shadow:0 0 0 2px rgba(34,194,76,.2);}
         input::placeholder{color:#777;}
         .hint,.note{color:var(--muted);font-size:.78rem;margin:.4rem 0 0;}
@@ -42,6 +44,7 @@
         .rgb-row label{margin:0;font-size:.75rem;color:var(--muted);}
         .rgb-row input[type=number]{width:100%;padding:.45rem .4rem;font-size:.9rem;}
         .rgb-row input[type=color]{width:2.6rem;height:2.4rem;padding:.15rem;border-radius:9px;border:1px solid var(--fline);background:var(--field);cursor:pointer;}
+        .chk input[type=color]{width:2.6rem;height:2.4rem;padding:.15rem;margin:0;}
         @media(max-width:24rem){.row2,.row3{grid-template-columns:1fr;}.rgb-row{grid-template-columns:1fr 1fr;}}
         .track-row{display:flex;gap:.5rem;align-items:center}
         .track-row input{flex:1}
@@ -53,8 +56,15 @@
         .btn:disabled{opacity:.6;cursor:wait}
         .chk{display:flex;align-items:center;gap:.6rem;padding:.7rem 0;border-bottom:1px solid rgba(120,120,120,.22);}
         .chk:last-of-type{border-bottom:none;}
+        .chk.is-disabled{opacity:.45;pointer-events:none;}
         .chk label{margin:0;font-size:.9rem;color:var(--text);flex:1;}
-        .switch{position:relative;width:2.6rem;height:1.5rem;flex:none;}
+        .drag-list{list-style:none;margin:.5rem 0 0;padding:0;}
+        .drag-item{display:flex;align-items:center;gap:.6rem;padding:.6rem .5rem;margin-bottom:.4rem;
+          background:var(--card2);border:1px solid var(--fline);border-radius:.5rem;
+          font-size:.88rem;color:var(--text);cursor:grab;user-select:none;}
+        .drag-item.dragging{opacity:.4;cursor:grabbing;}
+        .drag-handle{color:var(--fline);font-size:1rem;line-height:1;}
+	.switch{position:relative;width:2.6rem;height:1.5rem;flex:none;}
         .switch input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer;}
         .switch .track{position:absolute;inset:0;border-radius:999px;background:#333;
         border:1px solid var(--fline);transition:.18s;pointer-events:none;}
@@ -63,6 +73,39 @@
         .switch input:checked + .track{background:var(--accent);border-color:var(--accent2);}
         .switch input:checked + .track::after{left:1.32rem;background:#fff;}
         a{color:var(--link);}
+        .lofi-player{display:flex;gap:.8rem;align-items:center;background:var(--card2);
+        border:1px solid var(--fline);border-radius:12px;padding:.7rem;margin:.9rem 0 .5rem;}
+        .lofi-art-wrap{position:relative;width:72px;height:72px;border-radius:9px;flex:none;
+        overflow:hidden;border:1px solid var(--fline);display:grid;place-items:center;
+        background:radial-gradient(circle at 30% 25%,#2e2e2e,#191919 70%);}
+        .lofi-art-ph{color:var(--muted);font-size:1.7rem;opacity:.8;}
+        .lofi-art-lg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;}
+        .lofi-player-main{flex:1;min-width:0;}
+        .lofi-player-title{font-size:.95rem;font-weight:600;white-space:nowrap;overflow:hidden;
+        text-overflow:ellipsis;margin-bottom:.4rem;}
+        .lofi-player-controls{display:flex;align-items:center;gap:.6rem;}
+        .lofi-play-lg{width:2.4rem;height:2.4rem;border-radius:50%;border:1px solid var(--accent2);
+        background:var(--accent);color:#fff;font-size:.95rem;cursor:pointer;flex:none;
+        display:grid;place-items:center;padding:0;}
+        .lofi-seek{flex:1;min-width:0;width:auto;padding:0;height:.35rem;accent-color:var(--accent2);}
+        .lofi-time{color:var(--muted);font-size:.75rem;flex:none;font-variant-numeric:tabular-nums;}
+        .lofi-list{margin:.6rem 0 0;border:1px solid var(--fline);border-radius:12px;
+        background:var(--card2);max-height:21rem;overflow-y:auto;}
+        .lofi-row{display:flex;align-items:center;gap:.6rem;padding:.45rem .6rem;
+        border-bottom:1px solid rgba(120,120,120,.18);cursor:pointer;}
+        .lofi-row:last-child{border-bottom:none;}
+        .lofi-row.is-playing{background:rgba(34,194,76,.12);}
+        .lofi-row.is-off .lofi-thumb,.lofi-row.is-off .lofi-row-title{opacity:.35;}
+        .lofi-thumb{width:40px;height:40px;border-radius:7px;object-fit:cover;background:#222;
+        flex:none;display:grid;place-items:center;color:var(--muted);font-size:1rem;}
+        .lofi-row-title{flex:1;min-width:0;font-size:.88rem;white-space:nowrap;overflow:hidden;
+        text-overflow:ellipsis;}
+        .lofi-badge{flex:none;font-size:.6rem;color:var(--muted);border:1px solid var(--fline);
+        border-radius:999px;padding:.1rem .45rem;text-transform:uppercase;letter-spacing:.04em;}
+        .lofi-row .switch{transform:scale(.82);}
+        .lofi-remove{flex:none;background:none;border:none;color:var(--muted);font-size:1rem;
+        cursor:pointer;padding:.2rem .3rem;line-height:1;}
+        .lofi-remove:hover{color:#e66;}
         .wifi-note,.foot{text-align:center;font-size:.8rem;color:var(--muted);}
         .wifi-note{margin-top:.6rem}
         .foot{margin:1rem 0 .2rem}
@@ -72,8 +115,24 @@
         font-weight:600;background:#3a2808;color:#ffc866;border:1px solid #6a4a12}
         .update-badge.ok{background:#0f2a18;color:#8dffb0;border-color:#1a9c3c}
         .update-ver{font-size:.82rem;color:var(--muted);margin:.15rem 0}
+        .update-notes{display:none;white-space:pre-wrap;word-break:break-word;font-size:.78rem;
+        color:#d2d2d2;background:var(--field);border:1px solid var(--fline);border-radius:9px;
+        padding:.7rem .75rem;margin:.55rem 0 0;max-height:16rem;overflow:auto;line-height:1.4}
+        .update-notes.show{display:block}
+        .update-notes-link{display:none;font-size:.78rem;margin:.4rem 0 0}
+        .update-notes-link.show{display:block}
         .btn-danger{background:#4a1515;border-color:#7a2222}
         .btn-danger:hover{background:#5c1a1a}
+        .irreversible-card{background:#161010;border-color:#7a2222}
+        .irreversible-card>summary .ico{background:#2a1212;border-color:#7a2222;color:#f08888}
+        .irreversible-card .body{padding-top:.75rem;border-top-color:#5a2020}
+        .irreversible-row{display:flex;gap:.75rem;align-items:center;
+        justify-content:space-between;flex-wrap:wrap;padding:.2rem 0 .15rem}
+        .irreversible-copy{flex:1;min-width:12rem}
+        .irreversible-copy h3{margin:0;font-size:.95rem;font-weight:700}
+        .irreversible-copy .desc{margin:.3rem 0 0;color:var(--muted);font-size:.78rem}
+        .btn-irreversible{background:#1c1414;border-color:#8a2a2a;color:#f08870;flex:none}
+        .btn-irreversible:hover{background:#2a1414;color:#ff9d88}
         .fav-list{margin-top:.35rem}
         .fav-row{display:flex;gap:.55rem;align-items:flex-start;padding:.65rem 0;
         border-bottom:1px solid rgba(120,120,120,.22)}
@@ -89,6 +148,22 @@
         .btn-sm{padding:.4rem .65rem;font-size:.8rem}
         .system-card .body{padding-top:.75rem}
         .hidden{display:none}
+        .search-wrap{position:relative;margin:0 0 1rem}
+        .search-wrap input{width:100%;padding:.6rem .8rem;background:var(--field);
+        border:1px solid var(--fline);border-radius:10px;color:var(--text);font-size:.95rem}
+        .search-wrap input:focus{outline:none;border-color:var(--accent)}
+        .search-results{position:absolute;left:0;right:0;top:calc(100% + .3rem);
+        background:var(--card2);border:1px solid var(--line);border-radius:10px;z-index:50;
+        max-height:16rem;overflow:auto;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+        .search-results button{display:block;width:100%;text-align:left;background:none;border:0;
+        border-bottom:1px solid var(--line);color:var(--text);padding:.55rem .8rem;cursor:pointer;font-size:.88rem}
+        .search-results button:last-child{border-bottom:0}
+        .search-results button:hover,.search-results button.sel{background:var(--card)}
+        .search-results .sec{display:block;color:var(--muted);font-size:.72rem;margin-top:.1rem}
+        .search-empty{padding:.55rem .8rem;color:var(--muted);font-size:.85rem}
+        .search-hit{animation:searchflash 2s ease-out;border-radius:6px}
+        @keyframes searchflash{0%,55%{background:rgba(34,194,76,.28);box-shadow:0 0 0 2px var(--accent2)}
+        100%{background:transparent;box-shadow:none}}
     </style>
 </head>
 <body>
@@ -98,6 +173,11 @@
         <h1>FlightScnrPi</h1>
     </div>
     <p class="subtitle">Portal settings for radar, local ADS-B, display, alerts, tracking, and API keys.</p>
+
+    <div class="search-wrap">
+        <input id="setting_search" type="search" placeholder="Search settings…" autocomplete="off">
+        <div id="setting_search_results" class="search-results hidden"></div>
+    </div>
 
     <details class="card">
         <summary><span class="ico">&#9678;</span>Radar<span class="sum">center, range, units</span><span class="chev">&#9656;</span></summary>
@@ -119,6 +199,7 @@
             <label for="min_height">Min altitude floor (ft, 0 = off)</label>
             <select id="min_height">
                 <option value="0">0 (off)</option>
+                <option value="100">100</option>
                 <option value="500">500</option>
                 <option value="1000">1000</option>
                 <option value="1500">1500</option>
@@ -176,14 +257,44 @@
                 <input id="runway_color" type="color" title="Runway centerline">
             </div>
             <p class="hint">Sets RUNWAY_DARKMAP — runway centerline color on the dark basemap (skipped on VFR).</p>
+            <label>Runway Centerline Color for Light Map</label>
+            <div class="rgb-row" id="runway_light_rgb">
+                <label>R <input id="runway_light_r" type="number" min="0" max="255" step="1"></label>
+                <label>G <input id="runway_light_g" type="number" min="0" max="255" step="1"></label>
+                <label>B <input id="runway_light_b" type="number" min="0" max="255" step="1"></label>
+                <input id="runway_light_color" type="color" title="Runway centerline light map">
+            </div>
+            <p class="hint">Sets RUNWAY_LIGHT — runway centerline color on light basemaps (skipped on VFR).</p>
+            <label>Flight Number Color for Dark Map</label>
+            <div class="rgb-row" id="tag_text_dark_rgb">
+                <label>R <input id="text_dark_r" type="number" min="0" max="255" step="1"></label>
+                <label>G <input id="text_dark_g" type="number" min="0" max="255" step="1"></label>
+                <label>B <input id="text_dark_b" type="number" min="0" max="255" step="1"></label>
+                <input id="text_dark_color" type="color" title="Flight number dark map">
+            </div>
+            <p class="hint">Top identity line on aircraft radar tags (flight number / callsign) for dark basemaps.</p>
+            <label>Flight Number Color for Light Map</label>
+            <div class="rgb-row" id="tag_text_light_rgb">
+                <label>R <input id="text_light_r" type="number" min="0" max="255" step="1"></label>
+                <label>G <input id="text_light_g" type="number" min="0" max="255" step="1"></label>
+                <label>B <input id="text_light_b" type="number" min="0" max="255" step="1"></label>
+                <input id="text_light_color" type="color" title="Flight number light map">
+            </div>
+            <p class="hint">Same tag identity line on light / VFR / street basemaps. Type and altitude rows are unchanged.</p>
             <label for="map_style">Map style</label>
             <select id="map_style">
-                <option value="dark">Dark (CARTO)</option>
-                <option value="light">Light (CARTO)</option>
-                <option value="voyager">Voyager (CARTO)</option>
-                <option value="vfr">VFR sectional (FAA)</option>
+                <option value="dark">Dark: Carto</option>
+                <option value="osm">Dark: OSM</option>
+                <option value="stadia_dark">Dark: Stadia (needs STADIA_MAPS_API_KEY)</option>
+                <option value="black">Dark: Flat</option>
+                <option value="light">Light: Carto</option>
+                <option value="toner">Light: Toner (needs STADIA_MAPS_API_KEY)</option>
+                <option value="vfr">Light: VFR (FAA)</option>
+                <option value="streets">Street: Esri</option>
+                <option value="voyager">Street: Voyager (CARTO)</option>
+                <option value="satellite">Satellite: Esri</option>
             </select>
-            <p class="hint">VFR sectionals are free public-domain FAA charts (US coverage). Outside the US, use dark, light, or Voyager.</p>
+            <p class="hint">Dark/Light/Voyager Carto need a free CARTO_BASEMAPS_API_KEY. Dark: Stadia and Light: Toner need a free STADIA_MAPS_API_KEY. OSM, Esri, Flat, and VFR need no key. VFR sectionals are public-domain FAA charts (US coverage).</p>
             <label for="vfr_opacity">VFR map opacity <span id="vfr_opacity_label">45%</span></label>
             <input id="vfr_opacity" type="range" min="15" max="100" step="1" value="45">
             <p class="hint">How strong the VFR chart appears under traffic (lower = paler). Applies when map style is VFR.</p>
@@ -195,6 +306,10 @@
                 <label for="show_range_rings">Show range rings</label>
                 <span class="switch"><input id="show_range_rings" type="checkbox"><span class="track"></span></span>
             </div>
+            <div class="chk">
+                <label for="color_by_altitude">Color aircraft by altitude</label>
+                <span class="switch"><input id="color_by_altitude" type="checkbox"><span class="track"></span></span>
+            </div>
             <label for="traffic_labels">Traffic labels</label>
             <select id="traffic_labels">
                 <option value="aircraft">Aircraft Only</option>
@@ -203,6 +318,25 @@
                 <option value="off">OFF</option>
             </select>
             <p class="hint">Callsign/type/altitude on aircraft, and vessel name tags. Turn off to declutter a busy radar; tap a symbol for details.</p>
+            <label for="aircraft_tag_id">Aircraft ID on tags</label>
+            <select id="aircraft_tag_id">
+                <option value="flight_number">Flight number</option>
+                <option value="callsign">Callsign</option>
+                <option value="tail">Tail number</option>
+                <option value="alternate">Alternate</option>
+            </select>
+            <p class="hint">Top line of each aircraft tag: marketing flight number (e.g. UA5796), ATC callsign (e.g. SKW5796), tail / registration (e.g. N12345), or alternate through whichever of those differ.</p>
+            <div class="chk" id="show_tag_leaders_row">
+                <label for="show_tag_leaders">Show tag leaders</label>
+                <span class="switch"><input id="show_tag_leaders" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">Hockey-stick underline and diagonal from each callsign tag to its aircraft or vessel. Same color as the blip. Only drawn when traffic labels are on.</p>
+            <label for="rim_target_style">Out-of-range rim targets</label>
+            <select id="rim_target_style">
+                <option value="plane">Aircraft icon</option>
+                <option value="dot">Dot blip</option>
+            </select>
+            <p class="hint">Aircraft past the radar range are pinned to the rim. Dot draws a small half-round blip flat against the edge; aircraft icon keeps the compact plane symbol.</p>
             <label for="facing_deg">Facing direction (degrees)</label>
             <input id="facing_deg" type="number" min="0" max="359" step="1" value="0">
             <p class="hint">Real-world direction at the top of the screen (0 = north, 90 = east, 180 = south, 270 = west). You can also set this on the device under Settings → Display → Facing.</p>
@@ -221,6 +355,11 @@
             </div>
             <p class="hint">In California: <a href="https://www.fire.ca.gov/incidents" target="_blank" rel="noopener">CAL FIRE</a> (no API key). Rest of USA/Canada: <a href="https://data-nifc.opendata.arcgis.com/" target="_blank" rel="noopener">NIFC WFIGS</a> / <a href="https://fire.airnow.gov/" target="_blank" rel="noopener">AirNow</a> large fires (no API key). Outside USA/Canada: <a href="https://firms.modaps.eosdis.nasa.gov/api/area/" target="_blank" rel="noopener">NASA FIRMS</a> hotspots (free <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener">MAP_KEY</a> in API Keys). Tap a fire for details. Refreshes every 15 minutes and on recenter.</p>
             <div class="chk">
+                <label for="show_earthquakes">Show earthquakes</label>
+                <span class="switch"><input id="show_earthquakes" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">Global M2.5+ epicenters from the <a href="https://earthquake.usgs.gov/" target="_blank" rel="noopener">USGS</a> catalog (no API key), last 24 hours — same default window as the USGS live map. PAGER impact alerts and tsunami bulletins show on the detail page. Tap a marker for magnitude, depth, and place. Refreshes every minute and on recenter. Voice alerts are under Display, screens &amp; volume (device: Settings → HUD &amp; Volume).</p>
+            <div class="chk">
                 <label for="show_airport_centerlines">Show airport centerlines</label>
                 <span class="switch"><input id="show_airport_centerlines" type="checkbox"><span class="track"></span></span>
             </div>
@@ -229,7 +368,29 @@
                 <label for="show_airport_icons">Show airport icons</label>
                 <span class="switch"><input id="show_airport_icons" type="checkbox"><span class="track"></span></span>
             </div>
+            <label for="airport_icon_style">Airport icon style</label>
+            <select id="airport_icon_style">
+                <option value="classic">Classic pins</option>
+                <option value="chart">Chart style (sectional)</option>
+            </select>
+            <p class="hint">Chart style draws VFR-sectional symbols: blue = towered, magenta = untowered, tines = fuel available, star = rotating beacon. Fuel/beacon marks use FAA data and are US airports only.</p>
+            <label for="airport_min_size">Smallest airports shown</label>
+            <select id="airport_min_size">
+                <option value="large">Large only</option>
+                <option value="medium">Large + medium</option>
+                <option value="small_paved">Small (paved only)</option>
+                <option value="small">All small strips</option>
+            </select>
+            <p class="hint">OurAirports tags most dirt strips and private fields as small airports. "Paved only" keeps small fields with at least one paved runway.</p>
             <p class="hint">Airport pin icons (airport.png) for large, medium, and small airports in range. Heliports and closed fields are skipped.</p>
+            <p class="hint">Split-flap arrivals and departures for each airport in radar range, by tail number, flight number, or callsign. Movements are worked out on the device from the aircraft the radar already tracks, so no flight-schedule subscription is needed. Swipe left from the radar to reach it; tap the board to flip between arrivals and departures, or tap a row for an aircraft tile. The ID button next to Next picks which identity the flaps show.</p>
+            <label for="flip_board_id">Board identity</label>
+            <select id="flip_board_id">
+                <option value="tail">Tail number</option>
+                <option value="flight_number">Flight number</option>
+                <option value="callsign">Callsign</option>
+            </select>
+            <p class="hint">What each split-flap row shows. Missing values fall back (a GA tail with no flight number still shows the N-number).</p>
             <div class="chk">
                 <label for="show_ground_vehicles">Show ground vehicles</label>
                 <span class="switch"><input id="show_ground_vehicles" type="checkbox"><span class="track"></span></span>
@@ -284,7 +445,7 @@
                     <input id="fav_name" type="text" autocomplete="off" placeholder="e.g. Heathrow" maxlength="40">
                     <label for="fav_position">Location Position (lat, lon)</label>
                     <input id="fav_position" type="text" autocomplete="off" placeholder="e.g. 51.470748, -0.459909">
-                    <p class="hint">Radar center above is Home. After Set Radar Center on the Pi you can Update the active favorite, Save as Home, or keep as Custom. The last center is what reboot restores. Cycle favorites under Settings → Options → Favorite Locations. Max 10 favorites.</p>
+                    <p class="hint">Radar center above is Home. After Set Radar Center on the Pi you can Update the active favorite, Save as Home, or keep as Custom. The last center is what reboot restores. Pick a saved center under Settings → Options → Favorite Locations. Max 10 favorites.</p>
                     <button class="btn btn-primary" id="btn-fav-add" style="margin-top:.5rem" type="button">Add location</button>
                     <div id="fav-add-status" class="status"></div>
                 </div>
@@ -308,9 +469,47 @@
             </div>
             <label for="dump1090_url">aircraft.json URL</label>
             <input id="dump1090_url" type="text" autocomplete="off" placeholder="http://127.0.0.1:8080/data/aircraft.json">
-            <p class="hint">Local receiver feed (dump1090-fa, readsb, or tar1090). Merges with FR24/adsb.fi; local positions win on overlap. Leave off if nothing is listening — connection refused will spam the logs.</p>
+            <p class="hint">Local receiver feed (dump1090-fa, readsb, or tar1090). Merges with FR24/adsb.fi; local positions win on overlap. Leave off if nothing is listening — connection refused will spam the logs. Aircraft heard locally show a <code>*</code> before the callsign on the radar tag.</p>
+            <p id="dump1090-live" class="hint" style="margin-top:.45rem">Status: …</p>
             <button class="btn btn-primary" id="btn-dump1090" style="margin-top:.7rem" type="button">Save local ADS-B</button>
             <div id="dump1090-status" class="status"></div>
+        </div>
+    </details>
+
+    <details class="card">
+        <summary><span class="ico">&#128225;</span>Route Sources<span class="sum">order &amp; fallback</span><span class="chev">&#9656;</span></summary>
+        <div class="body">
+            <label for="route_source_order">Route lookup order</label>
+            <input id="route_source_order" type="text" autocomplete="off" placeholder="airlabs,flightaware,opensky">
+            <p class="hint">Comma-separated: airlabs, flightaware, opensky — tried in this order, first match per field wins, gaps filled by the next. Omit an entry to disable it entirely. Example for a fully free/open-source lookup with no paid API ever called: <code>opensky</code>. Leave blank for the default order (airlabs,flightaware,opensky).</p>
+            <button class="btn btn-primary" id="btn-route-source-order" style="margin-top:.7rem" type="button">Save route order</button>
+            <div id="route-source-order-status" class="status"></div>
+        </div>
+    </details>
+
+    <details class="card">
+        <summary><span class="ico">&#128506;</span>Position Sources<span class="sum">extended tracking map</span><span class="chev">&#9656;</span></summary>
+        <div class="body">
+            <p class="hint">Fallback order for the live-centered map (Radar &gt; Track &gt; Live). First source that has a fresh position for the tracked aircraft wins. Drag to reorder; a source with no key/URL configured is skipped automatically even if left in the list.</p>
+            <ul id="position-source-list" class="drag-list">
+                <!-- populated by loadPositionSourceOrder() -->
+            </ul>
+            <div class="chk" style="margin-top:.75rem">
+                <label for="live_map_heading_up">Rotate map to heading (default: north-up)</label>
+                <span class="switch"><input id="live_map_heading_up" type="checkbox"><span class="track"></span></span>
+            </div>
+            <label for="live_tracking_preview_minutes" style="margin-top:.75rem">Follow zoom preview (minutes)</label>
+            <input id="live_tracking_preview_minutes" type="number" min="1" max="30" step="0.5" value="5">
+            <p class="hint">How far ahead (at current ground speed) the Follow map tries to show. Larger = wider zoom at the same speed. Default 5.</p>
+            <label for="live_tracking_min_radius" id="live_tracking_min_radius_label">Follow min radius</label>
+            <input id="live_tracking_min_radius" type="number" min="0.5" max="200" step="0.1" value="3.22">
+            <p class="hint" id="live_tracking_min_radius_hint">Floor for the speed-based zoom curve (not the taxi snap). Default matches ~2 mi.</p>
+            <label for="live_tracking_max_radius" id="live_tracking_max_radius_label">Follow max radius</label>
+            <input id="live_tracking_max_radius" type="number" min="1" max="200" step="1" value="120">
+            <p class="hint" id="live_tracking_max_radius_hint">Ceiling for cruise / high-speed Follow zoom.</p>
+            <button class="btn btn-primary" id="btn-position-sources" style="margin-top:.7rem" type="button">Save position sources</button>
+            <button class="btn" id="btn-position-sources-reset" style="margin-top:.4rem" type="button">Reset to default order</button>
+            <div id="position-sources-status" class="status"></div>
         </div>
     </details>
 
@@ -358,10 +557,17 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#9788;</span>Display &amp; screens<span class="sum">brightness, rotation, timeouts</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9788;</span>Display, screens &amp; volume<span class="sum">brightness, rotation, timeouts, volume</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <label for="bright_pct">Screen brightness <span id="bright_pct_label">100%</span></label>
             <input id="bright_pct" type="range" min="3" max="100" step="1" value="100">
+            <div class="chk">
+                <label for="quiet_dim_enabled">Dim during quiet hours</label>
+                <span class="switch"><input id="quiet_dim_enabled" type="checkbox"><span class="track"></span></span>
+            </div>
+            <label for="quiet_dim_pct">Quiet-hours dim level <span id="quiet_dim_pct_label">20%</span></label>
+            <input id="quiet_dim_pct" type="range" min="0" max="100" step="1" value="20" oninput="document.getElementById('quiet_dim_pct_label').textContent = this.value + '%'">
+            <p class="hint">Caps the screen at this brightness while ATC quiet hours are active. Same as Settings &rarr; Quiet on the device, where the slider previews the dimness live.</p>
             <label for="display_rotation">Screen rotation</label>
             <select id="display_rotation">
                 <option value="0">0°</option>
@@ -400,6 +606,26 @@
             </div>
             <p class="hint">Applies everywhere: radar HUD, clock screen, and settings. Off = 24-hour.</p>
             <div class="chk">
+                <label for="date_format_eu">European date format</label>
+                <span class="switch"><input id="date_format_eu" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">Digital clock: <code>Wed, 26 Aug</code>. Altimeter drums: <code>DD MM</code>. Flieger is unchanged (day + date only).</p>
+            <label for="default_clock">Daytime clock face</label>
+            <select id="default_clock">
+                <option value="digital">Digital</option>
+                <option value="analog">Analog (altimeter)</option>
+                <option value="night">Analog (altimeter, night)</option>
+                <option value="flieger">Flieger chronograph</option>
+            </select>
+            <label for="default_clock_off_hours">Off-hours clock face</label>
+            <select id="default_clock_off_hours">
+                <option value="digital">Digital</option>
+                <option value="analog">Analog (altimeter)</option>
+                <option value="night">Analog (altimeter, night)</option>
+                <option value="flieger">Flieger chronograph</option>
+            </select>
+            <p class="hint">Daytime face is used outside the Off-Hours window; off-hours face while that schedule is active (force-clock, auto-idle, or opening the clock). Swipe between faces still works.</p>
+            <div class="chk">
                 <label for="radar_hud">Show radar clock HUD</label>
                 <span class="switch"><input id="radar_hud" type="checkbox" checked><span class="track"></span></span>
             </div>
@@ -407,7 +633,11 @@
                 <label for="radar_hud_dark">HUD dark mode</label>
                 <span class="switch"><input id="radar_hud_dark" type="checkbox"><span class="track"></span></span>
             </div>
-            <label for="radar_hud_position">Radar clock position</label>
+            <div class="chk">
+                <label for="background_texture">Background texture</label>
+                <span class="switch"><input id="background_texture" type="checkbox" checked><span class="track"></span></span>
+            </div>
+            <label for="radar_hud_position">Radar HUD position</label>
             <select id="radar_hud_position">
                 <option value="top">Top</option>
                 <option value="bottom">Bottom</option>
@@ -415,6 +645,16 @@
             <label for="radar_hud_opacity">Radar clock opacity <span id="radar_hud_opacity_label">72%</span></label>
             <input id="radar_hud_opacity" type="range" min="0" max="100" step="1" value="72">
             <p class="hint">Frosted glass pill behind the radar clock and icons (0% = invisible fill, 100% = solid). Dark mode uses a dark pill with light glyphs.</p>
+            <div class="chk">
+                <label for="radar_zoom_buttons">Radar zoom &minus;/+ buttons</label>
+                <span class="switch"><input id="radar_zoom_buttons" type="checkbox" checked><span class="track"></span></span>
+            </div>
+            <p class="hint">Faint &minus;/+ pill on the edge of the radar. Taps step the range like pinch zoom.</p>
+            <label for="radar_zoom_position">Zoom buttons position</label>
+            <select id="radar_zoom_position">
+                <option value="right">Right</option>
+                <option value="left">Left</option>
+            </select>
             <div class="chk">
                 <label for="hourly_chime">Hourly chime</label>
                 <button class="btn btn-sm" id="btn-chime-preview" type="button">Preview</button>
@@ -439,8 +679,79 @@
             <label for="military_sfx_volume">Military sound volume <span id="military_sfx_volume_label">80%</span></label>
             <input id="military_sfx_volume" type="range" min="0" max="100" step="1" value="80">
             <p class="hint">Plays once when a new military aircraft appears in radar range.</p>
+            <div class="chk">
+                <label for="earthquake_voice">Earthquake alert</label>
+                <button class="btn btn-sm" id="btn-earthquake-voice-preview" type="button">Preview</button>
+                <span class="switch"><input id="earthquake_voice" type="checkbox"><span class="track"></span></span>
+            </div>
+            <label for="earthquake_voice_volume">Earthquake alert volume <span id="earthquake_voice_volume_label">80%</span></label>
+            <input id="earthquake_voice_volume" type="range" min="0" max="100" step="1" value="80">
+            <p class="hint">Off by default. Plays a voice clip once per new USGS event M3.0+ in radar range. Not earthquake early warning — catalog events can be minutes old. Silent during quiet hours and display off-hours. Needs the earthquake layer on, plus a USB or Bluetooth speaker.</p>
+            <div class="chk">
+                <label for="flip_board_sound">Board flip sound</label>
+                <span class="switch"><input id="flip_board_sound" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">Split-flap clatter while the arrivals board turns. Density follows how many tiles are moving. Needs a speaker, and follows the master sound switch and the off-hours schedule.</p>
             <button class="btn btn-primary" id="btn-save-reload" style="margin-top:.7rem" type="button">Save &amp; reload on display</button>
             <div id="display-status" class="status"></div>
+        </div>
+    </details>
+
+    <details class="card">
+        <summary><span class="ico">&#9835;</span>LoFi Beats<span class="sum">background music, playlist, uploads</span><span class="chev">&#9656;</span></summary>
+        <div class="body">
+            <div class="chk">
+                <label for="lofi_enabled">Background lofi beats</label>
+                <span class="switch"><input id="lofi_enabled" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">Mellow music under the live ATC stream, crossfading through the playlist. Plays only while ATC audio is on, so it follows ATC quiet hours.</p>
+            <label for="lofi_volume" style="margin-top:.6rem">Lofi volume <span id="lofi_volume_label">25%</span></label>
+            <input id="lofi_volume" type="range" min="0" max="100" step="1" value="25" oninput="document.getElementById('lofi_volume_label').textContent = this.value + '%'">
+            <div class="chk">
+                <label for="lofi_controls_enabled">Lofi prev/next buttons</label>
+                <span class="switch"><input id="lofi_controls_enabled" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">Prev/next pill on the rim opposite the clock HUD. Shows only while the beats are enabled.</p>
+            <div class="chk">
+                <label for="lofi_title_scroll">Scroll lofi track name</label>
+                <span class="switch"><input id="lofi_title_scroll" type="checkbox" checked><span class="track"></span></span>
+            </div>
+            <p class="hint">Marquee the lofi track name through the pill. Off = truncate long names at 20 characters.</p>
+
+            <div id="lofi-pack" style="margin:.8rem 0 0">
+                <p class="hint" id="lofi_pack_hint">The starter playlist is not installed yet — the beats need tracks to play.</p>
+                <button class="btn btn-primary" id="btn-lofi-pack" type="button" style="margin-top:.4rem">Download starter playlist (~190 MB)</button>
+                <div id="lofi_pack_progress" hidden style="margin-top:.55rem">
+                    <div style="height:.5rem;border-radius:999px;background:var(--field);border:1px solid var(--fline);overflow:hidden">
+                        <div id="lofi_pack_bar" style="height:100%;width:0%;background:var(--accent2);transition:width .4s"></div>
+                    </div>
+                    <p class="hint" id="lofi_pack_msg"></p>
+                </div>
+            </div>
+
+            <div id="lofi-player" class="lofi-player" hidden>
+                <div class="lofi-art-wrap"><span class="lofi-art-ph">&#9835;</span><img id="lofi-player-art" class="lofi-art-lg" alt="" src=""></div>
+                <div class="lofi-player-main">
+                    <div id="lofi-player-title" class="lofi-player-title">&nbsp;</div>
+                    <div class="lofi-player-controls">
+                        <button class="lofi-play-lg" id="lofi-player-btn" type="button" aria-label="Play or pause">&#9654;</button>
+                        <input id="lofi-seek" type="range" min="0" max="1000" step="1" value="0" class="lofi-seek">
+                        <span id="lofi-time" class="lofi-time">0:00</span>
+                    </div>
+                </div>
+            </div>
+            <audio id="lofi_preview" preload="none"></audio>
+
+            <div id="lofi_tracks" class="lofi-list"></div>
+            <p class="hint">Tap a track to preview it here. Switch a built-in off to drop it from the rotation on the display. Your uploads can be removed with &#10005;.</p>
+
+            <div class="chk">
+                <input id="lofi_file" type="file" accept=".mp3,audio/mpeg" style="max-width:60%">
+                <button class="btn btn-sm" id="btn-lofi-upload" type="button">Add track</button>
+            </div>
+            <p class="hint" id="lofi_upload_msg"></p>
+            <button class="btn btn-primary" id="btn-save-lofi" style="margin-top:.7rem" type="button">Save &amp; reload on display</button>
+            <div id="lofi-status" class="status"></div>
         </div>
     </details>
 
@@ -458,7 +769,7 @@
             </select>
             <div id="dim-row">
                 <label for="night_dim">Dim brightness <span id="night_dim_label">20%</span></label>
-                <input id="night_dim" type="range" min="3" max="100" step="1" value="20">
+                <input id="night_dim" type="range" min="3" max="100" step="1" value="20" oninput="syncNightDimLabel()">
             </div>
             <div class="chk">
                 <label for="night_clock">Show clock during off-hours</label>
@@ -468,9 +779,19 @@
                 <div><label for="night_start">Start</label><input type="time" id="night_start"></div>
                 <div><label for="night_end">End</label><input type="time" id="night_end"></div>
             </div>
-            <p class="note">Dim/off and clock can be combined — e.g. dim the display and stay on the clock screen.</p>
+            <p class="note">Dim/off and clock can be combined — e.g. turn the display off (or dim it) and still force the clock screen. Quiet-hours dim under Display is a separate schedule tied to ATC quiet hours.</p>
             <button class="btn btn-primary" id="btn-offhours" style="margin-top:.7rem" type="button">Save off-hours</button>
             <div id="offhours-status" class="status"></div>
+        </div>
+    </details>
+
+    <details class="card">
+        <summary><span class="ico">&#9678;</span>Targets<span class="sum">colors, sizes, symbols</span><span class="chev">&#9656;</span></summary>
+        <div class="body">
+            <p class="hint">Per-category visibility for the radar: accent color, size, and symbol for planes, helicopters, drones, and vessels, plus compass rose and blip styling. Same as Settings &rarr; Targets on the device. Auto keeps today's default look.</p>
+            <div id="targets_body"></div>
+            <button class="btn btn-primary" id="btn-targets" type="button" style="margin-top:.7rem">Save targets</button>
+            <div id="targets-status" class="status"></div>
         </div>
     </details>
 
@@ -492,7 +813,7 @@
     <details class="card atc-card">
         <summary><span class="ico">&#9835;</span>ATC Audio<span class="sum">LiveATC</span><span class="chev">&#9656;</span></summary>
         <div class="body">
-            <p class="hint">Manual LiveATC stream to the Pi’s USB or Bluetooth speaker via <code>mpv</code> (<code>sudo apt install mpv</code>). Pair a Bluetooth speaker in the card below. Airport lists every large/medium field in radar range. Channel loads local seed/index immediately, then auto-fetches the full LiveATC feed list in the background (Cloudflare-bypass search). If ATC is enabled and playback is active (or was left on via Play), changing airport or moving the map selects that area’s Tower and keeps playing; Stop clears that so a map move only updates the selection. Playback resumes after reboot/app restart when it was playing. Quiet hours block auto-start and resume; Play still overrides until you Stop.</p>
+            <p class="hint">Manual LiveATC stream to the Pi’s USB or Bluetooth speaker via <code>mpv</code> (<code>sudo apt install mpv</code>). Pair a Bluetooth speaker in the card below. Airport lists every large/medium field in radar range. Channel loads local seed/index immediately, then auto-fetches the full LiveATC feed list in the background (Cloudflare-bypass search). Enable ATC audio to start playback; disable to stop. Changing airport or moving the map while ATC is enabled selects that area’s Tower and keeps playing. Playback resumes after reboot/app restart when it was left enabled. Quiet hours block auto-resume after reboot; turning ATC on again overrides quiet hours until you disable it.</p>
             <div class="chk">
                 <label for="atc_enabled">Enable ATC audio</label>
                 <span class="switch"><input id="atc_enabled" type="checkbox"><span class="track"></span></span>
@@ -529,8 +850,6 @@
             <p class="hint" id="atc_status_line">Status: —</p>
             <div class="track-row" style="margin-top:.55rem">
                 <button class="btn btn-primary" id="btn-atc-save" type="button">Save</button>
-                <button class="btn btn-primary" id="btn-atc-play" type="button">Play</button>
-                <button class="btn" id="btn-atc-stop" type="button">Stop</button>
             </div>
             <div id="atc-status" class="status"></div>
         </div>
@@ -555,7 +874,7 @@
     </details>
 
     <details class="card">
-        <summary><span class="ico">&#128273;</span>API Keys<span class="sum">FR24, Tomorrow.io, AirLabs, AIS, FlightAware, FIRMS</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#128273;</span>API Keys<span class="sum">FR24, Tomorrow.io, AirLabs, AIS, FlightAware, FIRMS, Stadia</span><span class="chev">&#9656;</span></summary>
         <div class="body">
             <div class="chk">
                 <label for="use-fr24-api">Use FR24 API</label>
@@ -588,7 +907,7 @@
             <p class="hint">Route enrichment only when FR24/AirLabs lack origin/destination — not a live radar feed. Soft monthly spend ceiling protects free credit.</p>
             <p class="hint" id="flightaware-usage"></p>
             <div class="chk">
-                <label for="use-opensky-api">Use OpenSky Network (route fallback)</label>
+                <label for="use-opensky-api">Use OpenSky Network (route + live position)</label>
                 <span class="switch"><input id="use-opensky-api" type="checkbox" checked><span class="track"></span></span>
             </div>
             <label for="opensky-client-id">OpenSky API client ID (optional)</label>
@@ -597,7 +916,15 @@
             <label for="opensky-client-secret">OpenSky API client secret (optional)</label>
             <input type="password" id="opensky-client-secret" placeholder="client_secret" autocomplete="off">
             <p class="hint" id="opensky-client-secret-hint"></p>
-            <p class="hint">Further route fallback when FR24/AirLabs/FlightAware lack origin/destination. Create an API client under Account → API Client on <a href="https://opensky-network.org/" target="_blank" rel="noopener">opensky-network.org</a> (separate from feeder credentials). Destination is often empty while airborne.</p>
+            <p class="hint">Route enrichment fallback when FR24/AirLabs/FlightAware lack origin/destination, and optional live-position source for extended tracking. Create an API client under Account → API Client on <a href="https://opensky-network.org/" target="_blank" rel="noopener">opensky-network.org</a> (separate from feeder credentials). Destination is often empty while airborne.</p>
+            <div class="chk">
+                <label for="use-adsbexchange-api">Use ADS-B Exchange (live position)</label>
+                <span class="switch"><input id="use-adsbexchange-api" type="checkbox"><span class="track"></span></span>
+            </div>
+            <label for="adsbexchange-key">ADS-B Exchange RapidAPI key (optional)</label>
+            <input type="password" id="adsbexchange-key" placeholder="API key" autocomplete="off">
+            <p class="hint" id="adsbexchange-hint"></p>
+            <p class="hint">Optional live-position fallback for extended tracking (after OpenSky in the default order). RapidAPI plan/quota varies — leave empty to skip. See <a href="https://rapidapi.com/adsbx/api/adsb-exchange" target="_blank" rel="noopener">ADS-B Exchange on RapidAPI</a>.</p>
             <div class="chk">
                 <label for="use-aisstream-api">Use aisstream.io API key</label>
                 <span class="switch"><input id="use-aisstream-api" type="checkbox" checked><span class="track"></span></span>
@@ -610,6 +937,22 @@
             <input type="password" id="firms-key" placeholder="MAP_KEY" autocomplete="off">
             <p class="hint" id="firms-hint"></p>
             <p class="hint">Free key from <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener">FIRMS map key</a>. Used for satellite hotspots when the radar is outside the USA and Canada. In California: CAL FIRE; elsewhere in USA/Canada: NIFC WFIGS (no key).</p>
+            <div class="chk">
+                <label for="use-carto-basemaps">Use CARTO basemaps</label>
+                <span class="switch"><input id="use-carto-basemaps" type="checkbox" checked><span class="track"></span></span>
+            </div>
+            <label for="carto-key">CARTO basemaps API key</label>
+            <input type="password" id="carto-key" placeholder="API key" autocomplete="off">
+            <p class="hint" id="carto-hint"></p>
+            <p class="hint">Free key from <a href="https://carto.com/basemaps/apikey/" target="_blank" rel="noopener">CARTO basemaps</a> (no CARTO account required). Required for Dark: Carto, Light: Carto, and Street: Voyager — without it tiles show an “API key required” watermark.</p>
+            <div class="chk">
+                <label for="use-stadia-maps">Use Stadia Maps</label>
+                <span class="switch"><input id="use-stadia-maps" type="checkbox" checked><span class="track"></span></span>
+            </div>
+            <label for="stadia-key">Stadia Maps API key</label>
+            <input type="password" id="stadia-key" placeholder="API key" autocomplete="off">
+            <p class="hint" id="stadia-hint"></p>
+            <p class="hint">Free key from <a href="https://client.stadiamaps.com/signup/" target="_blank" rel="noopener">Stadia Maps</a>. Required for Dark: Stadia and Light: Toner basemap styles on the Radar card.</p>
             <div class="track-row" style="margin-top:.6rem">
                 <button class="btn btn-primary" id="btn-keys-save" type="button">Save keys</button>
                 <button class="btn" id="btn-keys-restart" type="button">Save &amp; restart</button>
@@ -627,10 +970,30 @@
             </div>
             <p class="update-ver" id="update-local">Installed version: checking…</p>
             <p class="update-ver" id="update-remote">Latest on GitHub: checking…</p>
+            <pre class="update-notes" id="update-notes"></pre>
+            <p class="hint update-notes-link" id="update-notes-link"></p>
             <p class="hint" id="update-message"></p>
+            <p class="hint">After Update Now, the device may briefly re-sync install steps automatically (X11 / display). If LightDM is switched to X11 for pinch-zoom, the Pi reboots on its own.</p>
+            <div class="chk" style="margin-top:.55rem">
+                <label for="auto_off_hours">Auto-install during off-hours</label>
+                <span class="switch"><input id="auto_off_hours" type="checkbox"><span class="track"></span></span>
+            </div>
+            <div class="chk" id="auto-update-time-row">
+                <label for="auto_update_time">Auto-update time (optional)</label>
+                <input id="auto_update_time" type="time" step="60">
+            </div>
+            <div class="chk">
+                <label for="hide_update_banner">Hide update banner on device</label>
+                <span class="switch"><input id="hide_update_banner" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">When Auto-install is on, the update banner stays hidden on the radar/clock screen entirely; it installs silently. By default it installs in the Off Hours window (start/end above, or 22:00–06:00) once the panel has been idle for 5 minutes. Set a specific Auto-update time instead if you want updates to run at a fixed time independent of your Off Hours schedule (a window of about an hour after that time). Dismissing the radar bubble skips that version. ATC playing also delays the install. Hide update banner works on its own too: turn it on to stop the on-screen banner without enabling auto-install, so updates only happen when you tap Update Now here in the portal.</p>
+            <p class="hint" id="update-repair-hint">If you are stuck on an old version and <strong>Repair &amp; Update</strong> is missing, on the Pi open <strong>Menu → Accessories → Terminal</strong> and paste:<br><code>curl -fsSL https://raw.githubusercontent.com/yashmulgaonkar/FlightScnr_Pi/main/scripts/repair-ota.sh | bash</code></p>
             <div class="track-row" style="margin-top:.55rem">
                 <button class="btn" id="btn-check-updates" type="button">Check Updates</button>
                 <button class="btn btn-primary hidden" id="btn-update-now" type="button">Update Now</button>
+                <button class="btn hidden" id="btn-update-tonight" type="button">Later tonight</button>
+                <button class="btn btn-primary hidden" id="btn-repair-update" type="button">Repair &amp; Update</button>
+                <button class="btn btn-primary hidden" id="btn-resync-install" type="button">Finish install</button>
             </div>
             <div class="track-row hidden" id="update-confirm-row">
                 <button class="btn btn-primary" id="btn-update-confirm-yes" type="button">Install &amp; Restart</button>
@@ -641,11 +1004,25 @@
     </details>
 
     <details class="card system-card">
-        <summary><span class="ico">&#9881;</span>System<span class="sum">power</span><span class="chev">&#9656;</span></summary>
+        <summary><span class="ico">&#9881;</span>System<span class="sum">power, Wi-Fi</span><span class="chev">&#9656;</span></summary>
         <div class="body">
+            <p class="hint">When enabled (default), FlightScnr opens the setup hotspot if the network stays down past a short grace period. Turn this off on mesh or always-on Wi-Fi so NetworkManager can keep reconnecting. First-time setup with no saved Wi-Fi still uses the QR hotspot. Use <strong>Start Wi-Fi setup</strong> for recovery.</p>
+            <div class="chk">
+                <label for="auto_wifi_setup_hotspot">Automatic Wi-Fi setup hotspot</label>
+                <span class="switch"><input id="auto_wifi_setup_hotspot" type="checkbox" checked><span class="track"></span></span>
+            </div>
+            <div class="track-row" style="margin-top:.55rem">
+                <button class="btn btn-primary" id="btn-wifi-start-setup" type="button">Start Wi-Fi setup</button>
+            </div>
+            <div id="wifi-setup-pref-status" class="status"></div>
+            <hr style="border:none;border-top:1px solid var(--line, #333);margin:1rem 0">
             <p class="hint">Download a backup of portal preferences (radar, display, alerts, weather, off-hours, favourites, location, ATC, and API keys). The file includes secrets — keep it private. Does not include maps, photos, or <code>/etc/flightscnr.env</code>.</p>
             <div class="track-row" style="margin-top:.55rem">
                 <button class="btn btn-primary" id="btn-export-settings" type="button">Download settings</button>
+            </div>
+            <p class="hint" style="margin-top:.85rem">Download a diagnostics package for support (Pi model, OS, disk, recent logs). API keys are redacted. Attach the zip on Discord or a GitHub issue.</p>
+            <div class="track-row" style="margin-top:.55rem">
+                <button class="btn btn-primary" id="btn-export-diagnostics" type="button">Download diagnostics</button>
             </div>
             <p class="hint" style="margin-top:.85rem">Restore from a previously downloaded <code>.config</code> file. This overwrites matching preference files on the Pi and relaunches the app.</p>
             <div class="track-row" style="margin-top:.55rem;align-items:center;flex-wrap:wrap;gap:.5rem">
@@ -653,6 +1030,12 @@
                 <button class="btn btn-primary" id="btn-import-settings" type="button">Upload &amp; apply</button>
             </div>
             <div id="export-status" class="status"></div>
+            <hr style="border:none;border-top:1px solid var(--line, #333);margin:1rem 0">
+            <p class="hint">Safety disclaimer: always shown at boot. On the touchscreen you can check <strong>Don't show again</strong> then tap Accept to enable an eight-second countdown on later boots (no Accept during the countdown — the checkbox state is saved when the timer ends). The portal can only clear that saved choice — it cannot enable or restore it.</p>
+            <p id="disclaimer-status-line" class="hint" style="margin-top:.35rem">Disclaimer acceptance: …</p>
+            <div class="track-row" style="margin-top:.55rem">
+                <button class="btn" id="btn-disclaimer-clear" type="button">Clear saved disclaimer acceptance</button>
+            </div>
             <hr style="border:none;border-top:1px solid var(--line, #333);margin:1rem 0">
             <p class="hint">Relaunch the app, or restart / power off this Raspberry Pi. Reboot and shutdown take the display and portal offline.</p>
             <div class="track-row" style="margin-top:.55rem" id="system-actions-row">
@@ -669,8 +1052,28 @@
         </div>
     </details>
 
+    <details class="card irreversible-card">
+        <summary><span class="ico">&#9888;</span>Master Caution<span class="sum">wipe, reinstall</span><span class="chev">&#9656;</span></summary>
+        <div class="body">
+            <p class="hint">Download settings from <strong>System</strong> first if you want to keep radar prefs and API keys. Wi-Fi and dump1090 are not touched. If this button fails with a sudo error, tap <strong>Update Now</strong> or <strong>Finish install</strong> once so sudoers is updated.</p>
+            <div class="irreversible-row" id="irreversible-actions-row">
+                <div class="irreversible-copy">
+                    <h3>Clean install</h3>
+                    <p class="desc">Deletes the FlightScnr checkout, all settings, API keys, watch lists, and maps, then reinstalls from GitHub and reboots. Once you start, there is no going back.</p>
+                </div>
+                <button class="btn btn-irreversible" id="btn-wipe-reinstall" type="button">Wipe &amp; reinstall</button>
+            </div>
+            <div class="track-row hidden" id="irreversible-confirm-row" style="margin-top:.55rem;flex-wrap:wrap;gap:.5rem">
+                <span id="irreversible-confirm-msg" class="hint" style="flex:1 1 100%;margin:0"></span>
+                <button class="btn btn-irreversible" id="btn-irreversible-confirm-yes" type="button">Continue</button>
+                <button class="btn" id="btn-irreversible-confirm-no" type="button">Cancel</button>
+            </div>
+            <div id="irreversible-status" class="status"></div>
+        </div>
+    </details>
 
-    <p class="wifi-note">First-time Wi-Fi uses the on-device QR setup hotspot when no network is configured.</p>
+
+    <p class="wifi-note">First-time Wi-Fi uses the on-device QR setup hotspot when no network is configured. Automatic hotspot after a lost link can be changed under System.</p>
     <p class="foot">
         <a href="/stats">Statistics</a> ·
         <a href="/closest">Closest map</a> ·
@@ -682,7 +1085,7 @@
 <script>
 let pendingCallsign = "";
 let currentScaleIndex = 1;
-let rangePresetsMi = [2, 3, 5, 8, 10, 20, 30];
+let rangePresetsMi = [2, 3, 5, 8, 10, 20, 30, 50];
 const STATUTE_MILE_KM = 1.609344;
 const NM_PER_KM = 1 / 1.852;
 const $ = (id) => document.getElementById(id);
@@ -767,11 +1170,16 @@ function applyKeyHints(keys) {
         FLIGHTAWARE_API_KEY: "flightaware-hint",
         OPENSKY_API_CLIENT_ID: "opensky-client-id-hint",
         OPENSKY_API_CLIENT_SECRET: "opensky-client-secret-hint",
+        ADSBEXCHANGE_API_KEY: "adsbexchange-hint",
         FIRMS_MAP_KEY: "firms-hint",
+        STADIA_MAPS_API_KEY: "stadia-hint",
+        CARTO_BASEMAPS_API_KEY: "carto-hint",
     };
     Object.entries(map).forEach(([key, id]) => {
+        const el = $(id);
+        if (!el) return;
         const info = keys[key] || {};
-        $(id).textContent = info.configured ? `Current: ${info.masked} (${info.source})` : "Not set";
+        el.textContent = info.configured ? `Current: ${info.masked} (${info.source})` : "Not set";
     });
 }
 
@@ -793,7 +1201,13 @@ function formatRangeUnit(index, units) {
     return value.toFixed(1);
 }
 
+let rangePresetUnits = null;
+
 function formatRangeOptionLabel(index) {
+    if (rangePresetUnits) {
+        const mi = rangePresetUnits.mi[index], km = rangePresetUnits.km[index], nm = rangePresetUnits.nm[index];
+        return `${mi}mi / ${km}km / ${nm}nm`;
+    }
     return `${formatRangeUnit(index, "mi")}mi / ${formatRangeUnit(index, "km")}km / ${formatRangeUnit(index, "nm")}nm`;
 }
 
@@ -841,6 +1255,8 @@ function applyUpdateInfo(data) {
     const remote = data.remote || {};
     const running = !!data.update_running;
     const available = !!data.update_available && !running;
+    const resync = !!data.install_resync_needed && !running && !available;
+    const repair = !!data.ota_repair_needed && !running;
 
     $("update-local").textContent = formatVersionLine("Installed", local);
     if (remote.release_tag) {
@@ -854,15 +1270,61 @@ function applyUpdateInfo(data) {
     }
 
     $("update-message").textContent = data.message || "";
-    $("update-badge").classList.toggle("hidden", available || running);
-    $("update-available-badge").classList.toggle("hidden", !available);
+    const notesEl = $("update-notes");
+    const notesLink = $("update-notes-link");
+    const notes = (available && remote.release_notes) ? String(remote.release_notes) : "";
+    if (notesEl) {
+        notesEl.textContent = notes;
+        notesEl.classList.toggle("show", !!notes);
+    }
+    if (notesLink) {
+        const href = (available && remote.release_html_url) ? String(remote.release_html_url) : "";
+        if (href) {
+            notesLink.innerHTML = "";
+            const a = document.createElement("a");
+            a.href = href;
+            a.target = "_blank";
+            a.rel = "noopener";
+            a.textContent = "View on GitHub";
+            notesLink.appendChild(a);
+            notesLink.classList.add("show");
+        } else {
+            notesLink.textContent = "";
+            notesLink.classList.remove("show");
+        }
+    }
+    $("update-badge").classList.toggle("hidden", available || running || resync || repair);
+    $("update-available-badge").classList.toggle("hidden", !available && !repair);
+    if (repair && !available) {
+        $("update-available-badge").textContent = "Update blocked";
+    } else {
+        $("update-available-badge").textContent = "Update available";
+    }
     $("btn-update-now").classList.toggle("hidden", !available);
+    const tonightBtn = $("btn-update-tonight");
+    if (tonightBtn) {
+        tonightBtn.classList.toggle("hidden", !available);
+        tonightBtn.disabled = running || !!data.scheduled_tonight;
+        tonightBtn.textContent = data.scheduled_tonight
+            ? "Tonight (armed)"
+            : "Later tonight";
+    }
+    if ($("auto_off_hours")) $("auto_off_hours").checked = !!data.auto_off_hours;
+    if ($("auto_update_time")) $("auto_update_time").value = data.auto_update_time || "";
+    if ($("hide_update_banner")) $("hide_update_banner").checked = !!data.hide_banner;
+    $("btn-repair-update").classList.toggle("hidden", !repair);
+    $("btn-resync-install").classList.toggle("hidden", !resync);
     $("btn-check-updates").disabled = running;
     $("btn-update-now").disabled = running;
+    $("btn-repair-update").disabled = running;
+    $("btn-resync-install").disabled = running;
 
     if (running) {
         $("update-available-badge").classList.add("hidden");
         $("btn-update-now").classList.add("hidden");
+        if ($("btn-update-tonight")) $("btn-update-tonight").classList.add("hidden");
+        $("btn-repair-update").classList.add("hidden");
+        $("btn-resync-install").classList.add("hidden");
     }
 }
 
@@ -889,8 +1351,19 @@ function startUpdatePoll() {
             if (!data.update_running) {
                 clearInterval(updatePollTimer);
                 updatePollTimer = null;
+                const st = (data.status && data.status.state) || "";
                 await checkUpdates();
-                showStatus("updates-status", "Update finished. Refresh if the display did not restart.");
+                if (st === "failed") {
+                    showStatus(
+                        "updates-status",
+                        (data.status && data.status.message) || "Update failed. Try Repair & Update.",
+                        true
+                    );
+                } else if (st === "success") {
+                    showStatus("updates-status", "Update finished. Refresh if the display did not restart.");
+                } else {
+                    showStatus("updates-status", "Update ended. Refresh and check the version above.");
+                }
             }
         } catch (_) {
             // Service restart drops the connection — keep polling.
@@ -901,11 +1374,28 @@ function startUpdatePoll() {
 function showUpdateConfirm(show) {
     $("update-confirm-row").classList.toggle("hidden", !show);
     $("btn-update-now").classList.toggle("hidden", show);
+    if ($("btn-update-tonight")) $("btn-update-tonight").classList.toggle("hidden", show);
 }
 
 function applyUpdate() {
     clearStatus("updates-status");
     showUpdateConfirm(true);
+}
+
+async function applyUpdateTonight() {
+    clearStatus("updates-status");
+    $("btn-update-tonight").disabled = true;
+    try {
+        const data = await jsonFetch("/updates/tonight", { method: "POST" });
+        applyUpdateInfo(data);
+        showStatus(
+            "updates-status",
+            "Armed for tonight. Installs during off-hours after 5 minutes idle."
+        );
+    } catch (e) {
+        showStatus("updates-status", e.message, true);
+        $("btn-update-tonight").disabled = false;
+    }
 }
 
 async function applyUpdateConfirmed() {
@@ -922,6 +1412,34 @@ async function applyUpdateConfirmed() {
     }
 }
 
+async function applyResyncConfirmed() {
+    clearStatus("updates-status");
+    $("btn-resync-install").disabled = true;
+    try {
+        const data = await jsonFetch("/updates/resync", { method: "POST" });
+        showStatus("updates-status", data.message || "Install re-sync started.");
+        startUpdatePoll();
+        await checkUpdates();
+    } catch (e) {
+        showStatus("updates-status", e.message, true);
+        $("btn-resync-install").disabled = false;
+    }
+}
+
+async function applyRepairConfirmed() {
+    clearStatus("updates-status");
+    $("btn-repair-update").disabled = true;
+    try {
+        const data = await jsonFetch("/updates/repair", { method: "POST" });
+        showStatus("updates-status", data.message || "Repair started.");
+        startUpdatePoll();
+        await checkUpdates();
+    } catch (e) {
+        showStatus("updates-status", e.message, true);
+        $("btn-repair-update").disabled = false;
+    }
+}
+
 async function loadAll() {
     try {
         const loc = await jsonFetch("/location/json");
@@ -932,26 +1450,52 @@ async function loadAll() {
         const r = await jsonFetch("/radar/json");
         currentScaleIndex = Number(r.scale_index ?? 1);
         $("dist_units").value = r.unit_preset || legacyUnitPreset(r.distance_units) || "km_kph";
+        if (r.range_presets) rangePresetUnits = r.range_presets;
         populateRangeSelect(r.range_presets_mi);
         syncMinSpeedUnitLabels();
         $("min_height").value = String(r.min_height_ft ?? 1000);
         $("max_height").value = String(r.max_height_ft ?? 100000);
         setRgbInputs("theme", r.theme_rgb || [0, 255, 0]);
         setRgbInputs("runway", r.runway_darkmap_rgb || [225, 128, 0]);
+        setRgbInputs("runway_light", r.runway_light_rgb || [35, 55, 95]);
+        setRgbInputs("text_dark", r.tag_text_dark_rgb || [0, 255, 0]);
+        setRgbInputs("text_light", r.tag_text_light_rgb || [15, 23, 42]);
         if ($("map_style")) $("map_style").value = r.map_style || "dark";
         if ($("vfr_opacity")) {
             $("vfr_opacity").value = String(r.vfr_map_opacity ?? 45);
             syncVfrOpacityLabel();
         }
+        if ($("live_map_heading_up")) {
+            $("live_map_heading_up").checked = !!r.live_map_heading_up;
+        }
+        if ($("live_tracking_preview_minutes")) {
+            $("live_tracking_preview_minutes").value = String(
+                r.live_tracking_preview_minutes != null ? r.live_tracking_preview_minutes : 5
+            );
+        }
+        setFollowRadiusInputsFromKm(
+            r.live_tracking_min_radius_km != null ? r.live_tracking_min_radius_km : FOLLOW_DEFAULT_MIN_KM,
+            r.live_tracking_max_radius_km != null ? r.live_tracking_max_radius_km : FOLLOW_DEFAULT_MAX_KM
+        );
         $("show_compass").checked = !!r.show_compass_rose;
         if ($("show_range_rings")) $("show_range_rings").checked = r.show_range_rings !== false;
+        if ($("color_by_altitude")) $("color_by_altitude").checked = !!r.color_by_altitude;
         if ($("traffic_labels")) $("traffic_labels").value = r.traffic_labels || (r.show_aircraft_tag === false ? "off" : "both");
+        if ($("aircraft_tag_id")) $("aircraft_tag_id").value = r.aircraft_tag_id || "flight_number";
         $("facing_deg").value = String(Math.round(Number(r.facing_deg) || 0) % 360);
         $("show_sweep").checked = !!r.show_sweep_line;
+        if ($("show_tag_leaders")) $("show_tag_leaders").checked = r.show_tag_leaders !== false;
+        if ($("rim_target_style")) $("rim_target_style").value = r.rim_target_style || "plane";
+        syncTagLeadersControl();
         $("show_precip").checked = r.show_precipitation !== false;
         if ($("show_wildfires")) $("show_wildfires").checked = !!r.show_wildfires;
+        if ($("show_earthquakes")) $("show_earthquakes").checked = !!r.show_earthquakes;
         if ($("show_airport_centerlines")) $("show_airport_centerlines").checked = !!r.show_airport_centerlines;
         if ($("show_airport_icons")) $("show_airport_icons").checked = !!r.show_airport_icons;
+        if ($("airport_icon_style")) $("airport_icon_style").value = r.airport_icon_style || "classic";
+        if ($("airport_min_size")) $("airport_min_size").value = r.airport_min_size || "small";
+        if ($("flip_board_sound")) $("flip_board_sound").checked = !!r.flip_board_sound;
+        if ($("flip_board_id")) $("flip_board_id").value = r.flip_board_id || "tail";
         if ($("show_ground_vehicles")) $("show_ground_vehicles").checked = r.show_ground_vehicles !== false;
         $("traffic_mode").value = r.traffic_mode || (r.ais_enabled ? "both" : "aircraft");
         if ($("vessel_min_speed")) $("vessel_min_speed").value = String(r.vessel_min_speed_kt ?? 0);
@@ -962,6 +1506,11 @@ async function loadAll() {
         const d = await jsonFetch("/display/json");
         $("bright_pct").value = String(d.brightness_percent || 100);
         syncBrightLabel();
+        if ($("quiet_dim_enabled")) $("quiet_dim_enabled").checked = !!d.quiet_dim_enabled;
+        if ($("quiet_dim_pct")) {
+            $("quiet_dim_pct").value = String(d.quiet_dim_percent ?? 20);
+            document.getElementById("quiet_dim_pct_label").textContent = ($("quiet_dim_pct").value) + "%";
+        }
         if ($("display_rotation")) {
             const rot = [0, 90, 180, 270].includes(Number(d.display_rotation))
                 ? String(d.display_rotation)
@@ -972,8 +1521,23 @@ async function loadAll() {
         $("clock_timeout").value = String(d.clock_timeout_s ?? 10);
         $("idle_clock").checked = !!d.auto_idle_clock;
         if ($("clock_12hr")) $("clock_12hr").checked = d.clock_12hr !== false;
+        if ($("date_format_eu")) $("date_format_eu").checked = d.date_format === "eu";
+        if ($("default_clock")) {
+            const face = d.default_clock;
+            $("default_clock").value = (face === "analog" || face === "night" || face === "flieger") ? face : "digital";
+        }
+        if ($("default_clock_off_hours")) {
+            const nightFace = d.default_clock_off_hours;
+            $("default_clock_off_hours").value =
+                (nightFace === "analog" || nightFace === "night" || nightFace === "flieger")
+                    ? nightFace
+                    : "digital";
+        }
         if ($("radar_hud")) $("radar_hud").checked = d.radar_hud_enabled !== false;
         if ($("radar_hud_dark")) $("radar_hud_dark").checked = !!d.radar_hud_dark;
+        if ($("background_texture")) $("background_texture").checked = d.background_texture !== false;
+        if ($("radar_zoom_buttons")) $("radar_zoom_buttons").checked = d.radar_zoom_buttons !== false;
+        if ($("radar_zoom_position")) $("radar_zoom_position").value = d.radar_zoom_position || "right";
         if ($("radar_hud_position")) $("radar_hud_position").value = d.radar_hud_position === "bottom" ? "bottom" : "top";
         if ($("radar_hud_opacity")) {
             $("radar_hud_opacity").value = String(d.radar_hud_opacity ?? 72);
@@ -992,6 +1556,23 @@ async function loadAll() {
         if ($("military_sfx_volume")) {
             $("military_sfx_volume").value = String(d.military_sfx_volume ?? 80);
         }
+        if ($("earthquake_voice")) $("earthquake_voice").checked = !!d.earthquake_voice_enabled;
+        if ($("earthquake_voice_volume")) {
+            $("earthquake_voice_volume").value = String(d.earthquake_voice_volume ?? 80);
+        }
+        if ($("lofi_enabled")) $("lofi_enabled").checked = !!d.lofi_enabled;
+        if ($("lofi_controls_enabled")) $("lofi_controls_enabled").checked = !!d.lofi_controls_enabled;
+        if ($("lofi_title_scroll")) $("lofi_title_scroll").checked = d.lofi_title_scroll !== false;
+        loadLofiTracks();
+        refreshLofiPack();
+        if ($("lofi_volume")) {
+            $("lofi_volume").value = String(d.lofi_volume ?? 25);
+            const ll = $("lofi_volume_label");
+            if (ll) ll.textContent = `${$("lofi_volume").value}%`;
+        }
+        if ($("auto_wifi_setup_hotspot")) {
+            $("auto_wifi_setup_hotspot").checked = d.auto_wifi_setup_hotspot !== false;
+        }
         syncChimeVolumeLabel();
     } catch (_) {}
 
@@ -1000,10 +1581,10 @@ async function loadAll() {
         $("night_en").checked = !!o.enabled;
         let mode = (o.mode || "dim");
         if (mode === "clock") mode = "dim";
-        $("night_mode").value = mode;
+        if ($("night_mode")) $("night_mode").value = (mode === "off") ? "off" : "dim";
         $("night_start").value = o.start || "22:00";
         $("night_end").value = o.end || "06:00";
-        $("night_dim").value = String(o.dim_percent || 20);
+        if ($("night_dim")) $("night_dim").value = String(o.dim_percent ?? 20);
         syncNightDimLabel();
         if ($("night_clock")) $("night_clock").checked = !!o.force_clock || (o.mode === "clock");
         toggleDimRow();
@@ -1036,6 +1617,10 @@ async function loadAll() {
     } catch (_) {}
 
     try {
+        await loadDisclaimerStatus();
+    } catch (_) {}
+
+    try {
         const t = await jsonFetch("/tracked/json");
         $("current-tracked").textContent = t.callsign ? `Currently tracking: ${t.callsign}` : "Not currently tracking a flight.";
     } catch (_) {}
@@ -1054,6 +1639,20 @@ async function loadAll() {
         if ($("use-opensky-api")) {
             $("use-opensky-api").checked = toggles.USE_OPENSKY_API !== false;
         }
+        if ($("use-adsbexchange-api")) {
+            $("use-adsbexchange-api").checked = !!toggles.USE_ADSBEXCHANGE_API;
+        }
+        if ($("use-stadia-maps")) {
+            $("use-stadia-maps").checked = toggles.USE_STADIA_MAPS !== false;
+        }
+        if ($("use-carto-basemaps")) {
+            $("use-carto-basemaps").checked = toggles.USE_CARTO_BASEMAPS !== false;
+        }
+        const rso = keys.route_source_order || {};
+        if ($("route_source_order")) {
+            $("route_source_order").value = rso.ROUTE_SOURCE_ORDER || "";
+        }
+        renderPositionSourceList(keys.position_source_order || DEFAULT_POSITION_SOURCE_ORDER);
         const faUsage = keys.flightaware_usage;
         if ($("flightaware-usage") && faUsage) {
             $("flightaware-usage").textContent =
@@ -1069,7 +1668,9 @@ async function loadAll() {
 }
 
 function toggleDimRow() {
-    $("dim-row").style.display = $("night_mode").value === "dim" ? "block" : "none";
+    const mode = $("night_mode") ? $("night_mode").value : "dim";
+    const row = $("dim-row");
+    if (row) row.style.display = mode === "dim" ? "" : "none";
 }
 
 function syncBrightLabel() {
@@ -1078,7 +1679,7 @@ function syncBrightLabel() {
 }
 function syncNightDimLabel() {
     const el = $("night_dim_label");
-    if (el) el.textContent = `${$("night_dim").value}%`;
+    if (el && $("night_dim")) el.textContent = `${$("night_dim").value}%`;
 }
 function syncHudOpacityLabel() {
     const el = $("radar_hud_opacity_label");
@@ -1091,11 +1692,21 @@ function syncChimeVolumeLabel() {
     if (tel && $("traffic_sfx_volume")) tel.textContent = `${$("traffic_sfx_volume").value}%`;
     const mel = $("military_sfx_volume_label");
     if (mel && $("military_sfx_volume")) mel.textContent = `${$("military_sfx_volume").value}%`;
+    const qel = $("earthquake_voice_volume_label");
+    if (qel && $("earthquake_voice_volume")) qel.textContent = `${$("earthquake_voice_volume").value}%`;
 }
 
 function syncVfrOpacityLabel() {
     const el = $("vfr_opacity_label");
     if (el && $("vfr_opacity")) el.textContent = `${$("vfr_opacity").value}%`;
+}
+
+function syncTagLeadersControl() {
+    const labelsOn = $("traffic_labels") ? $("traffic_labels").value !== "off" : true;
+    const input = $("show_tag_leaders");
+    const row = $("show_tag_leaders_row");
+    if (input) input.disabled = !labelsOn;
+    if (row) row.classList.toggle("is-disabled", !labelsOn);
 }
 
 /** Match device speed labels from unit preset (…_kts / …_mph / …_kph). */
@@ -1118,6 +1729,120 @@ function distanceUnitFromSelect() {
 
 function speedUnitFromSelect() {
     return selectedUnitPreset().split("_")[1] || "kph";
+}
+
+/** Convert km ↔ mi/nm/km for Follow radius fields (stored as km server-side). */
+function kmToDistanceUnit(km, units) {
+    const v = Number(km);
+    if (!Number.isFinite(v)) return 0;
+    if (units === "mi") return v / STATUTE_MILE_KM;
+    if (units === "nm") return v * NM_PER_KM;
+    return v;
+}
+
+function distanceUnitToKm(val, units) {
+    const v = Number(val);
+    if (!Number.isFinite(v)) return 0;
+    if (units === "mi") return v * STATUTE_MILE_KM;
+    if (units === "nm") return v / NM_PER_KM;
+    return v;
+}
+
+function formatDistanceAmount(km, units) {
+    const v = kmToDistanceUnit(km, units);
+    if (units === "km" && v >= 10) return String(Math.round(v));
+    if ((units === "mi" || units === "nm") && Math.abs(v - Math.round(v)) < 0.05) {
+        return String(Math.round(v));
+    }
+    return (Math.round(v * 100) / 100).toFixed(2).replace(/\.?0+$/, "") || "0";
+}
+
+function formatSpeedAmountFromKt(kt) {
+    const n = Number(kt) || 0;
+    const units = speedUnitFromSelect();
+    if (units === "mph") return `${Math.round(n * 1.15078)} mph`;
+    if (units === "kts") return `${Math.round(n)} kt`;
+    return `${Math.round(n * 1.852)} kph`;
+}
+
+const FOLLOW_DEFAULT_MIN_KM = 3.22;
+const FOLLOW_DEFAULT_MAX_KM = 120;
+let _followRadiusKm = {
+    min: FOLLOW_DEFAULT_MIN_KM,
+    max: FOLLOW_DEFAULT_MAX_KM,
+};
+let _followRadiusDisplayUnit = "km";
+
+function setFollowRadiusInputsFromKm(minKm, maxKm) {
+    _followRadiusKm.min = Number(minKm);
+    _followRadiusKm.max = Number(maxKm);
+    if (!Number.isFinite(_followRadiusKm.min)) _followRadiusKm.min = FOLLOW_DEFAULT_MIN_KM;
+    if (!Number.isFinite(_followRadiusKm.max)) _followRadiusKm.max = FOLLOW_DEFAULT_MAX_KM;
+    _followRadiusDisplayUnit = distanceUnitFromSelect();
+    const units = _followRadiusDisplayUnit;
+    const minEl = $("live_tracking_min_radius");
+    const maxEl = $("live_tracking_max_radius");
+    if (minEl) {
+        minEl.value = String(
+            Math.round(kmToDistanceUnit(_followRadiusKm.min, units) * 100) / 100
+        );
+    }
+    if (maxEl) {
+        maxEl.value = String(
+            Math.round(kmToDistanceUnit(_followRadiusKm.max, units) * 100) / 100
+        );
+    }
+    syncFollowRadiusUnitLabels();
+}
+
+function readFollowRadiusKmFromInputs() {
+    const units = _followRadiusDisplayUnit || distanceUnitFromSelect();
+    const minEl = $("live_tracking_min_radius");
+    const maxEl = $("live_tracking_max_radius");
+    if (minEl) {
+        _followRadiusKm.min = distanceUnitToKm(minEl.value, units);
+    }
+    if (maxEl) {
+        _followRadiusKm.max = distanceUnitToKm(maxEl.value, units);
+    }
+    return {
+        min: _followRadiusKm.min,
+        max: _followRadiusKm.max,
+    };
+}
+
+function syncFollowRadiusUnitLabels() {
+    const dist = distanceUnitFromSelect();
+    const minLabel = $("live_tracking_min_radius_label");
+    const maxLabel = $("live_tracking_max_radius_label");
+    const minHint = $("live_tracking_min_radius_hint");
+    const maxHint = $("live_tracking_max_radius_hint");
+    if (minLabel) minLabel.textContent = `Follow min radius (${dist})`;
+    if (maxLabel) maxLabel.textContent = `Follow max radius (${dist})`;
+    const taxiDist = formatDistanceAmount(FOLLOW_DEFAULT_MIN_KM, dist);
+    const defMin = formatDistanceAmount(FOLLOW_DEFAULT_MIN_KM, dist);
+    const defMax = formatDistanceAmount(FOLLOW_DEFAULT_MAX_KM, dist);
+    const taxiSpeed = formatSpeedAmountFromKt(50);
+    if (minHint) {
+        minHint.textContent =
+            `Floor for the speed-based zoom curve (not the taxi snap under ${taxiSpeed}, ` +
+            `which stays ~${taxiDist} ${dist}). Default ${defMin} ${dist}.`;
+    }
+    if (maxHint) {
+        maxHint.textContent =
+            `Ceiling for cruise / high-speed Follow zoom. Default ${defMax} ${dist}.`;
+    }
+}
+
+function onDistanceUnitsChanged() {
+    // Fields still show the previous unit's numbers until rewritten.
+    const prev = _followRadiusDisplayUnit || distanceUnitFromSelect();
+    const minEl = $("live_tracking_min_radius");
+    const maxEl = $("live_tracking_max_radius");
+    if (minEl) _followRadiusKm.min = distanceUnitToKm(minEl.value, prev);
+    if (maxEl) _followRadiusKm.max = distanceUnitToKm(maxEl.value, prev);
+    setFollowRadiusInputsFromKm(_followRadiusKm.min, _followRadiusKm.max);
+    syncMinSpeedUnitLabels();
 }
 
 function formatSpeedFloorFromKt(kt) {
@@ -1168,15 +1893,27 @@ async function saveRadar() {
                 max_height_ft: Number($("max_height").value),
                 theme_rgb: readRgbInputs("theme"),
                 runway_darkmap_rgb: readRgbInputs("runway"),
+                runway_light_rgb: readRgbInputs("runway_light"),
+                tag_text_dark_rgb: readRgbInputs("text_dark"),
+                tag_text_light_rgb: readRgbInputs("text_light"),
                 show_compass_rose: $("show_compass").checked,
                 show_range_rings: $("show_range_rings") ? $("show_range_rings").checked : true,
+                color_by_altitude: $("color_by_altitude") ? $("color_by_altitude").checked : false,
                 traffic_labels: $("traffic_labels") ? $("traffic_labels").value : "both",
+                aircraft_tag_id: $("aircraft_tag_id") ? $("aircraft_tag_id").value : "flight_number",
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,
+                show_tag_leaders: $("show_tag_leaders") ? $("show_tag_leaders").checked : true,
+                rim_target_style: $("rim_target_style") ? $("rim_target_style").value : "plane",
                 show_precipitation: $("show_precip").checked,
                 show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
+                show_earthquakes: $("show_earthquakes") ? $("show_earthquakes").checked : false,
                 show_airport_centerlines: $("show_airport_centerlines") ? $("show_airport_centerlines").checked : false,
                 show_airport_icons: $("show_airport_icons") ? $("show_airport_icons").checked : false,
+                airport_icon_style: $("airport_icon_style") ? $("airport_icon_style").value : "classic",
+                airport_min_size: $("airport_min_size") ? $("airport_min_size").value : "small",
+                flip_board_sound: $("flip_board_sound") ? $("flip_board_sound").checked : true,
+                flip_board_id: $("flip_board_id") ? $("flip_board_id").value : "tail",
                 show_ground_vehicles: $("show_ground_vehicles") ? $("show_ground_vehicles").checked : true,
                 map_style: $("map_style").value,
                 vfr_map_opacity: Number($("vfr_opacity") ? $("vfr_opacity").value : 45),
@@ -1214,13 +1951,185 @@ async function saveDump1090() {
                 : "Local ADS-B disabled."
         );
         await loadAll();
+        await refreshDump1090Live();
     } catch (e) {
         showStatus("dump1090-status", e.message, true);
     }
 }
 
-async function saveAndReloadSettings() {
-    clearStatus("display-status");
+function formatDump1090Live(data) {
+    if (!data || !data.enabled) {
+        return "Status: disabled";
+    }
+    if (data.reachable === false) {
+        const err = data.error ? ` (${data.error})` : "";
+        return `Status: unreachable${err}`;
+    }
+    if (data.reachable !== true) {
+        return "Status: checking…";
+    }
+    const fresh = Number(data.aircraft_fresh || 0);
+    const total = Number(data.aircraft_total || 0);
+    let line = `Status: reachable — ${fresh} aircraft with fresh position`;
+    if (total > fresh) {
+        line += ` (${total} in feed)`;
+    }
+    const radar = data.radar || {};
+    const added = Number(radar.added || 0);
+    const updated = Number(radar.updated || 0);
+    const raw = Number(radar.raw || 0);
+    if (radar.ts) {
+        line += `. Last radar cycle: ${raw} in range, ${added} new, ${updated} refreshed`;
+        if (radar.ok === false) {
+            line += " (feed error — may be using cache)";
+        }
+    }
+    return line;
+}
+
+let dump1090LiveTimer = null;
+
+async function refreshDump1090Live() {
+    const el = $("dump1090-live");
+    if (!el) return;
+    try {
+        const data = await jsonFetch("/dump1090/status.json");
+        el.textContent = formatDump1090Live(data);
+    } catch (e) {
+        el.textContent = `Status: ${e.message || "unavailable"}`;
+    }
+}
+
+function startDump1090LivePoll() {
+    refreshDump1090Live();
+    if (dump1090LiveTimer) clearInterval(dump1090LiveTimer);
+    dump1090LiveTimer = setInterval(refreshDump1090Live, 5000);
+}
+
+async function saveRouteSourceOrder() {
+    clearStatus("route-source-order-status");
+    try {
+        const raw = $("route_source_order") ? $("route_source_order").value.trim() : "";
+        const resp = await jsonFetch("/api-keys", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                route_source_order: raw,
+            }),
+        });
+	// Show the *effective* (parsed/filtered) order, not just what was typed.
+        // Unknown or misspelled entries are silently dropped, so this is the
+        // only way to notice a typo actually did something.
+        const effective =
+            (resp.keys && resp.keys.route_source_order &&
+                resp.keys.route_source_order.ROUTE_SOURCE_ORDER_EFFECTIVE) ||
+            "airlabs,flightaware,opensky";
+	showStatus("route-source-order-status", `Saved — effective order: ${effective}`);
+        await loadAll();
+    } catch (e) {
+        showStatus("route-source-order-status", e.message, true);
+    }
+}
+const DEFAULT_POSITION_SOURCE_ORDER = ["dump1090", "adsbfi", "opensky", "adsbexchange", "fr24"];
+const POSITION_SOURCE_LABELS = {
+    dump1090: "Local (dump1090 / readsb)",
+    adsbfi: "adsb.fi",
+    opensky: "OpenSky",
+    adsbexchange: "ADS-B Exchange",
+    fr24: "FlightRadar24",
+};
+
+function renderPositionSourceList(order) {
+    const list = $("position-source-list");
+    if (!list) return;
+    const known = (order && order.length ? order : DEFAULT_POSITION_SOURCE_ORDER)
+        .filter((s) => POSITION_SOURCE_LABELS[s]);
+    // Any source missing from the saved order (e.g. after an update adds
+    // a new one) still shows up at the end, same "unknown/omitted entries
+    // fall back gracefully" behavior as config.py's parser.
+    for (const s of DEFAULT_POSITION_SOURCE_ORDER) {
+        if (!known.includes(s)) known.push(s);
+    }
+    list.innerHTML = "";
+    for (const source of known) {
+        const li = document.createElement("li");
+        li.draggable = true;
+        li.dataset.source = source;
+        li.className = "drag-item";
+        li.innerHTML = `<span class="drag-handle">&#9776;</span> <span>${POSITION_SOURCE_LABELS[source]}</span>`;
+        list.appendChild(li);
+    }
+    attachDragReorder(list);
+}
+
+function attachDragReorder(list) {
+    let dragEl = null;
+    list.querySelectorAll(".drag-item").forEach((item) => {
+        item.addEventListener("dragstart", () => {
+            dragEl = item;
+            item.classList.add("dragging");
+        });
+        item.addEventListener("dragend", () => {
+            item.classList.remove("dragging");
+            dragEl = null;
+        });
+    });
+    list.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        const after = [...list.querySelectorAll(".drag-item:not(.dragging)")].find(
+            (sib) => e.clientY <= sib.getBoundingClientRect().top + sib.offsetHeight / 2
+        );
+        if (dragEl) {
+            if (after) list.insertBefore(dragEl, after);
+            else list.appendChild(dragEl);
+        }
+    });
+}
+
+async function savePositionSources() {
+    clearStatus("position-sources-status");
+    try {
+        const order = [...document.querySelectorAll("#position-source-list .drag-item")]
+            .map((li) => li.dataset.source);
+        const headingUp = $("live_map_heading_up") ? $("live_map_heading_up").checked : false;
+        const previewMin = $("live_tracking_preview_minutes")
+            ? Number($("live_tracking_preview_minutes").value)
+            : 5;
+        const radii = readFollowRadiusKmFromInputs();
+        await jsonFetch("/api-keys", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ position_source_order: order }),
+        });
+        await jsonFetch("/radar", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                live_map_heading_up: headingUp,
+                live_tracking_preview_minutes: previewMin,
+                live_tracking_min_radius_km: radii.min,
+                live_tracking_max_radius_km: radii.max,
+            }),
+        });
+        // Show the effective/parsed order after save (same PR #69 review
+        // feedback applied here too: confirm what was actually persisted,
+        // in case any dragged-in entry was somehow invalid).
+        const keys = await jsonFetch("/api-keys/json");
+        const effective = keys.position_source_order || order;
+        showStatus("position-sources-status", `Saved: ${effective.join(" \u2192 ")}`);
+    } catch (e) {
+        showStatus("position-sources-status", e.message, true);
+    }
+}
+
+async function resetPositionSources() {
+    renderPositionSourceList(DEFAULT_POSITION_SOURCE_ORDER);
+    await savePositionSources();
+}
+
+async function saveAndReloadSettings(statusId) {
+    if (typeof statusId !== "string") statusId = "display-status";
+    clearStatus(statusId);
     try {
         await jsonFetch("/radar", {
             method: "POST",
@@ -1233,15 +2142,27 @@ async function saveAndReloadSettings() {
                 max_height_ft: Number($("max_height").value),
                 theme_rgb: readRgbInputs("theme"),
                 runway_darkmap_rgb: readRgbInputs("runway"),
+                runway_light_rgb: readRgbInputs("runway_light"),
+                tag_text_dark_rgb: readRgbInputs("text_dark"),
+                tag_text_light_rgb: readRgbInputs("text_light"),
                 show_compass_rose: $("show_compass").checked,
                 show_range_rings: $("show_range_rings") ? $("show_range_rings").checked : true,
+                color_by_altitude: $("color_by_altitude") ? $("color_by_altitude").checked : false,
                 traffic_labels: $("traffic_labels") ? $("traffic_labels").value : "both",
+                aircraft_tag_id: $("aircraft_tag_id") ? $("aircraft_tag_id").value : "flight_number",
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,
+                show_tag_leaders: $("show_tag_leaders") ? $("show_tag_leaders").checked : true,
+                rim_target_style: $("rim_target_style") ? $("rim_target_style").value : "plane",
                 show_precipitation: $("show_precip").checked,
                 show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
+                show_earthquakes: $("show_earthquakes") ? $("show_earthquakes").checked : false,
                 show_airport_centerlines: $("show_airport_centerlines") ? $("show_airport_centerlines").checked : false,
                 show_airport_icons: $("show_airport_icons") ? $("show_airport_icons").checked : false,
+                airport_icon_style: $("airport_icon_style") ? $("airport_icon_style").value : "classic",
+                airport_min_size: $("airport_min_size") ? $("airport_min_size").value : "small",
+                flip_board_sound: $("flip_board_sound") ? $("flip_board_sound").checked : true,
+                flip_board_id: $("flip_board_id") ? $("flip_board_id").value : "tail",
                 show_ground_vehicles: $("show_ground_vehicles") ? $("show_ground_vehicles").checked : true,
                 map_style: $("map_style").value,
                 vfr_map_opacity: Number($("vfr_opacity") ? $("vfr_opacity").value : 45),
@@ -1255,13 +2176,23 @@ async function saveAndReloadSettings() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 brightness_percent: Number($("bright_pct").value),
+                quiet_dim_enabled: $("quiet_dim_enabled") ? $("quiet_dim_enabled").checked : false,
+                quiet_dim_percent: $("quiet_dim_pct") ? Number($("quiet_dim_pct").value) : 20,
                 display_rotation: Number($("display_rotation") ? $("display_rotation").value : 90),
                 flight_detail_timeout_s: Number($("detail_timeout").value),
                 clock_timeout_s: Number($("clock_timeout").value),
                 auto_idle_clock: $("idle_clock").checked,
                 clock_12hr: $("clock_12hr") ? $("clock_12hr").checked : true,
+                date_format: $("date_format_eu") && $("date_format_eu").checked ? "eu" : "us",
+                default_clock: $("default_clock") ? $("default_clock").value : "digital",
+                default_clock_off_hours: $("default_clock_off_hours")
+                    ? $("default_clock_off_hours").value
+                    : "digital",
                 radar_hud_enabled: $("radar_hud") ? $("radar_hud").checked : true,
                 radar_hud_dark: $("radar_hud_dark") ? $("radar_hud_dark").checked : false,
+                background_texture: $("background_texture") ? $("background_texture").checked : true,
+                radar_zoom_buttons: $("radar_zoom_buttons") ? $("radar_zoom_buttons").checked : true,
+                radar_zoom_position: $("radar_zoom_position") ? $("radar_zoom_position").value : "right",
                 radar_hud_position: $("radar_hud_position") ? $("radar_hud_position").value : "top",
                 radar_hud_opacity: $("radar_hud_opacity") ? Number($("radar_hud_opacity").value) : 72,
                 hourly_chime_enabled: $("hourly_chime") ? $("hourly_chime").checked : false,
@@ -1270,6 +2201,13 @@ async function saveAndReloadSettings() {
                 traffic_sfx_volume: $("traffic_sfx_volume") ? Number($("traffic_sfx_volume").value) : 80,
                 military_sfx_enabled: $("military_sfx") ? $("military_sfx").checked : true,
                 military_sfx_volume: $("military_sfx_volume") ? Number($("military_sfx_volume").value) : 80,
+                earthquake_voice_enabled: $("earthquake_voice") ? $("earthquake_voice").checked : false,
+                earthquake_voice_volume: $("earthquake_voice_volume") ? Number($("earthquake_voice_volume").value) : 80,
+                lofi_enabled: $("lofi_enabled") ? $("lofi_enabled").checked : false,
+                lofi_volume: $("lofi_volume") ? Number($("lofi_volume").value) : 25,
+                lofi_controls_enabled: $("lofi_controls_enabled") ? $("lofi_controls_enabled").checked : false,
+                lofi_title_scroll: $("lofi_title_scroll") ? $("lofi_title_scroll").checked : true,
+                auto_wifi_setup_hotspot: $("auto_wifi_setup_hotspot") ? $("auto_wifi_setup_hotspot").checked : true,
             }),
         });
         const loc = ($("radar_center").value || "").trim();
@@ -1282,12 +2220,12 @@ async function saveAndReloadSettings() {
         }
         const data = await jsonFetch("/settings/reload", { method: "POST" });
         showStatus(
-            "display-status",
+            statusId,
             data.message || "Settings saved; display will reload shortly."
         );
         await loadAll();
     } catch (e) {
-        showStatus("display-status", e.message, true);
+        showStatus(statusId, e.message, true);
     }
 }
 
@@ -1299,11 +2237,11 @@ async function saveOffHours() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 enabled: $("night_en").checked,
-                mode: $("night_mode").value,
+                mode: $("night_mode") ? $("night_mode").value : "dim",
+                dim_percent: $("night_dim") ? Number($("night_dim").value) : 20,
                 force_clock: $("night_clock") ? $("night_clock").checked : false,
                 start: $("night_start").value,
                 end: $("night_end").value,
-                dim_percent: Number($("night_dim").value),
             }),
         });
         showStatus("offhours-status", data.message || "Off-hours saved.");
@@ -1489,13 +2427,19 @@ async function saveApiKeys(restart) {
                 flightaware_api_key: $("flightaware-key") ? $("flightaware-key").value : "",
                 opensky_api_client_id: $("opensky-client-id") ? $("opensky-client-id").value : "",
                 opensky_api_client_secret: $("opensky-client-secret") ? $("opensky-client-secret").value : "",
+                adsbexchange_api_key: $("adsbexchange-key") ? $("adsbexchange-key").value : "",
                 firms_map_key: $("firms-key") ? $("firms-key").value : "",
+                stadia_maps_api_key: $("stadia-key") ? $("stadia-key").value : "",
+                carto_basemaps_api_key: $("carto-key") ? $("carto-key").value : "",
                 use_fr24_api: $("use-fr24-api").checked,
                 use_tomorrow_weather: $("use-tomorrow-weather").checked,
                 use_airlabs_api: $("use-airlabs-api").checked,
                 use_aisstream_api: $("use-aisstream-api").checked,
                 use_flightaware_api: $("use-flightaware-api") ? $("use-flightaware-api").checked : false,
                 use_opensky_api: $("use-opensky-api") ? $("use-opensky-api").checked : true,
+                use_adsbexchange_api: $("use-adsbexchange-api") ? $("use-adsbexchange-api").checked : false,
+                use_stadia_maps: $("use-stadia-maps") ? $("use-stadia-maps").checked : true,
+                use_carto_basemaps: $("use-carto-basemaps") ? $("use-carto-basemaps").checked : true,
                 restart: !!restart,
             }),
         });
@@ -1506,7 +2450,10 @@ async function saveApiKeys(restart) {
         if ($("flightaware-key")) $("flightaware-key").value = "";
         if ($("opensky-client-id")) $("opensky-client-id").value = "";
         if ($("opensky-client-secret")) $("opensky-client-secret").value = "";
+        if ($("adsbexchange-key")) $("adsbexchange-key").value = "";
         if ($("firms-key")) $("firms-key").value = "";
+        if ($("stadia-key")) $("stadia-key").value = "";
+        if ($("carto-key")) $("carto-key").value = "";
         if (data.keys) applyKeyHints(data.keys);
         showStatus("api-keys-status", data.message || "API keys saved.");
     } catch (e) {
@@ -1617,6 +2564,8 @@ let pendingSystemAction = null;
 function showSystemConfirm(show, action) {
     $("system-confirm-row").classList.toggle("hidden", !show);
     $("system-actions-row").classList.toggle("hidden", show);
+    const clearBtn = $("btn-disclaimer-clear");
+    if (clearBtn) clearBtn.disabled = !!show;
     if (!show) {
         pendingSystemAction = null;
         return;
@@ -1624,14 +2573,17 @@ function showSystemConfirm(show, action) {
     pendingSystemAction = action;
     const msg = $("system-confirm-msg");
     const yes = $("btn-system-confirm-yes");
-    yes.classList.toggle("btn-danger", action === "shutdown");
-    yes.classList.toggle("btn-primary", action !== "shutdown");
+    yes.classList.toggle("btn-danger", action === "shutdown" || action === "clear-disclaimer");
+    yes.classList.toggle("btn-primary", action !== "shutdown" && action !== "clear-disclaimer");
     if (action === "restart-app") {
         msg.textContent = "Relaunch FlightScnr? The display and portal will reconnect in a few seconds.";
         yes.textContent = "Relaunch";
     } else if (action === "reboot") {
         msg.textContent = "Are you sure you want to reboot this Raspberry Pi?";
         yes.textContent = "Reboot";
+    } else if (action === "clear-disclaimer") {
+        msg.textContent = "Clear saved disclaimer acceptance? The next boot will wait for Accept with no countdown.";
+        yes.textContent = "Clear";
     } else {
         msg.textContent = "Are you sure you want to shut down this Raspberry Pi?";
         yes.textContent = "Shutdown";
@@ -1648,6 +2600,16 @@ async function confirmSystemAction() {
     if (!action) return;
     showSystemConfirm(false);
     clearStatus("system-status");
+    if (action === "clear-disclaimer") {
+        try {
+            const data = await jsonFetch("/disclaimer/clear", { method: "POST" });
+            showStatus("system-status", data.message || "Disclaimer acceptance cleared.");
+            await loadDisclaimerStatus();
+        } catch (e) {
+            showStatus("system-status", e.message, true);
+        }
+        return;
+    }
     setSystemButtonsDisabled(true);
     const labels = { reboot: "reboot", shutdown: "shut down", "restart-app": "relaunch" };
     const label = labels[action] || action;
@@ -1661,6 +2623,23 @@ async function confirmSystemAction() {
     } catch (e) {
         showStatus("system-status", e.message, true);
         setSystemButtonsDisabled(false);
+    }
+}
+
+async function loadDisclaimerStatus() {
+    const line = $("disclaimer-status-line");
+    if (!line) return;
+    try {
+        const st = await jsonFetch("/disclaimer/json");
+        if (st.remembered) {
+            line.textContent =
+                `Disclaimer acceptance: remembered (v${st.stored_version}) — next boot shows an eight-second countdown.`;
+        } else {
+            line.textContent =
+                "Disclaimer acceptance: not remembered — next boot waits for Accept.";
+        }
+    } catch (_) {
+        line.textContent = "Disclaimer acceptance: unavailable.";
     }
 }
 
@@ -1934,15 +2913,157 @@ function setSystemButtonsDisabled(disabled) {
     $("btn-shutdown").disabled = disabled;
 }
 
+let irreversibleStep = 0;
+
+function showIrreversibleConfirm(step) {
+    irreversibleStep = step || 0;
+    const row = $("irreversible-confirm-row");
+    const actions = $("irreversible-actions-row");
+    const msg = $("irreversible-confirm-msg");
+    const yes = $("btn-irreversible-confirm-yes");
+    if (!irreversibleStep) {
+        row.classList.add("hidden");
+        actions.classList.remove("hidden");
+        return;
+    }
+    actions.classList.add("hidden");
+    row.classList.remove("hidden");
+    if (irreversibleStep === 1) {
+        msg.textContent = "This deletes everything FlightScnr stores on this Pi, then reinstalls from GitHub. The Pi will reboot. Continue?";
+        yes.textContent = "Continue";
+    } else {
+        msg.textContent = "Last chance. This cannot be undone. Wipe everything and reinstall?";
+        yes.textContent = "Wipe & reinstall";
+    }
+}
+
+async function confirmIrreversible() {
+    if (irreversibleStep === 1) {
+        showIrreversibleConfirm(2);
+        return;
+    }
+    if (irreversibleStep !== 2) return;
+    showIrreversibleConfirm(0);
+    $("btn-wipe-reinstall").disabled = true;
+    try {
+        const data = await jsonFetch("/system/factory-reset", { method: "POST" });
+        if (!data.ok) {
+            showStatus("irreversible-status", data.message || "Clean install could not start.", true);
+            $("btn-wipe-reinstall").disabled = false;
+            return;
+        }
+        showStatus(
+            "irreversible-status",
+            data.message || "Clean install started. This page will go offline; wait several minutes for reboot."
+        );
+    } catch (e) {
+        showStatus("irreversible-status", e.message, true);
+        $("btn-wipe-reinstall").disabled = false;
+    }
+}
+
 $("btn-check-updates").addEventListener("click", checkUpdates);
 $("btn-update-now").addEventListener("click", applyUpdate);
+if ($("btn-update-tonight")) {
+    $("btn-update-tonight").addEventListener("click", applyUpdateTonight);
+}
+async function saveAutoUpdatePrefs() {
+    const prevChecked = $("auto_off_hours") ? $("auto_off_hours").checked : false;
+    const prevTime = $("auto_update_time") ? $("auto_update_time").value : "";
+    const prevHide = $("hide_update_banner") ? $("hide_update_banner").checked : false;
+    try {
+        const data = await jsonFetch("/updates/auto", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                auto_off_hours: $("auto_off_hours") ? $("auto_off_hours").checked : false,
+                auto_update_time: $("auto_update_time") ? $("auto_update_time").value : "",
+                hide_banner: $("hide_update_banner") ? $("hide_update_banner").checked : false,
+            }),
+        });
+        applyUpdateInfo(data);
+        if ($("auto_update_time")) $("auto_update_time").value = data.auto_update_time || "";
+        if ($("hide_update_banner")) $("hide_update_banner").checked = !!data.hide_banner;
+        let msg = "Auto-install is off. Updates only happen when you tap Update Now.";
+        if (data.auto_off_hours) {
+            msg = data.auto_update_time
+                ? `Will auto-install silently around ${data.auto_update_time}.`
+                : "Will auto-install silently during off-hours when idle.";
+        } else if (data.hide_banner) {
+            msg = "Update banner hidden on device. Check here to install manually.";
+        }
+        showStatus("updates-status", msg);
+    } catch (e) {
+        showStatus("updates-status", e.message, true);
+        if ($("auto_off_hours")) $("auto_off_hours").checked = prevChecked;
+        if ($("auto_update_time")) $("auto_update_time").value = prevTime;
+        if ($("hide_update_banner")) $("hide_update_banner").checked = prevHide;
+    }
+}
+if ($("auto_off_hours")) {
+    $("auto_off_hours").addEventListener("change", saveAutoUpdatePrefs);
+}
+if ($("hide_update_banner")) {
+    $("hide_update_banner").addEventListener("change", saveAutoUpdatePrefs);
+}
+if ($("auto_update_time")) {
+    $("auto_update_time").addEventListener("change", saveAutoUpdatePrefs);
+}
+if ($("auto_wifi_setup_hotspot")) {
+    $("auto_wifi_setup_hotspot").addEventListener("change", async () => {
+        clearStatus("wifi-setup-pref-status");
+        try {
+            const data = await jsonFetch("/display", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    auto_wifi_setup_hotspot: $("auto_wifi_setup_hotspot").checked,
+                }),
+            });
+            showStatus(
+                "wifi-setup-pref-status",
+                data.auto_wifi_setup_hotspot !== false
+                    ? "Automatic Wi-Fi setup hotspot is on."
+                    : "Automatic Wi-Fi setup hotspot is off — NetworkManager will keep trying to reconnect."
+            );
+        } catch (e) {
+            showStatus("wifi-setup-pref-status", e.message, true);
+            $("auto_wifi_setup_hotspot").checked = !$("auto_wifi_setup_hotspot").checked;
+        }
+    });
+}
+if ($("btn-wifi-start-setup")) {
+    $("btn-wifi-start-setup").addEventListener("click", async () => {
+        clearStatus("wifi-setup-pref-status");
+        try {
+            const data = await jsonFetch("/wifi/start-setup", { method: "POST" });
+            showStatus(
+                "wifi-setup-pref-status",
+                data.message || "Opening Wi-Fi setup on the display…"
+            );
+        } catch (e) {
+            showStatus("wifi-setup-pref-status", e.message, true);
+        }
+    });
+}
+$("btn-repair-update").addEventListener("click", applyRepairConfirmed);
+$("btn-resync-install").addEventListener("click", applyResyncConfirmed);
 $("btn-update-confirm-yes").addEventListener("click", applyUpdateConfirmed);
 $("btn-update-confirm-no").addEventListener("click", () => showUpdateConfirm(false));
 $("btn-restart-app").addEventListener("click", () => promptSystemAction("restart-app"));
 $("btn-reboot").addEventListener("click", () => promptSystemAction("reboot"));
 $("btn-shutdown").addEventListener("click", () => promptSystemAction("shutdown"));
+if ($("btn-disclaimer-clear")) {
+    $("btn-disclaimer-clear").addEventListener("click", () => promptSystemAction("clear-disclaimer"));
+}
 $("btn-system-confirm-yes").addEventListener("click", confirmSystemAction);
 $("btn-system-confirm-no").addEventListener("click", () => showSystemConfirm(false));
+$("btn-wipe-reinstall").addEventListener("click", () => {
+    clearStatus("irreversible-status");
+    showIrreversibleConfirm(1);
+});
+$("btn-irreversible-confirm-yes").addEventListener("click", confirmIrreversible);
+$("btn-irreversible-confirm-no").addEventListener("click", () => showIrreversibleConfirm(0));
 
 $("btn-export-settings").addEventListener("click", () => {
     showStatus("export-status", "Downloading settings…");
@@ -1951,6 +3072,14 @@ $("btn-export-settings").addEventListener("click", () => {
     setTimeout(() => {
         showStatus("export-status", "Download started — check your browser downloads.");
     }, 400);
+});
+
+$("btn-export-diagnostics").addEventListener("click", () => {
+    showStatus("export-status", "Building diagnostics package…");
+    window.location.href = "/diagnostics/export?t=" + Date.now();
+    setTimeout(() => {
+        showStatus("export-status", "Diagnostics download started — check your browser downloads.");
+    }, 600);
 });
 
 $("btn-import-settings").addEventListener("click", async () => {
@@ -1988,8 +3117,15 @@ $("btn-import-settings").addEventListener("click", async () => {
 });
 $("btn-radar").addEventListener("click", saveRadar);
 $("btn-dump1090").addEventListener("click", saveDump1090);
-$("btn-save-reload").addEventListener("click", saveAndReloadSettings);
+$("btn-route-source-order").addEventListener("click", saveRouteSourceOrder);
+$("btn-position-sources").addEventListener("click", savePositionSources);
+$("btn-position-sources-reset").addEventListener("click", resetPositionSources);
+$("btn-save-reload").addEventListener("click", () => saveAndReloadSettings("display-status"));
+$("btn-save-lofi").addEventListener("click", () => saveAndReloadSettings("lofi-status"));
 $("btn-offhours").addEventListener("click", saveOffHours);
+if ($("night_mode")) {
+    $("night_mode").addEventListener("change", toggleDimRow);
+}
 $("btn-weather").addEventListener("click", saveWeather);
 $("btn-weather-fetch").addEventListener("click", fetchWeatherNow);
 $("btn-alerts").addEventListener("click", saveAlerts);
@@ -2012,14 +3148,13 @@ $("fav-list").addEventListener("click", (ev) => {
     if (!btn) return;
     deleteFavourite(btn.getAttribute("data-fav-delete"));
 });
-$("night_mode").addEventListener("change", toggleDimRow);
 $("range_index").addEventListener("change", syncRangeSelect);
 $("bright_pct").addEventListener("input", syncBrightLabel);
-$("night_dim").addEventListener("input", syncNightDimLabel);
 if ($("radar_hud_opacity")) $("radar_hud_opacity").addEventListener("input", syncHudOpacityLabel);
 if ($("hourly_chime_volume")) $("hourly_chime_volume").addEventListener("input", syncChimeVolumeLabel);
 if ($("traffic_sfx_volume")) $("traffic_sfx_volume").addEventListener("input", syncChimeVolumeLabel);
 if ($("military_sfx_volume")) $("military_sfx_volume").addEventListener("input", syncChimeVolumeLabel);
+if ($("earthquake_voice_volume")) $("earthquake_voice_volume").addEventListener("input", syncChimeVolumeLabel);
 if ($("btn-chime-preview")) {
     $("btn-chime-preview").addEventListener("click", async () => {
         clearStatus("display-status");
@@ -2074,8 +3209,32 @@ if ($("btn-military-sfx-preview")) {
         }
     });
 }
+if ($("btn-earthquake-voice-preview")) {
+    $("btn-earthquake-voice-preview").addEventListener("click", async () => {
+        clearStatus("display-status");
+        try {
+            const volume = $("earthquake_voice_volume")
+                ? Number($("earthquake_voice_volume").value)
+                : 80;
+            const data = await jsonFetch("/display/earthquake-voice-preview", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ earthquake_voice_volume: volume }),
+            });
+            showStatus("display-status", data.message || "Playing earthquake alert preview.");
+        } catch (err) {
+            showStatus("display-status", err.message || String(err), true);
+        }
+    });
+}
 if ($("vfr_opacity")) $("vfr_opacity").addEventListener("input", syncVfrOpacityLabel);
-if ($("dist_units")) $("dist_units").addEventListener("change", syncMinSpeedUnitLabels);
+if ($("dist_units")) $("dist_units").addEventListener("change", onDistanceUnitsChanged);
+if ($("live_tracking_min_radius")) {
+    $("live_tracking_min_radius").addEventListener("change", readFollowRadiusKmFromInputs);
+}
+if ($("live_tracking_max_radius")) {
+    $("live_tracking_max_radius").addEventListener("change", readFollowRadiusKmFromInputs);
+}
 if ($("atc_volume")) {
     $("atc_volume").addEventListener("input", onAtcVolumeInput);
     $("atc_volume").addEventListener("change", onAtcVolumeChange);
@@ -2110,8 +3269,7 @@ if ($("atc_channel")) {
     $("atc_channel").addEventListener("change", () => saveAtc());
 }
 if ($("btn-atc-save")) $("btn-atc-save").addEventListener("click", () => saveAtc());
-if ($("btn-atc-play")) $("btn-atc-play").addEventListener("click", () => saveAtc({ action: "play" }));
-if ($("btn-atc-stop")) $("btn-atc-stop").addEventListener("click", () => saveAtc({ action: "stop" }));
+if ($("atc_enabled")) $("atc_enabled").addEventListener("change", () => saveAtc());
 
 function renderBluetoothStatus(st) {
     const line = $("bt_status_line");
@@ -2329,12 +3487,442 @@ if ($("btn-bt-use")) $("btn-bt-use").addEventListener("click", bluetoothUsePrefe
 if ($("btn-bt-usb")) $("btn-bt-usb").addEventListener("click", bluetoothUseUsb);
 if ($("btn-bt-disconnect")) $("btn-bt-disconnect").addEventListener("click", bluetoothDisconnect);
 
+if ($("traffic_labels")) $("traffic_labels").addEventListener("change", syncTagLeadersControl);
+
 document.addEventListener("DOMContentLoaded", () => {
     wireRgbGroup("theme");
     wireRgbGroup("runway");
+    wireRgbGroup("runway_light");
+    wireRgbGroup("text_dark");
+    wireRgbGroup("text_light");
     loadAll();
     checkUpdates();
+    startDump1090LivePoll();
 });
+
+    const lofiPrettyName = (name) =>
+        name.replace(/\.mp3$/i, "").replace(/[-_]+/g, " ").trim();
+    const lofiFmtTime = (secs) => {
+        if (!isFinite(secs) || secs < 0) return "0:00";
+        const m = Math.floor(secs / 60), s = Math.floor(secs % 60);
+        return m + ":" + String(s).padStart(2, "0");
+    };
+    let lofiCurrent = null;
+    function lofiSetRowHighlight() {
+        document.querySelectorAll(".lofi-row").forEach(row => {
+            row.classList.toggle("is-playing", row.dataset.name === lofiCurrent);
+        });
+    }
+    function lofiPlay(name) {
+        const audio = $("lofi_preview");
+        const panel = $("lofi-player");
+        if (!audio || !panel) return;
+        if (lofiCurrent === name) {
+            if (audio.paused) audio.play().catch(() => {});
+            else audio.pause();
+            return;
+        }
+        lofiCurrent = name;
+        panel.hidden = false;
+        $("lofi-player-title").textContent = lofiPrettyName(name);
+        const art = $("lofi-player-art");
+        art.style.display = "none";
+        art.src = "/lofi/cover/" + encodeURIComponent(name);
+        audio.src = "/lofi/stream/" + encodeURIComponent(name);
+        audio.play().catch(() => {});
+        lofiSetRowHighlight();
+    }
+    function wireLofiPlayer() {
+        const audio = $("lofi_preview");
+        const btn = $("lofi-player-btn");
+        const seek = $("lofi-seek");
+        const time = $("lofi-time");
+        if (!audio || !btn || !seek) return;
+        btn.addEventListener("click", () => {
+            if (!lofiCurrent) return;
+            if (audio.paused) audio.play().catch(() => {});
+            else audio.pause();
+        });
+        audio.addEventListener("play", () => { btn.innerHTML = "&#10074;&#10074;"; });
+        audio.addEventListener("pause", () => { btn.innerHTML = "&#9654;"; });
+        audio.addEventListener("ended", () => { btn.innerHTML = "&#9654;"; });
+        audio.addEventListener("timeupdate", () => {
+            if (audio.duration > 0 && !seek.matches(":active")) {
+                seek.value = String(Math.round(1000 * audio.currentTime / audio.duration));
+            }
+            if (time) time.textContent = lofiFmtTime(audio.currentTime);
+        });
+        seek.addEventListener("input", () => {
+            if (audio.duration > 0) {
+                audio.currentTime = (Number(seek.value) / 1000) * audio.duration;
+            }
+        });
+        const art = $("lofi-player-art");
+        if (art) {
+            art.addEventListener("load", () => { art.style.display = "block"; });
+            art.addEventListener("error", () => { art.style.display = "none"; });
+        }
+    }
+    wireLofiPlayer();
+    async function refreshLofiPack() {
+        const box = $("lofi-pack");
+        if (!box) return;
+        try {
+            const d = await (await fetch("/lofi/pack/status")).json();
+            const busy = d.state === "downloading" || d.state === "installing";
+            const label = d.label || "starter playlist";
+            const sizeMb = d.size_mb ? ` (~${d.size_mb} MB)` : " (~190 MB)";
+            const btn = $("btn-lofi-pack");
+            if (btn) {
+                btn.textContent = d.installed
+                    ? `Re-download ${label}${sizeMb}`
+                    : `Download ${label}${sizeMb}`;
+            }
+            const hint = $("lofi_pack_hint");
+            if (hint) {
+                if (d.installed && !busy && d.state !== "error") {
+                    const expect = d.tracks ? ` (${d.tracks} in release)` : "";
+                    hint.textContent =
+                        `Installed: ${d.count} pack track${d.count === 1 ? "" : "s"}${expect}. Re-download to replace with the latest release.`;
+                } else if (d.count > 0 && !d.installed) {
+                    hint.textContent =
+                        `Found ${d.count} pack track${d.count === 1 ? "" : "s"} but the starter playlist is not fully installed — download to get the full set.`;
+                } else if (!d.installed) {
+                    const desc = d.description ? `${d.description} ` : "";
+                    hint.textContent =
+                        desc + "Download once from GitHub Releases — tracks install to this Pi and play locally under ATC.";
+                }
+            }
+            if (btn) btn.disabled = busy;
+            $("lofi_pack_progress").hidden = !busy && d.state !== "error";
+            if (busy) {
+                const pct = d.total > 0 ? Math.round(100 * d.received / d.total) : 0;
+                $("lofi_pack_bar").style.width = pct + "%";
+                $("lofi_pack_msg").textContent = d.state === "installing"
+                    ? "Unpacking tracks…"
+                    : `Downloading… ${pct}% (${Math.round(d.received / 1048576)} MB)`;
+                setTimeout(refreshLofiPack, 1000);
+            } else if (d.state === "error") {
+                $("lofi_pack_msg").textContent = "Download failed: " + (d.message || "unknown error");
+            } else if (d.state === "done") {
+                $("lofi_pack_bar").style.width = "100%";
+                loadLofiTracks();
+            }
+        } catch (_) {}
+    }
+    if ($("btn-lofi-pack")) $("btn-lofi-pack").addEventListener("click", async () => {
+        $("btn-lofi-pack").disabled = true;
+        try { await fetch("/lofi/pack/download", {method: "POST"}); } catch (_) {}
+        refreshLofiPack();
+    });
+    async function loadLofiTracks() {
+        const box = $("lofi_tracks");
+        if (!box) return;
+        try {
+            const r = await fetch("/lofi/tracks");
+            const d = await r.json();
+            box.textContent = "";
+            const disabled = new Set(d.disabled || []);
+            const addRow = (name, builtin) => {
+                const row = document.createElement("div");
+                row.className = "lofi-row" + (disabled.has(name) ? " is-off" : "");
+                row.dataset.name = name;
+
+                const art = document.createElement("img");
+                art.className = "lofi-thumb";
+                art.loading = "lazy";
+                art.alt = "";
+                art.src = "/lofi/cover/" + encodeURIComponent(name);
+                art.addEventListener("error", () => {
+                    const ph = document.createElement("span");
+                    ph.className = "lofi-thumb";
+                    ph.textContent = "\u266B";
+                    art.replaceWith(ph);
+                });
+                row.appendChild(art);
+
+                const title = document.createElement("span");
+                title.className = "lofi-row-title";
+                title.textContent = lofiPrettyName(name);
+                row.appendChild(title);
+
+                const badge = document.createElement("span");
+                badge.className = "lofi-badge";
+                badge.textContent = builtin ? "built-in" : "yours";
+                row.appendChild(badge);
+
+                if (builtin) {
+                    const sw = document.createElement("span");
+                    sw.className = "switch";
+                    const input = document.createElement("input");
+                    input.type = "checkbox";
+                    input.checked = !disabled.has(name);
+                    input.title = "Include in the rotation";
+                    input.addEventListener("click", (e) => e.stopPropagation());
+                    input.addEventListener("change", async () => {
+                        await fetch("/lofi/toggle_disabled", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({name})});
+                        row.classList.toggle("is-off", !input.checked);
+                    });
+                    const track = document.createElement("span");
+                    track.className = "track";
+                    sw.appendChild(input);
+                    sw.appendChild(track);
+                    row.appendChild(sw);
+                } else {
+                    const del = document.createElement("button");
+                    del.type = "button";
+                    del.className = "lofi-remove";
+                    del.title = "Remove this upload";
+                    del.textContent = "\u2715";
+                    del.addEventListener("click", async (e) => {
+                        e.stopPropagation();
+                        await fetch("/lofi/delete", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({name})});
+                        if (lofiCurrent === name) {
+                            const audio = $("lofi_preview");
+                            if (audio) audio.pause();
+                            lofiCurrent = null;
+                            $("lofi-player").hidden = true;
+                        }
+                        loadLofiTracks();
+                    });
+                    row.appendChild(del);
+                }
+                row.addEventListener("click", () => lofiPlay(name));
+                box.appendChild(row);
+            };
+            (d.bundled || []).forEach(n => addRow(n, true));
+            (d.user || []).forEach(n => addRow(n, false));
+            if (!box.childNodes.length) {
+                box.textContent = "No tracks yet.";
+                box.style.padding = ".6rem";
+            }
+            lofiSetRowHighlight();
+        } catch (_) {}
+    }
+    if ($("btn-lofi-upload")) $("btn-lofi-upload").addEventListener("click", async () => {
+        const input = $("lofi_file");
+        const msg = $("lofi_upload_msg");
+        if (!input || !input.files || !input.files.length) { if (msg) msg.textContent = "Choose an MP3 first."; return; }
+        const fd = new FormData();
+        fd.append("track", input.files[0]);
+        if (msg) msg.textContent = "Uploading…";
+        try {
+            const r = await fetch("/lofi/upload", {method: "POST", body: fd});
+            const d = await r.json();
+            if (msg) msg.textContent = d.message || (r.ok ? "Added." : "Upload failed.");
+            if (r.ok) { input.value = ""; loadLofiTracks(); }
+        } catch (_) { if (msg) msg.textContent = "Upload failed."; }
+    });
+
+    // --- Settings search: keyword match on labels, jump + flash ---
+    (function () {
+        const inp = $("setting_search"), box = $("setting_search_results");
+        if (!inp || !box) return;
+        let index = null;
+        let current = [];
+        function sectionTitle(det) {
+            const sum = det.querySelector(":scope > summary");
+            if (!sum) return "";
+            let t = "";
+            for (const n of sum.childNodes) if (n.nodeType === 3) t += n.textContent;
+            return t.replace(/\s+/g, " ").trim();
+        }
+        function buildIndex() {
+            index = [];
+            document.querySelectorAll("details.card").forEach((det) => {
+                const sec = sectionTitle(det) || "Settings";
+                const sum = det.querySelector(":scope > summary");
+                const sumHint = sum && sum.querySelector(".sum") ? sum.querySelector(".sum").textContent : "";
+                if (sum) index.push({
+                    text: (sec + " " + sumHint).toLowerCase(),
+                    label: sec, sec: "Section", el: sum,
+                });
+                det.querySelectorAll("label").forEach((lab) => {
+                    const t = lab.textContent.replace(/\s+/g, " ").trim();
+                    if (t) index.push({
+                        text: (t + " " + sec).toLowerCase(),
+                        label: t, sec, el: lab,
+                    });
+                });
+            });
+        }
+        function go(entry) {
+            box.classList.add("hidden");
+            inp.blur();
+            for (let n = entry.el; n; n = n.parentElement)
+                if (n.tagName === "DETAILS") n.open = true;
+            entry.el.scrollIntoView({ behavior: "smooth", block: "center" });
+            entry.el.classList.remove("search-hit");
+            void entry.el.offsetWidth;
+            entry.el.classList.add("search-hit");
+            setTimeout(() => entry.el.classList.remove("search-hit"), 2100);
+        }
+        function render(q) {
+            if (index === null) buildIndex();
+            const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+            if (!words.length) { box.classList.add("hidden"); current = []; return; }
+            current = index.filter((e) => words.every((w) => e.text.includes(w))).slice(0, 12);
+            box.innerHTML = "";
+            if (!current.length) {
+                const d = document.createElement("div");
+                d.className = "search-empty";
+                d.textContent = "No settings match";
+                box.appendChild(d);
+            } else current.forEach((e, i) => {
+                const b = document.createElement("button");
+                b.type = "button";
+                const name = document.createElement("span");
+                name.textContent = e.label;
+                const sec = document.createElement("span");
+                sec.className = "sec";
+                sec.textContent = e.sec;
+                b.appendChild(name);
+                b.appendChild(sec);
+                if (i === 0) b.classList.add("sel");
+                b.addEventListener("mousedown", (ev) => { ev.preventDefault(); go(e); });
+                box.appendChild(b);
+            });
+            box.classList.remove("hidden");
+        }
+        inp.addEventListener("input", () => render(inp.value));
+        inp.addEventListener("keydown", (ev) => {
+            if (ev.key === "Enter" && current.length) { ev.preventDefault(); go(current[0]); }
+            else if (ev.key === "Escape") { box.classList.add("hidden"); inp.blur(); }
+        });
+        inp.addEventListener("focus", () => { if (inp.value.trim()) render(inp.value); });
+        document.addEventListener("click", (ev) => {
+            if (!ev.target.closest(".search-wrap")) box.classList.add("hidden");
+        });
+    })();
+
+    // --- Targets section: per-category visibility ---
+    (function () {
+        const body = $("targets_body");
+        if (!body) return;
+        const CATS = [
+            ["plane", "Planes"], ["heli", "Helicopters"],
+            ["drone", "Drones"], ["vessel", "Vessels"],
+        ];
+        const FORMS = [["icon", "Icon"], ["triangle", "Triangle"], ["dot", "Dot"]];
+        const MODES = [["letters", "Letters"], ["degrees", "Degrees"], ["both", "Both"]];
+        const COLOR_IDS = CATS.map(([cat]) => "tgt_" + cat).concat(["tgt_compass", "tgt_blip"]);
+        function colorRow(id) {
+            return '<div class="chk"><label for="' + id + '_auto">Auto color</label>' +
+                '<span class="switch"><input id="' + id + '_auto" type="checkbox" checked><span class="track"></span></span></div>' +
+                '<div class="chk"><label for="' + id + '_color">Custom color</label>' +
+                '<input id="' + id + '_color" type="color" value="#ffb428" disabled></div>';
+        }
+        function rangeRow(id, label, lo, hi, val) {
+            return '<label for="' + id + '">' + label + ' <span id="' + id + '_label">' + val + '%</span></label>' +
+                '<input id="' + id + '" type="range" min="' + lo + '" max="' + hi + '" step="5" value="' + val + '" ' +
+                'oninput="document.getElementById(\'' + id + '_label\').textContent = this.value + \'%\'">';
+        }
+        function selectRow(id, label, options) {
+            let opts = options.map(([v, t]) => '<option value="' + v + '">' + t + "</option>").join("");
+            return '<label for="' + id + '">' + label + "</label><select id=\"" + id + '">' + opts + "</select>";
+        }
+        let html = "";
+        for (const [cat, title] of CATS) {
+            html += '<p style="margin:.9rem 0 .2rem;font-weight:600">' + title + "</p>";
+            html += colorRow("tgt_" + cat);
+            html += rangeRow("tgt_" + cat + "_size", "Size", 50, 150, 100);
+            html += selectRow("tgt_" + cat + "_form", "Symbol", FORMS);
+        }
+        html += '<p style="margin:.9rem 0 .2rem;font-weight:600">Compass rose</p>';
+        html += colorRow("tgt_compass");
+        html += rangeRow("tgt_compass_opacity", "Opacity", 20, 100, 100);
+        html += selectRow("tgt_compass_labels", "Labels", MODES);
+        html += '<p style="margin:.9rem 0 .2rem;font-weight:600">Blips</p>';
+        html += colorRow("tgt_blip");
+        html += rangeRow("tgt_blip_size", "Size", 50, 150, 100);
+        html += rangeRow("tgt_blip_opacity", "Opacity", 20, 100, 100);
+        body.innerHTML = html;
+
+        function syncColorEnabled(id) {
+            const auto = $(id + "_auto"), color = $(id + "_color");
+            if (!auto || !color) return;
+            color.disabled = auto.checked;
+        }
+        function wireColorRow(id) {
+            syncColorEnabled(id);
+            const auto = $(id + "_auto");
+            if (auto) auto.addEventListener("change", () => syncColorEnabled(id));
+        }
+        for (const id of COLOR_IDS) wireColorRow(id);
+
+        function setColor(id, hex) {
+            const auto = $(id + "_auto"), color = $(id + "_color");
+            if (auto) auto.checked = !hex;
+            if (color) {
+                if (hex) color.value = hex;
+                color.disabled = !!(auto && auto.checked);
+            }
+        }
+        function getColor(id) {
+            const auto = $(id + "_auto"), color = $(id + "_color");
+            if (auto && auto.checked) return "";
+            return color ? color.value : "";
+        }
+        function setRange(id, v) {
+            const el = $(id);
+            if (!el) return;
+            el.value = String(v);
+            const lab = $(id + "_label");
+            if (lab) lab.textContent = v + "%";
+        }
+        async function load() {
+            try {
+                const d = await jsonFetch("/targets/json");
+                for (const [cat] of CATS) {
+                    const c = (d.categories || {})[cat] || {};
+                    setColor("tgt_" + cat, c.color || "");
+                    setRange("tgt_" + cat + "_size", c.size ?? 100);
+                    if ($("tgt_" + cat + "_form")) $("tgt_" + cat + "_form").value = c.form || "icon";
+                }
+                const cp = d.compass || {};
+                setColor("tgt_compass", cp.color || "");
+                setRange("tgt_compass_opacity", cp.opacity ?? 100);
+                if ($("tgt_compass_labels")) $("tgt_compass_labels").value = cp.labels || "letters";
+                const bl = d.blip || {};
+                setColor("tgt_blip", bl.color || "");
+                setRange("tgt_blip_size", bl.size ?? 100);
+                setRange("tgt_blip_opacity", bl.opacity ?? 100);
+            } catch (_) {}
+        }
+        load();
+        const btn = $("btn-targets");
+        if (btn) btn.addEventListener("click", async () => {
+            const payload = {categories: {}, compass: {}, blip: {}};
+            for (const [cat] of CATS) {
+                payload.categories[cat] = {
+                    color: getColor("tgt_" + cat),
+                    size: Number($("tgt_" + cat + "_size").value),
+                    form: $("tgt_" + cat + "_form").value,
+                };
+            }
+            payload.compass = {
+                color: getColor("tgt_compass"),
+                opacity: Number($("tgt_compass_opacity").value),
+                labels: $("tgt_compass_labels").value,
+            };
+            payload.blip = {
+                color: getColor("tgt_blip"),
+                size: Number($("tgt_blip_size").value),
+                opacity: Number($("tgt_blip_opacity").value),
+            };
+            const st = $("targets-status");
+            try {
+                await jsonFetch("/targets", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(payload),
+                });
+                if (st) st.textContent = "Saved.";
+            } catch (_) {
+                if (st) st.textContent = "Save failed.";
+            }
+        });
+    })();
 </script>
 </body>
 </html>

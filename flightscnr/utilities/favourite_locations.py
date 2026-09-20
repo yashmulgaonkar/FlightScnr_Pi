@@ -392,9 +392,27 @@ def delete_location(entry_id: str) -> bool:
     return True
 
 
+# Favourites this close to Home (degrees, ≈50 m) are the same place — a
+# favourite promoted to Home stays in the list but leaves the location cycle.
+_HOME_DUP_EPS_DEG = 0.0005
+
+
+def _duplicates_home(loc: dict) -> bool:
+    try:
+        h_lat, h_lon = home_coords()
+        return (
+            abs(float(loc["lat"]) - h_lat) < _HOME_DUP_EPS_DEG
+            and abs(float(loc["lon"]) - h_lon) < _HOME_DUP_EPS_DEG
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 def cycle_active() -> tuple[int, float, float, str]:
     """Advance Home → fav0 → … → Home (Custom joins as its own step before Home).
 
+    Favourites whose coordinates duplicate Home are skipped, so setting a
+    favourite as Home never makes the cycle visit the same place twice.
     Returns ``(index, lat, lon, label)``. Caller should persist coordinates to
     ``location.json`` so reboot restores this center.
     """
@@ -404,34 +422,22 @@ def cycle_active() -> tuple[int, float, float, str]:
     n = len(locs)
     cur = int(_state.get("active_index", HOME_INDEX))
 
+    def _go_home() -> tuple[int, float, float, str]:
+        _set_active_index(HOME_INDEX)
+        lat, lon = home_coords()
+        return HOME_INDEX, lat, lon, "Home"
+
+    def _next_from(start: int) -> tuple[int, float, float, str]:
+        for i in range(max(0, start), n):
+            loc = locs[i]
+            if _duplicates_home(loc):
+                continue
+            _set_active_index(i)
+            return i, float(loc["lat"]), float(loc["lon"]), loc["name"]
+        return _go_home()
+
     # Order: Home → favs → (back to Home). Custom is not in the cycle list;
     # the next tap from Custom goes to the first favourite (or Home if none).
-    if cur == CUSTOM_INDEX:
-        if n == 0:
-            _set_active_index(HOME_INDEX)
-            lat, lon = home_coords()
-            return HOME_INDEX, lat, lon, "Home"
-        _set_active_index(0)
-        loc = locs[0]
-        return 0, float(loc["lat"]), float(loc["lon"]), loc["name"]
-
-    if n == 0:
-        _set_active_index(HOME_INDEX)
-        lat, lon = home_coords()
-        return HOME_INDEX, lat, lon, "Home"
-
-    if cur < 0:
-        # Home → first favourite
-        _set_active_index(0)
-        loc = locs[0]
-        return 0, float(loc["lat"]), float(loc["lon"]), loc["name"]
-
-    nxt = cur + 1
-    if nxt >= n:
-        _set_active_index(HOME_INDEX)
-        lat, lon = home_coords()
-        return HOME_INDEX, lat, lon, "Home"
-
-    _set_active_index(nxt)
-    loc = locs[nxt]
-    return nxt, float(loc["lat"]), float(loc["lon"]), loc["name"]
+    if cur == CUSTOM_INDEX or cur < 0:
+        return _next_from(0)
+    return _next_from(cur + 1)

@@ -1,0 +1,40 @@
+name: ✨ Wishlist
+description: Suggest a new feature or capability
+title: "[Wishlist]: "
+labels: ["wishlist"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for new ideas that are not just tweaks to existing behavior.
+        For refining something that already exists, use the **Improvement** template instead.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What you want, and the problem it would solve.
+      placeholder: |
+        I'd like a way to…
+    validations:
+      required: true
+
+  - type: textarea
+    id: request
+    attributes:
+      label: Request
+      description: Concrete behavior, UI, or workflow you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why this matters (optional)
+      description: Who benefits, how often it comes up, or what is painful without it.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered (optional)
+      description: Workarounds, other tools, or related settings you already tried.

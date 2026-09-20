@@ -1,33 +1,48 @@
-name: 📑 Documentation Bug report
-description: Create a report to help us improve the docs
-title: "docs(bug): "
+name: 📑 Documentation
+description: Improvements or additions to documentation
+title: "[Docs]: "
 labels: ["scope:docs"]
 body:
-  - type: textarea
+  - type: markdown
     attributes:
-      label: Describe the bug
-      description: A clear and concise description of the bug.
+      value: |
+        Use this for missing, incorrect, or unclear docs (README, wiki, comments, install notes).
+        A PR that fixes the docs is often better than an issue alone.
+
+  - type: dropdown
+    id: docs_kind
+    attributes:
+      label: What kind of docs issue?
+      options:
+        - Incorrect information
+        - Missing information
+        - Unclear / hard to follow
+        - Typo / formatting
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: describe
+    attributes:
+      label: Describe the issue
+      description: What page/section, what is wrong, and what should change.
       placeholder: |
-          # A PR to fix the bug is often better than adding this issue!
-          #
-          # If you can't create a PR please provide the following:
-          # - What page and/or section has the problem
-          # - What is the problem - missing information, incorrect information?
-          # - Suggested fixes, links to corresponding code PRs
-          # - Any additional context
+        - Page / section:
+        - Problem:
+        - Suggested fix:
     validations:
       required: true
 
   - type: input
+    id: page_url
     attributes:
-      label: Page URL
-      description: The URL of the problem page.
-    validations:
-      required: false
+      label: Page URL (optional)
+      description: Link to the wiki page, README section, or docs file if you have one.
+      placeholder: https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/…
 
   - type: textarea
+    id: media
     attributes:
-      label: Screenshot / Media
-      description: Add screenshot / media if you have them
-    validations:
-      required: false
+      label: Screenshot / media (optional)
+      description: Add a screenshot or other media if it helps.

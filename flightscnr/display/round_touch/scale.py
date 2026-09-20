@@ -10,21 +10,60 @@
 """Radar range scale bands (FlightScnr radar_scale.h)."""
 
 STATUTE_MILE_KM = 1.609344
+NM_KM = 1.852
 LABEL_TO_COVERAGE = 4.0 / 3.0
+
+# Round-number band values per display unit — same 8 steps each, so a saved
+# scale_index survives a unit switch at roughly the same zoom. Ring pixel
+# radii never change; only what the rings mean (and fetch radii) shifts.
+UNIT_BANDS = {
+    "mi": (2, 3, 5, 8, 10, 20, 30, 50),
+    "km": (3, 5, 8, 12, 15, 30, 50, 80),
+    "nm": (2, 3, 5, 7, 10, 15, 25, 40),
+}
+_UNIT_KM = {"mi": STATUTE_MILE_KM, "km": 1.0, "nm": NM_KM}
+
 
 def _band(miles: float) -> dict:
     label_km = miles * STATUTE_MILE_KM
     return {"label_km": label_km, "coverage_km": label_km * LABEL_TO_COVERAGE}
 
 
-SCALE_BANDS = [_band(m) for m in (2, 3, 5, 8, 10, 20, 30)]
-PRESET_STATUTE_MILES = tuple(m for m in (2, 3, 5, 8, 10, 20, 30))
+SCALE_BANDS = [_band(m) for m in UNIT_BANDS["mi"]]
+PRESET_STATUTE_MILES = UNIT_BANDS["mi"]
 
 _active_index = 1
 
 
+def _resolve_units(units: str | None) -> str:
+    if units is None:
+        try:
+            from display.round_touch import settings
+
+            units = settings.distance_units()
+        except Exception:
+            units = "mi"
+    units = (units or "mi").lower()
+    return units if units in UNIT_BANDS else "mi"
+
+
+def bands(units: str | None = None) -> list[dict]:
+    """Band dicts for a display unit (defaults to the active setting)."""
+    u = _resolve_units(units)
+    factor = _UNIT_KM[u]
+    out = []
+    for v in UNIT_BANDS[u]:
+        label_km = v * factor
+        out.append({
+            "value": v,
+            "label_km": label_km,
+            "coverage_km": label_km * LABEL_TO_COVERAGE,
+        })
+    return out
+
+
 def active_band():
-    return SCALE_BANDS[_active_index]
+    return bands()[_active_index]
 
 
 def active_index():
@@ -48,7 +87,7 @@ def search_radius_nm(index: int | None = None) -> float:
         idx = active_index()
     else:
         idx = max(0, min(int(index), len(SCALE_BANDS) - 1))
-    band = SCALE_BANDS[idx]
+    band = bands()[idx]
     try:
         from display.round_touch import theme
 
@@ -84,8 +123,9 @@ def format_active_tag(units: str = "km") -> str:
 
 
 def format_band_tag(index: int, units: str = "km") -> str:
+    u = _resolve_units(units)
     idx = max(0, min(int(index), len(SCALE_BANDS) - 1))
-    return format_scale_tag(SCALE_BANDS[idx]["label_km"], units)
+    return f"{bands(u)[idx]['value']}{u}"
 
 
 def value_to_km(value: float, units: str = "mi") -> float:
@@ -99,11 +139,12 @@ def value_to_km(value: float, units: str = "mi") -> float:
 
 def index_for_value(value: float, units: str = "mi") -> int:
     """Snap to the nearest scale band for a distance in the given units."""
-    target_km = value_to_km(float(value), units)
+    u = _resolve_units(units)
+    target = float(value)
     best_idx = 0
     best_diff = float("inf")
-    for i, band in enumerate(SCALE_BANDS):
-        diff = abs(band["label_km"] - target_km)
+    for i, band in enumerate(bands(u)):
+        diff = abs(band["value"] - target)
         if diff < best_diff:
             best_diff = diff
             best_idx = i
@@ -111,15 +152,41 @@ def index_for_value(value: float, units: str = "mi") -> int:
 
 
 def display_value_for_index(index: int, units: str = "mi") -> float:
-    """Numeric range for portal display in the given units."""
+    """Numeric range for portal display in the given units (always round)."""
+    u = _resolve_units(units)
     idx = max(0, min(int(index), len(SCALE_BANDS) - 1))
-    label_km = SCALE_BANDS[idx]["label_km"]
-    units = (units or "km").lower()
-    if units == "mi":
-        return label_km / STATUTE_MILE_KM
-    if units == "nm":
-        return label_km * NM_PER_KM
-    return label_km
+    return bands(u)[idx]["value"]
+
+
+def ring_values(index: int, units: str | None = None) -> list[float]:
+    """Three ring distances for a band: two round inner rings + the range.
+
+    Inner rings sit near 1/3 and 2/3 of the range but snap to round
+    numbers in the display unit, so ring labels never show decimals
+    (beyond .5 at the smallest ranges). The radar draws the rings at the
+    matching fractional radii.
+    """
+    u = _resolve_units(units)
+    v = float(bands(u)[max(0, min(int(index), len(SCALE_BANDS) - 1))]["value"])
+    step = 0.5 if v < 5 else (1.0 if v < 30 else (5.0 if v < 60 else 10.0))
+
+    def snap(x: float) -> float:
+        return round(x / step) * step
+
+    d1 = snap(v / 3.0)
+    d2 = snap(2.0 * v / 3.0)
+    if d1 <= 0:
+        d1 = step
+    if d2 <= d1:
+        d2 = d1 + step
+    if d2 >= v:
+        d2 = v - step
+    if d1 >= d2:
+        d1 = d2 - step if d2 - step > 0 else d2 / 2.0
+    out = []
+    for d in (d1, d2, v):
+        out.append(int(d) if float(d).is_integer() else float(d))
+    return out
 
 
 def format_display_value(index: int, units: str = "mi") -> str:
@@ -140,8 +207,9 @@ def preset_labels_mi() -> str:
 def index_for_radius_nm(radius_nm: float) -> int:
     """Scale band index that fits the configured search radius."""
     radius_km = radius_nm * 1.852
-    best = len(SCALE_BANDS) - 1
-    for i, band in enumerate(SCALE_BANDS):
+    unit_bands = bands()
+    best = len(unit_bands) - 1
+    for i, band in enumerate(unit_bands):
         if band["coverage_km"] >= radius_km:
             best = i
             break

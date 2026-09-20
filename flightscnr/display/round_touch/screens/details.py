@@ -21,7 +21,6 @@ from version import APP_VERSION
 
 FOOTER_BUTTONS = ("next", "radar")
 # Nudge below the live version line; use default footer slot size (same as Settings).
-_FOOTER_Y_OFFSET = theme.s(16)
 
 _BOOT_DIR = os.path.normpath(
     os.path.join(
@@ -44,15 +43,7 @@ _layout: dict | None = None
 
 
 def tap_footer_action(x: int, y: int) -> str | None:
-    idx = nav.tap_footer_button(
-        x,
-        y,
-        len(FOOTER_BUTTONS),
-        y_offset=_FOOTER_Y_OFFSET,
-    )
-    if idx is None:
-        return None
-    return FOOTER_BUTTONS[idx]
+    return nav.curved_footer_hit(x, y, list(FOOTER_BUTTONS))
 
 
 def _load_layout() -> dict:
@@ -115,12 +106,21 @@ def _draw_version_overlay(surface) -> tuple[int, int, pygame.font.Font]:
 
 
 def _update_notice_text() -> str | None:
-    """Return 'Update available vX.Y…' or None when the banner is hidden."""
+    """Return progress / available notice, or None when nothing to show."""
     try:
-        from utilities.updater import remote_release_label, should_show_update_banner
+        from utilities.updater import (
+            remote_release_label,
+            should_show_update_banner,
+            update_is_scheduled,
+            update_running,
+        )
 
+        if update_running():
+            return "Update in progress — do not turn off"
         if not should_show_update_banner():
             return None
+        if update_is_scheduled():
+            return "Firmware will update tonight during off-hours"
         remote = remote_release_label()
     except Exception:
         return None
@@ -159,7 +159,7 @@ def _draw_version_with_update(
 
 def draw_details(surface, boot_splash=False, scroll_offset: int = 0) -> int:
     del scroll_offset
-    surface.fill((0, 0, 0))
+    draw.fill_background_textured(surface)
 
     brand = _brand_surface()
     if brand is None:
@@ -175,10 +175,6 @@ def draw_details(surface, boot_splash=False, scroll_offset: int = 0) -> int:
     if boot_splash:
         return 0
 
-    nav.draw_breadcrumb(surface, ["Radar", "About"])
-    nav.draw_footer_buttons(
-        surface,
-        list(FOOTER_BUTTONS),
-        y_offset=_FOOTER_Y_OFFSET,
-    )
+    nav.draw_curved_breadcrumb(surface, ["Radar", "About"])
+    nav.draw_curved_footer(surface, list(FOOTER_BUTTONS))
     return 0

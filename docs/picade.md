@@ -93,18 +93,24 @@ Bound by SDL button index in `/etc/flightscnr.env`:
 | B | 1 | `JOYSTICK_BTN_RADAR` | back to radar |
 | L1 | 6 | `JOYSTICK_BTN_SWIPE_LEFT` | swipe left |
 | R1 | 7 | `JOYSTICK_BTN_SWIPE_RIGHT` | swipe right |
+| L3 | 10 | `JOYSTICK_BTN_SWIPE_UP` | swipe up |
+| R3 | 11 | `JOYSTICK_BTN_SWIPE_DOWN` | swipe down |
 | L2 | 8 | `JOYSTICK_BTN_ZOOM_OUT` | zoom out (wider range) |
 | R2 | 9 | `JOYSTICK_BTN_ZOOM_IN` | zoom in (shorter range) |
 
 What the two swipe buttons do depends on the screen:
 
-| Screen | Swipe left | Swipe right |
-|---|---|---|
-| Radar | open Settings | open Tracked flights |
-| Settings | next page | previous page, then back to radar |
-| Flight detail | next flight | previous flight |
-| Fire detail | next fire | previous fire |
-| Tracked flights | back to radar | — |
+| Screen | Swipe left | Swipe right | Swipe up | Swipe down |
+|---|---|---|---|---|
+| Radar | flip board (when the layer is on) | Tracked flights | About | Clock |
+| About | Settings | — | — | back to radar |
+| Settings | previous page, then About | next page | scroll | scroll |
+| Flight detail | previous flight | next flight | scroll | scroll |
+| Fire detail | previous fire | next fire | scroll | scroll |
+
+Left and right follow the page dots at the top of the paged screens: right
+advances the lit dot rightwards, left walks it back. Settings sits beside
+About, so it takes up then left from the radar.
 
 Every binding is unset by default, so a touchscreen install is unaffected.
 
@@ -139,6 +145,8 @@ SHOW_MOUSE_CURSOR=True      # with no touchscreen you need to see where you aim
 
 JOYSTICK_BTN_SWIPE_LEFT=6
 JOYSTICK_BTN_SWIPE_RIGHT=7
+JOYSTICK_BTN_SWIPE_UP=10
+JOYSTICK_BTN_SWIPE_DOWN=11
 JOYSTICK_BTN_RADAR=1
 JOYSTICK_BTN_ZOOM_OUT=8
 JOYSTICK_BTN_ZOOM_IN=9
@@ -153,9 +161,9 @@ JOYSTICK_BTN_ZOOM_IN=9
   or zoom buttons when a slider has focus.*
 - **No pinch to zoom.** Pinch needs multi-touch, which pointer emulation cannot
   provide. Use the zoom buttons, or Settings → Options → Range.
-- **Vertical navigation has no button.** Swipe up/down (radar → Details, radar →
-  Clock, and page scrolling) is reachable with the mouse only. Two more bindings
-  would cover it.
+- **The boot safety disclaimer needs a pointer.** It is mandatory and must not
+  be bypassed; it is remembered between boots and auto-continues, but the first
+  acceptance on a fresh install wants a mouse click.
 
 ## Using another screen
 

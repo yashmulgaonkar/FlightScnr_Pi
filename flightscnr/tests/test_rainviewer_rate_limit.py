@@ -219,5 +219,142 @@ class TestPrecipProviders(unittest.TestCase):
         self.assertTrue(rv._provider_available("librewxr"))
 
 
+class TestFollowRainPan(unittest.TestCase):
+    """Sticky overscanned Follow rain must crop under the aircraft each frame."""
+
+    @classmethod
+    def setUpClass(cls):
+        import pygame
+
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+        pygame.init()
+        pygame.display.set_mode((64, 64))
+
+    @classmethod
+    def tearDownClass(cls):
+        import pygame
+
+        pygame.quit()
+
+    def tearDown(self):
+        from display.round_touch import rainviewer_overlay as rv
+
+        with rv._follow_lock:
+            rv._follow_viewport = None
+            rv._follow_loading = False
+
+    def _seed_viewport(self, lat: float, lon: float, radius_km: float = 20.0):
+        import pygame
+        from display.round_touch import rainviewer_overlay as rv
+
+        overscan_r = radius_km * rv._FOLLOW_OVERSCAN
+        bounds = rv._follow_bounds_for_center(lat, lon, overscan_r)
+        # Distinct colors so crop offsets are observable via pixel sampling.
+        raster_w = raster_h = 180
+        raster = pygame.Surface((raster_w, raster_h), pygame.SRCALPHA)
+        for x in range(raster_w):
+            for y in range(raster_h):
+                raster.set_at((x, y), (x % 256, y % 256, 40, 200))
+        vp = {
+            "raster": raster,
+            "bounds": bounds,
+            "raster_w": raster_w,
+            "raster_h": raster_h,
+            "radius_km": radius_km,
+            "lat": lat,
+            "lon": lon,
+            "frame_time": 1000,
+            "provider_id": "rainviewer",
+        }
+        with rv._follow_lock:
+            rv._follow_viewport = vp
+        return vp
+
+    def test_drifted_aircraft_shifts_crop_offset(self):
+        from display.round_touch import rainviewer_overlay as rv
+
+        lat, lon = 47.45, -122.31
+        vp = self._seed_viewport(lat, lon, 20.0)
+        at_center = rv._crop_follow_window(vp, lat, lon, 100, 100)
+        drifted = rv._crop_follow_window(vp, lat + 0.05, lon, 100, 100)
+        self.assertIsNotNone(at_center)
+        self.assertIsNotNone(drifted)
+        _, cx0, cy0, _, _ = at_center
+        _, cx1, cy1, _, _ = drifted
+        # Northward drift → crop moves up in mercator (smaller y).
+        self.assertNotEqual((cx0, cy0), (cx1, cy1))
+        self.assertLess(cy1, cy0)
+
+    def test_small_drift_does_not_need_refetch(self):
+        from display.round_touch import rainviewer_overlay as rv
+
+        lat, lon = 47.45, -122.31
+        vp = self._seed_viewport(lat, lon, 20.0)
+        # ~1 km north — well inside overscanned sticky margin.
+        self.assertFalse(
+            rv._follow_needs_refetch(vp, lat + 0.009, lon, 20.0, 1000, "rainviewer")
+        )
+
+    def test_large_drift_or_frame_change_needs_refetch(self):
+        from display.round_touch import rainviewer_overlay as rv
+
+        lat, lon = 47.45, -122.31
+        vp = self._seed_viewport(lat, lon, 20.0)
+        self.assertTrue(
+            rv._follow_needs_refetch(vp, lat + 0.5, lon, 20.0, 1000, "rainviewer")
+        )
+        self.assertTrue(
+            rv._follow_needs_refetch(vp, lat, lon, 20.0, 2000, "rainviewer")
+        )
+        self.assertTrue(
+            rv._follow_needs_refetch(vp, lat, lon, 40.0, 1000, "rainviewer")
+        )
+
+    def test_sticky_margin_refetches_before_crop_clamp(self):
+        """Regression: margin above clamp fraction froze rain under the plane."""
+        from display.round_touch import rainviewer_overlay as rv
+
+        clamp_frac = 1.0 - 1.0 / rv._FOLLOW_OVERSCAN
+        self.assertLess(rv._FOLLOW_STICKY_MARGIN, clamp_frac)
+
+    def test_force_refresh_needs_refetch(self):
+        from display.round_touch import rainviewer_overlay as rv
+
+        lat, lon = 47.45, -122.31
+        vp = self._seed_viewport(lat, lon, 20.0)
+        vp["force_refresh"] = True
+        self.assertTrue(
+            rv._follow_needs_refetch(vp, lat, lon, 20.0, 1000, "rainviewer")
+        )
+
+    def test_crop_clamp_sets_force_refresh(self):
+        """When the crop hits the raster edge, force a sticky rain refetch."""
+        import pygame
+        from display.round_touch import rainviewer_overlay as rv
+        from unittest import mock
+
+        lat, lon = 47.45, -122.31
+        vp = self._seed_viewport(lat, lon, 20.0)
+        # Far outside overscan → crop clamps.
+        far_lat = lat + 2.0
+        cropped = rv._crop_follow_window(vp, far_lat, lon, 100, 100)
+        self.assertIsNotNone(cropped)
+        _window, crop_x, crop_y, ideal_x, ideal_y = cropped
+        self.assertTrue(abs(crop_x - ideal_x) > 2 or abs(crop_y - ideal_y) > 2)
+
+        surf = pygame.Surface((100, 100), pygame.SRCALPHA)
+        with mock.patch.object(rv, "_enabled", return_value=True), mock.patch(
+            "display.round_touch.settings.show_precipitation", return_value=True
+        ), mock.patch.object(rv, "_cached_metadata", return_value=(None, None)), mock.patch.object(
+            rv, "_start_follow_worker"
+        ) as start:
+            rv.blit_follow_overlay(
+                surf, lat=far_lat, lon=lon, radius_km=20.0, width=100, height=100
+            )
+        self.assertTrue(vp.get("force_refresh"))
+        start.assert_called()
+
+
 if __name__ == "__main__":
     unittest.main()

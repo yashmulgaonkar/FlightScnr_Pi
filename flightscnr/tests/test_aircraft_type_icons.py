@@ -67,6 +67,25 @@ class TestAircraftTypeIcons(unittest.TestCase):
 
         self.assertEqual(_category_for_type("GLF5"), "business-jet")
 
+    def test_cirrus_sf50_is_not_scheibe_sf25_glider(self):
+        """SF50 Vision Jet must not inherit the SF25 Falke glider icon."""
+        from display.round_touch.aircraft_type_icons import (
+            _category_for_type,
+            icon_category,
+            is_unknown_type,
+        )
+
+        self.assertEqual(_category_for_type("SF50"), "business-jet")
+        self.assertEqual(_category_for_type("SF-50"), "business-jet")
+        self.assertEqual(icon_category({"plane": "SF50"}), "business-jet")
+        self.assertFalse(is_unknown_type({"plane": "SF50"}))
+        self.assertEqual(_category_for_type("SF25"), "glider")
+        self.assertEqual(icon_category({"plane": "SF25"}), "glider")
+        self.assertEqual(_category_for_type("SF34"), "turboprop")
+        # Digit siblings must not prefix-steal even if SF50 were unlisted.
+        self.assertNotEqual(_category_for_type("SF50"), "glider")
+        self.assertNotEqual(_category_for_type("SF50"), "turboprop")
+
     def test_citation_jet_family(self):
         """C525 / C25A/B/C/M must use business-jet, not military C2/C5 prefixes."""
         from display.round_touch.aircraft_type_icons import (

@@ -72,6 +72,9 @@ _KIND_ORDER = {
 }
 
 _lock = threading.RLock()
+# Serializes start()/stop() so a settings toggle and the speaker-watch
+# keepalive can never spawn two mpv streams (echo bug).
+_transport_lock = threading.RLock()
 _proc: subprocess.Popen | None = None
 _playing_mount: str | None = None
 _playing_airport: str | None = None
@@ -872,7 +875,7 @@ def _radar_airport_radius_km() -> float:
         scale_mod.select(idx)
     except Exception:
         pass
-    band = scale_mod.SCALE_BANDS[idx]
+    band = scale_mod.bands()[idx]
     try:
         screen_r = theme.VISIBLE_RADIUS - theme.BEYOND_RING_MARGIN
         return float(band["coverage_km"]) * (float(screen_r) / float(theme.GRID_OUTER_RADIUS))
@@ -931,6 +934,19 @@ def _settings():
     from display.round_touch import settings
 
     return settings
+
+
+def _sync_settings_from_disk() -> None:
+    """Reload ATC intent from disk before cross-process start/stop decisions.
+
+    Display and portal each cache settings in memory. The portal speaker-watch
+    only synced on HTTP requests, so a stale enabled=False/want=False could
+    reconcile-kill mpv that the display keepalive just started.
+    """
+    try:
+        _settings().sync_from_disk()
+    except Exception:
+        logger.debug("ATC settings sync_from_disk failed", exc_info=True)
 
 
 def _prefs() -> dict:
@@ -1165,11 +1181,9 @@ def _mpv_softvol(ui_percent: float | int) -> float:
 
 
 def _effective_atc_ui_volume(ui_percent: float | int | None = None) -> float:
-    """UI volume for mpv — 0 while master/ATC mute is on; else scaled by master gain."""
+    """UI volume for mpv — 0 while master mute is on; else scaled by master gain."""
     settings = _settings()
     if not settings.master_sound_enabled():
-        return 0.0
-    if not settings.atc_sound_enabled():
         return 0.0
     if ui_percent is None:
         try:
@@ -1188,10 +1202,16 @@ def _effective_atc_ui_volume(ui_percent: float | int | None = None) -> float:
 
 
 def set_volume(percent: int, *, persist: bool = True) -> int:
-    """Clamp, optionally persist, and apply volume to a running mpv (if any)."""
+    """Clamp, optionally persist, and apply volume to a running mpv (if any).
+
+    ``persist=False`` marks a mid-drag update: only the cheap mpv softvol
+    IPC runs. The OS-mixer subprocesses (wpctl/pactl/amixer, seconds of
+    UI-thread stall) run on the final persisting call alone.
+    """
     value = _settings().set_atc_volume(percent, persist=persist)
-    # Keep OS mixer at full while ATC is in use; softvol handles finer gain.
-    _ensure_system_output_volume(1.0)
+    if persist:
+        # Keep OS mixer at full while ATC is in use; softvol handles gain.
+        _ensure_system_output_volume(1.0)
     _send_ipc(
         ["set_property", "volume", _mpv_softvol(_effective_atc_ui_volume(value))]
     )
@@ -1207,6 +1227,11 @@ def reassert_output_levels() -> None:
 
 
 def stop(*, clear_override: bool = True) -> dict:
+    with _transport_lock:
+        return _stop_locked(clear_override=clear_override)
+
+
+def _stop_locked(*, clear_override: bool = True) -> dict:
     global _proc, _playing_mount, _playing_airport, _quiet_override, _last_error
     with _lock:
         proc = _proc
@@ -1270,6 +1295,16 @@ def start(
     override: bool = False,
 ) -> dict:
     """Start LiveATC stream. ``override=True`` allows play during quiet hours."""
+    with _transport_lock:
+        return _start_locked(airport=airport, mount=mount, override=override)
+
+
+def _start_locked(
+    *,
+    airport: str | None = None,
+    mount: str | None = None,
+    override: bool = False,
+) -> dict:
     global _proc, _playing_mount, _playing_airport, _quiet_override, _last_error
 
     settings = _settings()
@@ -1295,6 +1330,12 @@ def start(
                 _last_error = "No LiveATC feed for airport"
             return status()
 
+    # A concurrent start (toggle + keepalive) already brought this exact
+    # feed up while we waited on the transport lock — one stream is enough.
+    with _lock:
+        if _mpv_alive() and _playing_airport == icao and _playing_mount == feed:
+            return status()
+
     known = {f["mount"] for f in feeds_for_airport(icao)}
     if known and feed not in known:
         with _lock:
@@ -1304,7 +1345,7 @@ def start(
     quiet = in_quiet_hours()
     if quiet and not override:
         with _lock:
-            _last_error = "Quiet hours — use Play to override"
+            _last_error = "Quiet hours — enable ATC to override"
         return status()
 
     if shutil.which("mpv") is None:
@@ -1332,7 +1373,7 @@ def start(
         )
         return status()
 
-    stop(clear_override=False)
+    _stop_locked(clear_override=False)
     # USB/PipeWire sink is often left at ~40%; raise it before starting mpv.
     _ensure_system_output_volume(1.0)
 
@@ -1389,6 +1430,23 @@ def start(
         logger.info("ATC mpv died on start (code %s) — %s", proc.returncode, detail)
         return status()
 
+    # Two processes (display + portal) can race past each other's stop() and
+    # both spawn mpv — the echo bug. Deterministic tie-break: lowest pid wins.
+    rivals = [p for p in _atc_mpv_pids() if p != proc.pid]
+    if rivals and min(rivals) < proc.pid:
+        logger.info(
+            "ATC duplicate stream race — conceding to mpv pid %s", min(rivals)
+        )
+        _kill_pids([proc.pid])
+        try:
+            proc.wait(timeout=2.0)
+        except (subprocess.TimeoutExpired, OSError):
+            _kill_pids([proc.pid], sig=signal.SIGKILL)
+        return status()
+    if rivals:
+        logger.info("ATC duplicate stream race — reaping rivals %s", rivals)
+        _kill_pids(rivals)
+
     with _lock:
         _proc = proc
         _playing_mount = feed
@@ -1408,24 +1466,33 @@ def start(
     return status()
 
 
-def apply_enabled(enabled: bool) -> dict:
-    """Persist enable flag; stop playback when disabling.
+def apply_enabled(enabled: bool, *, override: bool = True) -> dict:
+    """Single ATC power switch shared by HUD, settings, and the web portal.
 
-    Disabling does **not** clear ``atc_want_playing`` — that flag is only cleared
-    by explicit Stop — so turning ATC Audio back on can resume after a restart
-    or a toggle, matching NVS intent.
+    On: persist enabled, set ``atc_want_playing``, and start the stream (quiet
+    hours are overridden by default — same as the old Play button). Idempotent
+    when already playing so Save / preference sync does not retune.
+
+    Off: clear ``atc_want_playing`` and stop playback (same as the old Stop).
     """
     settings = _settings()
-    settings.set_atc_enabled(enabled)
-    if not enabled:
-        return stop(clear_override=False)
-    if settings.atc_want_playing():
-        quiet = in_quiet_hours()
-        forced = settings.atc_quiet_override()
-        if quiet and not forced:
+    on = bool(enabled)
+    if on:
+        settings.set_atc_enabled(True)
+        settings.set_atc_want_playing(True)
+        if is_playing():
             return status()
-        return start(override=bool(forced))
-    return status()
+        quiet = in_quiet_hours()
+        if quiet and not override:
+            return status()
+        return start(override=bool(override))
+    settings.set_atc_enabled(False)
+    return stop(clear_override=True)
+
+
+def toggle_power(*, override: bool = True) -> dict:
+    """Flip ATC enable/disable — HUD long-press and settings switch use this."""
+    return apply_enabled(not _settings().atc_enabled(), override=override)
 
 
 def maybe_resume_when_speaker_ready() -> dict:
@@ -1434,6 +1501,7 @@ def maybe_resume_when_speaker_ready() -> dict:
     Used by the USB-speaker watch thread. Does not clear ``want_playing`` when
     the speaker is still missing — that is handled by ``start()`` deferral.
     """
+    _sync_settings_from_disk()
     settings = _settings()
     if not settings.atc_enabled() or not settings.atc_want_playing():
         return status()
@@ -1461,6 +1529,7 @@ def reconcile_enabled_state() -> dict:
     (especially if the IPC socket was already unlinked). Call from the speaker
     watch and after settings reload so orphans cannot outlive the UI toggle.
     """
+    _sync_settings_from_disk()
     settings = _settings()
     if settings.atc_enabled() and settings.atc_want_playing():
         return status()
@@ -1482,6 +1551,7 @@ def maybe_keepalive() -> dict:
     """
     global _keepalive_next_at, _keepalive_failures
 
+    _sync_settings_from_disk()
     settings = _settings()
     if not settings.atc_enabled() or not settings.atc_want_playing():
         _keepalive_failures = 0
@@ -1528,11 +1598,11 @@ def maybe_resume_after_boot(
 ) -> dict:
     """Resume ATC after app restart/reboot if it was playing when we stopped.
 
-    ``atc_want_playing`` is persisted on Play and cleared only on explicit Stop,
+    ``atc_want_playing`` is set when ATC is enabled and cleared when disabled,
     so a reboot/service restart restores audio. Retries for a while after boot
     because PipeWire/network/LiveATC are often not ready on the first try.
 
-    Honors quiet hours unless the user previously forced Play (quiet override).
+    Honors quiet hours unless the user previously forced playback (quiet override).
     Skips mpv entirely when no USB/Bluetooth speaker is present (watch resumes later).
     """
     global _last_error
@@ -1602,6 +1672,45 @@ def maybe_resume_after_boot(
         if attempt < attempts:
             time.sleep(wait)
     return last
+
+
+_last_quiet_check = 0.0
+
+
+def enforce_quiet_hours() -> None:
+    """Apply the quiet window to a LIVE stream, not just new starts.
+
+    Called periodically from the display loop: stops playback once the
+    quiet window begins (unless overridden) and resumes it when the
+    window ends if the user still wants ATC playing. The lofi bed
+    follows is_playing(), so it obeys automatically.
+    """
+    global _last_quiet_check
+    now_mono = time.monotonic()
+    if now_mono - _last_quiet_check < 30.0:
+        return
+    _last_quiet_check = now_mono
+    try:
+        from display.round_touch import settings
+
+        if not settings.atc_quiet_hours_enabled():
+            return
+        if settings.atc_quiet_override():
+            return
+        if in_quiet_hours():
+            if is_playing():
+                logger.info("ATC stopped — quiet hours began")
+                stop(clear_override=False)
+            return
+        if (
+            settings.atc_want_playing()
+            and settings.atc_enabled()
+            and not is_playing()
+        ):
+            logger.info("ATC resuming — quiet hours ended")
+            start(override=False)
+    except Exception:
+        logger.debug("Quiet-hours enforcement failed", exc_info=True)
 
 
 def retune_if_playing(
@@ -1675,11 +1784,10 @@ def on_radar_center_changed() -> dict:
 
     When the previously selected airport leaves the visible area (map moved to a
     completely different location), select the nearest airport that has feeds
-    (else nearest) and default the channel to Tower. If ATC is enabled and
-    playback was active or intended (``want_playing``), retune/start that Tower
-    so audio keeps following the map. If ATC was off or explicitly Stopped,
-    only update the selection. Stop only when continuing playback but the new
-    area has nothing to tune to.
+    (else nearest) and default the channel to Tower. If ATC is enabled
+    (``want_playing``), retune/start that Tower so audio keeps following the map.
+    If ATC is disabled, only update the selection. Stop only when continuing
+    playback but the new area has nothing to tune to.
     Also kick off a background prefetch of feed lists for airports in range.
     """
     settings = _settings()

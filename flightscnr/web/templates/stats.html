@@ -66,10 +66,30 @@
         <thead><tr><th>Date</th><th>Flights</th><th></th><th>First</th><th>Last</th></tr></thead>
         <tbody id="log-body"></tbody>
     </table>
+    <h3>Live-Position Sources (Extended Tracking)</h3>
+    <p style="color:#888;font-size:.85rem;margin-top:-.5rem">
+        How often each source actually won the fallback race today while a
+        flight was being tracked on the live map — useful for spotting how
+        often metered sources (OpenSky, ADS-B Exchange, FR24) get used
+        instead of the free local dump1090/adsb.fi sources.
+    </p>
+    <table id="position-sources-table">
+        <thead><tr><th>Source</th><th>Calls today</th></tr></thead>
+        <tbody id="position-sources-body">
+            <tr><td colspan="2" style="color:#888">No live-tracking activity yet today.</td></tr>
+        </tbody>
+    </table>
 
     <script>
         const COLOURS = ['#ffb300','#ff6b35','#69f0ae','#ffd54f','#ff69b4','#9b59b6','#1abc9c','#e74c3c','#3498db','#f39c12','#00b894','#fd79a8'];
         const DOWS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+	const POSITION_SOURCE_LABELS = {
+            dump1090: 'Local (dump1090 / readsb)',
+            adsbfi: 'adsb.fi',
+            opensky: 'OpenSky',
+            adsbexchange: 'ADS-B Exchange',
+            fr24: 'FlightRadar24',
+        };
 
         let airportCode = '';
 
@@ -212,8 +232,50 @@
                 tbody.appendChild(tr);
             }
         }
+        async function loadPositionSourceStats() {
+            const tbody = document.getElementById('position-sources-body');
+            if (!tbody) return;
 
+            try {
+                const res = await fetch('/stats/position-sources');
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
+                }
+
+                const data = await res.json();
+                const today = data.today || {};
+
+                tbody.innerHTML = '';
+
+                const entries = Object.entries(today);
+
+                if (!entries.length) {
+                    tbody.innerHTML =
+                        '<tr><td colspan="2" style="color:#888">No live-tracking activity yet today.</td></tr>';
+                    return;
+                }
+
+                for (const [source, count] of entries) {
+                    const tr = document.createElement('tr');
+
+                    const sourceTd = document.createElement('td');
+                    sourceTd.textContent = POSITION_SOURCE_LABELS[source] || source;
+
+                    const countTd = document.createElement('td');
+                    countTd.textContent = count;
+
+                    tr.appendChild(sourceTd);
+                    tr.appendChild(countTd);
+                    tbody.appendChild(tr);
+                }
+            } catch (err) {
+                console.error('Failed to load position-source stats:', err);
+                tbody.innerHTML =
+                   '<tr><td colspan="2" style="color:#888">Could not load live-position source statistics.</td></tr>';
+            }
+        }
         document.addEventListener('DOMContentLoaded', loadAll);
+	document.addEventListener('DOMContentLoaded', loadPositionSourceStats);
     </script>
 </body>
 </html>

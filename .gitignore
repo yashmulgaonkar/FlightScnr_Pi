@@ -40,6 +40,8 @@ flightscnr/runways.json
 flightscnr/cities.json
 flightscnr/airlines.json
 flightscnr/icao_types.json
+flightscnr/faa_airports.json
+flightscnr/airport_frequencies.json
 flightscnr/close.txt
 flightscnr/farthest.txt
 flightscnr/tracked_flight.json

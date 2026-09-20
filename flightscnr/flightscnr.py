@@ -13,12 +13,19 @@ import os
 import sys
 import logging
 
-# Configure logging for systemd (no timestamps — journald adds them)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(levelname)s: %(message)s",
-    stream=sys.stdout,
-)
+# systemd / minimal locales often leave stdout as latin-1 or ascii; force UTF-8
+# so print/log lines with em dashes (—) cannot raise UnicodeEncodeError.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+# Console → journald (no timestamps — journald adds them) plus a size-capped
+# rotating file under FLIGHTSCNR_DATA_DIR/logs/ for support downloads.
+from utilities.app_logging import configure_app_logging
+
+configure_app_logging()
 logger = logging.getLogger("flightscnr")
 
 
@@ -81,20 +88,60 @@ def validate_config():
     return len(errors) == 0
 
 
+def stop_web_server(proc, timeout: float = 5.0) -> None:
+    """Stop the web-portal child on the way out.
+
+    Without this the child outlives the display loop and only dies when systemd
+    SIGKILLs the leftovers in the cgroup.
+    """
+    if proc is None or proc.poll() is not None:
+        return
+    logger.info("Stopping web portal (pid %d)", proc.pid)
+    proc.terminate()
+    try:
+        proc.wait(timeout=timeout)
+        return
+    except subprocess.TimeoutExpired:
+        logger.warning("Web portal ignored SIGTERM after %.0fs — killing", timeout)
+    proc.kill()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        logger.error("Web portal (pid %d) survived SIGKILL", proc.pid)
+
+
 if __name__ == "__main__":
+    # SDL reads WM_CLASS at init time — before any pygame import in the tree.
+    from utilities.kiosk_env import apply_sdl_kiosk_env
+
+    apply_sdl_kiosk_env()
+
     # Get directory of this script (flightscnr.py)
     base_dir = os.path.dirname(os.path.abspath(__file__))
 
     # Validate configuration before starting
     validate_config()
 
+    try:
+        from utilities.device_info import log_startup_device_info
+
+        log_startup_device_info()
+    except Exception:
+        logger.debug("Startup device info failed", exc_info=True)
+
     # Build path to web/app.py
     app_path = os.path.join(base_dir, "web", "app.py")
 
     # Start Flask server in background (use same interpreter as this process)
-    subprocess.Popen([sys.executable, app_path])
+    logger.info("Starting web portal")
+    web_server = subprocess.Popen([sys.executable, app_path])
 
     # Start round touch display loop
     from display import Display
     display = Display()
-    display.run()
+    try:
+        logger.info("Starting display loop")
+        display.run()
+    finally:
+        logger.info("Display loop ended — shutting down web portal")
+        stop_web_server(web_server)

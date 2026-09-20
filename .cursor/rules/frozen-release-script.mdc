@@ -1,0 +1,27 @@
+---
+description: scripts/release.sh is frozen — never modify it in any way
+alwaysApply: true
+---
+
+# scripts/release.sh is FROZEN — do not touch
+
+`scripts/release.sh` must remain byte-for-byte identical to its 2026.8.5.5
+state, forever. Do NOT:
+
+- edit its contents (not even comments or whitespace)
+- rename, move, or delete it
+- change its file mode (no chmod), ownership, or line endings
+- add it to any chmod/format/lint sweep, refactor, or codemod
+
+## Why
+
+Fleet devices running pre-2026.8.7 builds have this exact path mode-dirty
+(an old `fix_repo_permissions` chmod bug) and have no blocker-clearing code.
+Any upstream change to this path makes their `git pull --ff-only` OTA abort,
+stranding them on old versions permanently.
+
+## What to do instead
+
+- Release tooling lives in `scripts/dev-release.sh` — make changes there.
+- If a task seems to require changing `scripts/release.sh`, stop and ask the
+  user; do not proceed on your own.

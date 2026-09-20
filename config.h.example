@@ -6,7 +6,7 @@
 // Edit config.h with any text editor, save, then restart:
 //   sudo systemctl restart flightscnr
 //
-// You can also set keys from the web portal at http://raspberrypi.local
+// You can also set keys from the web portal at http://<hostname>.local
 // (saved to /var/lib/flightscnr/secrets.json).
 //
 // Priority (highest wins): /etc/flightscnr.env → web portal → config.h
@@ -23,7 +23,7 @@ TOMORROW_API_KEY =
 // AIRLABS_API_KEY =
 // Optional FlightAware AeroAPI key (route fallback only — not live radar)
 // FLIGHTAWARE_API_KEY =
-// Optional local dump1090/readsb aircraft.json feed
+// Optional local dump1090/readsb aircraft.json feed (off by default)
 // DUMP1090_ENABLED = False
 // DUMP1090_URL = http://127.0.0.1:8080/data/aircraft.json
 
@@ -40,6 +40,17 @@ HOME_LON = -122.372035
 
 // Flight detail: airline logo when no planespotters photo (True/False)
 SHOW_AIRLINE_LOGOS = False
+
+// Radar target tag size: multiplier from 0.5 to 2.0 (1.0 = default).
+// Scales the callsign/type/altitude text and the tag block around it, so
+// smaller tags really do take less room. Range-ring labels are unaffected.
+// Anything outside the range logs a warning and falls back to 1.0.
+RADAR_TAG_FONT_SCALE = 1.0
+
+// Aircraft beyond the radar range, pinned to the rim: dot | plane
+// plane = the aircraft icon, pointing along its track (default)
+// dot   = small half-round blip flat against the display edge
+RADAR_RIM_STYLE = plane
 
 // AIS vessel radar declutter
 // One-line name only (no type/speed); never label with MMSI

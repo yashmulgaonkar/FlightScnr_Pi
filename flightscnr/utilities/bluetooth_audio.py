@@ -188,11 +188,56 @@ def _run_as_audio_user(
         )
 
 
+def _rfkill_unblock_bluetooth() -> None:
+    """Clear soft rfkill blocks so ``bluetoothctl power on`` can succeed."""
+    if not shutil.which("rfkill"):
+        return
+    try:
+        subprocess.run(
+            ["rfkill", "unblock", "bluetooth"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5.0,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        logger.debug("rfkill unblock bluetooth failed", exc_info=True)
+
+
+def _ensure_bluetooth_service() -> None:
+    """Start ``bluetooth.service`` when inactive (fresh images / after rfkill)."""
+    if not shutil.which("systemctl"):
+        return
+    try:
+        active = subprocess.run(
+            ["systemctl", "is-active", "--quiet", "bluetooth.service"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5.0,
+            check=False,
+        )
+        if active.returncode == 0:
+            return
+        subprocess.run(
+            ["systemctl", "start", "bluetooth.service"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15.0,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        logger.debug("Could not start bluetooth.service", exc_info=True)
+
+
 def ensure_adapter_powered() -> bool:
     """Power on the Bluetooth adapter when possible."""
     if not available():
         _set_error("bluetoothctl not installed (sudo apt install bluez)")
         return False
+    # Fresh Pi OS images often soft-block BT (rfkill) or leave bluetoothd down;
+    # ``power on`` alone fails with "Adapter off" until those are cleared.
+    _rfkill_unblock_bluetooth()
+    _ensure_bluetooth_service()
     # Keep a silent BlueZ pair agent so desktop UIs don't pop confirmation
     # dialogs that steal focus from the fullscreen FlightScnr display.
     ensure_pair_agent()
@@ -206,7 +251,9 @@ def ensure_adapter_powered() -> bool:
     text = (info.stdout or "") + (info.stderr or "")
     if "Powered: yes" in text:
         return True
-    # Retry once.
+    # Service / rfkill can take a moment after start; retry once.
+    time.sleep(0.8)
+    _rfkill_unblock_bluetooth()
     _bluetoothctl("power", "on", timeout=8.0)
     info = _bluetoothctl("show", timeout=8.0)
     text = (info.stdout or "") + (info.stderr or "")

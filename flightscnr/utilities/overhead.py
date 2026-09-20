@@ -22,6 +22,7 @@ from utilities.airline_branding import (
     IATA_TO_ICAO,
     MARKETING_BRANDS,
     marketing_brand_name,
+    prefer_marketing_flight_id,
     resolve_logo_icao,
 )
 from utilities.fr24_client import FR24Client, LiveFlight
@@ -156,6 +157,8 @@ os.makedirs(DATA_DIR, exist_ok=True)
 LOG_FILE = os.path.join(DATA_DIR, "close.txt")
 LOG_FILE_FARTHEST = os.path.join(DATA_DIR, "farthest.txt")
 TRACKED_FILE = os.path.join(DATA_DIR, "tracked_flight.json")
+# Shown once on the kiosk after auto-clearing a vanished Follow / Tracked flight.
+TRACKING_CLEARED_NOTICE = "Flight no longer available."
 COUNTER_FILE = os.path.join(DATA_DIR, "flight_counter.json")
 MAPS_DIR = os.path.join(DATA_DIR, "maps")
 os.makedirs(MAPS_DIR, exist_ok=True)
@@ -403,13 +406,32 @@ def _enrich_entry_from_zone_feed(entry: dict, lf: LiveFlight, stats: dict | None
         enriched = True
 
     plane = (lf.aircraft_code or "").strip()
-    if plane and not (entry.get("plane") or "").strip():
+    existing_plane = (entry.get("plane") or "").strip()
+    if plane and plane.upper() != existing_plane.upper():
+        # FR24 live type wins over dump1090/adsb.fi ``t`` (hex DB is often stale —
+        # EVA007 B789 was showing as DH8C / Dash 8 from local aircraft.csv).
         entry["plane"] = plane
         enriched = True
 
+    # IATA marketing number from live-feed extra_info.flight (AS3490 vs SKW3490).
+    marketing = (getattr(lf, "number", "") or "").strip().upper()
+    if marketing and not (entry.get("flight_number") or entry.get("number") or "").strip():
+        entry["flight_number"] = marketing
+        entry["number"] = marketing
+        enriched = True
+    elif marketing:
+        if not (entry.get("flight_number") or "").strip():
+            entry["flight_number"] = marketing
+            enriched = True
+        if not (entry.get("number") or "").strip():
+            entry["number"] = marketing
+            enriched = True
+
     callsign = (entry.get("callsign") or lf.callsign or "").strip()
+    flight_number = (entry.get("flight_number") or entry.get("number") or marketing or "").strip()
     airline_icao = resolve_logo_icao(
         operator_icao=lf.airline_icao or "",
+        flight_number=flight_number,
         callsign=callsign,
     )
     owner_icao = airline_icao or entry.get("owner_icao") or ""
@@ -423,7 +445,7 @@ def _enrich_entry_from_zone_feed(entry: dict, lf: LiveFlight, stats: dict | None
         enriched = True
 
     if not (entry.get("airline") or "").strip():
-        brand = marketing_brand_name(callsign)
+        brand = marketing_brand_name(flight_number) or marketing_brand_name(callsign)
         if brand:
             entry["airline"] = brand
             enriched = True
@@ -580,8 +602,9 @@ def _log_route_audit(callsign, aircraft_type, distance, source, origin, destinat
     route_str = f"{origin or '?'}->{destination or '?'}"
     line = f"{ts} [{HOSTNAME}] {callsign} {aircraft_type} {distance:.1f} {source} {route_str}\n"
     try:
-        with open(ROUTE_AUDIT_LOG, "a", encoding="utf-8") as f:
-            f.write(line)
+        from utilities.log_util import ROUTE_AUDIT_MAX_BYTES, append_capped
+
+        append_capped(ROUTE_AUDIT_LOG, line, max_bytes=ROUTE_AUDIT_MAX_BYTES)
     except Exception:
         pass
 
@@ -614,6 +637,25 @@ def load_tracked_callsign():
     return _tracked_cache["value"]
 
 
+def set_tracked_callsign(callsign: str) -> None:
+    """Write tracked_flight.json (same file the portal writes) and reset
+    the mtime cache so the change is visible immediately."""
+    cs = (callsign or "").strip().upper()[:12]
+    try:
+        with open(TRACKED_FILE, "w", encoding="utf-8") as f:
+            json.dump({"callsign": cs}, f)
+        try:
+            os.chmod(TRACKED_FILE, 0o666)
+        except OSError:
+            pass
+    except OSError:
+        logging.getLogger("flightscnr").warning(
+            "Could not write tracked flight file", exc_info=True
+        )
+        return
+    _tracked_cache.update({"at": 0.0, "mtime": None, "value": cs})
+
+
 def _load_counter_log() -> dict:
     try:
         with open(COUNTER_FILE, "r", encoding="utf-8") as f:
@@ -628,13 +670,23 @@ def _save_counter_log(data: dict) -> None:
         from config import STATS_LOG_DAYS as max_days
     except (ImportError, AttributeError):
         max_days = 0
-    if max_days and max_days > 0:
+    # 0 meant "keep forever", which is how the log reached 625 KB and started
+    # stalling the display loop on every write. Fall back to a bounded window.
+    if not max_days or max_days <= 0:
+        max_days = _COUNTER_DEFAULT_DAYS
+    if max_days > 0:
         from datetime import date, timedelta
         cutoff = str(date.today() - timedelta(days=max_days))
         data = {k: v for k, v in data.items() if k >= cutoff}
     try:
-        with open(COUNTER_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        # Compact, and written to a temp file first. This runs on the display
+        # thread: the file reached 625 KB after three days of sightings, and
+        # re-encoding it pretty-printed stalled the loop long enough to break
+        # swipe detection outright.
+        tmp = COUNTER_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, separators=(",", ":"))
+        os.replace(tmp, COUNTER_FILE)
     except OSError as e:
         logger.warning(f"Could not save flight counter: {e}")
 
@@ -661,11 +713,28 @@ def _counter_ensure_loaded() -> dict:
     return _counter_cache
 
 
-def flush_flight_counter() -> None:
-    """Persist the in-memory flight counter if it changed."""
-    global _counter_dirty
+# Days of sightings to keep. Unbounded growth is what made each write
+# expensive enough to stall the display loop.
+_COUNTER_DEFAULT_DAYS = 7
+# Never re-encode the whole log more often than this. A busy sky marks it
+# dirty many times a minute, and each write costs the same regardless.
+_COUNTER_FLUSH_MIN_S = 60.0
+_counter_last_flush = 0.0
+
+
+def flush_flight_counter(force: bool = False) -> None:
+    """Persist the in-memory flight counter if it changed.
+
+    Coalesced: the whole log is rewritten on every flush, so a burst of new
+    callsigns used to mean a burst of full-file writes on the display thread.
+    """
+    global _counter_dirty, _counter_last_flush
     if not _counter_dirty or _counter_cache is None:
         return
+    now = time()
+    if not force and (now - _counter_last_flush) < _COUNTER_FLUSH_MIN_S:
+        return
+    _counter_last_flush = now
     _save_counter_log(_counter_cache)
     _counter_dirty = False
 
@@ -824,7 +893,8 @@ class Overhead:
     def __init__(self):
         self._api = FR24Client()
         self._lock = Lock()
-        self._data = []           # overhead flights
+        self._data = []           # overhead flights (altitude-filtered for radar)
+        self._data_all = []       # same cycle, before altitude floor (flip board)
         self._tracked_data = None # tracked flight or None
         self._new_data = False
         self._processing = False
@@ -833,12 +903,17 @@ class Overhead:
         self._tracked_miss_count = 0         # consecutive polls with no result
         self._TRACKED_MISS_THRESHOLD = 3     # fallback miss threshold (no ETA)
         # Full FR24 find+details every DATA_REFRESH (~2s) starved radar prewarm;
-        # reuse last-good live data between polls.
+        # reuse last-good live data between polls. Tracked / Radar keep the
+        # slower cadence; Follow asks for a tighter LiveFeed pin poll.
         self._TRACKED_POLL_MIN_S = 9.0
+        self._FOLLOW_POLL_MIN_S = 2.0
+        self._follow_pin_poll = False
         self._tracked_last_callsign = ""     # last callsign we polled for
         self._tracked_last_eta = None        # last known estimated arrival (unix ts)
         self._tracked_last_data = None       # last known good tracked data
         self._tracked_schedule_cache = {}    # callsign -> AirLabs schedule result (or None)
+        # One-shot message for the UI after auto-clear (Follow / Tracked popup).
+        self._tracking_cleared_notice: str | None = None
         self._first_flight_logged = False    # log first flight details as JSON
         self._cycle_count = 0               # total grab_data cycles
         self._total_flights_seen = 0        # lifetime flight count
@@ -1036,22 +1111,26 @@ class Overhead:
                             retries -= 1
                             continue
 
-                        # Log first flight details as pretty JSON for debugging
                         if not self._first_flight_logged:
                             self._first_flight_logged = True
-                            logger.info(
-                                "First flight API response:\n%s",
-                                json.dumps(d, indent=2, default=str),
+                            logger.debug(
+                                "First flight details keys: %s",
+                                sorted(d.keys()) if isinstance(d, dict) else type(d),
                             )
 
                         # Aircraft type from details, fallback to live feed
                         plane = self.safe_get(d, "aircraft", "model", "code", default="") or f.aircraft_code or ""
 
                         # Airline name: try local database first, then FR24's registered_owners
-                        flight_number = self.safe_get(d, "schedule_info", "flight_number", default="")
+                        # Prefer IATA marketing number (live-feed extra_info.flight / schedule).
+                        callsign = f.callsign or ""
+                        flight_number = prefer_marketing_flight_id(
+                            schedule_number=self.safe_get(d, "schedule_info", "flight_number", default=""),
+                            live_number=(getattr(f, "number", "") or "").strip(),
+                            callsign=callsign,
+                        )
                         airline_name = self.safe_get(d, "aircraft_info", "registered_owners", default="")
 
-                        callsign = f.callsign or ""
                         airline_icao = resolve_logo_icao(
                             operator_icao=f.airline_icao or "",
                             flight_number=flight_number,
@@ -1174,6 +1253,7 @@ class Overhead:
                             "airline": airline_name,
                             "plane": plane,
                             "flight_number": flight_number,
+                            "number": flight_number,
                             "origin": origin,
                             "origin_latitude": origin_lat,
                             "origin_longitude": origin_lon,
@@ -1273,6 +1353,21 @@ class Overhead:
                     dump_on = DUMP1090_ENABLED
             use_adsb_cloud = adsb_on and location_configured()
             use_dump1090 = dump_on and location_configured()
+            if not use_dump1090:
+                try:
+                    from utilities.dump1090_client import write_radar_status
+
+                    write_radar_status(
+                        enabled=bool(dump_on),
+                        ok=None,
+                        raw=0,
+                        added=0,
+                        updated=0,
+                        error="" if dump_on else "disabled",
+                        url=dump_url or "",
+                    )
+                except Exception:
+                    pass
             if use_adsb_cloud or use_dump1090:
                 from display.round_touch import scale, settings
 
@@ -1289,16 +1384,30 @@ class Overhead:
                         )
                     )
                 dump_entries: list[dict] = []
+                dump_fetch_ok: bool | None = None
+                dump_fetch_error = ""
                 if use_dump1090:
-                    from utilities.dump1090_client import fetch_aircraft_entries as fetch_dump1090
-
-                    dump_entries = fetch_dump1090(
-                        LOCATION_DEFAULT[0],
-                        LOCATION_DEFAULT[1],
-                        search_radius_nm,
-                        MIN_ALTITUDE,
-                        url=dump_url,
+                    from utilities.dump1090_client import (
+                        feed_backoff_active,
+                        fetch_aircraft_entries as fetch_dump1090,
                     )
+
+                    try:
+                        dump_entries = fetch_dump1090(
+                            LOCATION_DEFAULT[0],
+                            LOCATION_DEFAULT[1],
+                            search_radius_nm,
+                            MIN_ALTITUDE,
+                            url=dump_url,
+                        )
+                        dump_fetch_ok = not feed_backoff_active()
+                        if not dump_fetch_ok:
+                            dump_fetch_error = "feed unreachable or invalid (using cache)"
+                    except Exception as exc:
+                        dump_fetch_ok = False
+                        dump_fetch_error = str(exc)[:240]
+                        dump_entries = []
+                        logger.warning("dump1090 fetch raised: %s", exc)
                     stats["dump1090_raw"] = len(dump_entries)
                 else:
                     stats["dump1090_raw"] = 0
@@ -1465,6 +1574,7 @@ class Overhead:
                                         target["registration"] = cs
                             # Prefer local dump1090 tag when it refreshed kinematics.
                             if entry.get("data_source") == "dump1090":
+                                target["local_adsb"] = True
                                 src = (target.get("data_source") or "")
                                 if src.startswith("adsb") or src == "adsb_fi":
                                     target["data_source"] = "dump1090"
@@ -1476,6 +1586,8 @@ class Overhead:
                             )
                             _gil_yield(_i)
                             continue
+                        if entry.get("data_source") == "dump1090":
+                            entry["local_adsb"] = True
                         _maybe_feed_enrich(entry)
                         overhead_data.append(entry)
                         stats[f"{stat_prefix}_added"] = (
@@ -1501,6 +1613,22 @@ class Overhead:
                 _merge_position_entries(adsb_entries, stat_prefix="adsb")
                 _merge_position_entries(dump_entries, stat_prefix="dump1090")
 
+                if use_dump1090:
+                    try:
+                        from utilities.dump1090_client import write_radar_status
+
+                        write_radar_status(
+                            enabled=True,
+                            ok=dump_fetch_ok,
+                            raw=int(stats.get("dump1090_raw") or 0),
+                            added=int(stats.get("dump1090_added") or 0),
+                            updated=int(stats.get("dump1090_updated") or 0),
+                            error=dump_fetch_error,
+                            url=dump_url or "",
+                        )
+                    except Exception:
+                        logger.debug("dump1090 radar status write failed", exc_info=True)
+
                 apply_adsb_alert_fields(overhead_data, adsb_entries + dump_entries)
                 _t_dedupe = time()
                 overhead_data = dedupe_flights(overhead_data)
@@ -1518,7 +1646,9 @@ class Overhead:
                         continue
                     _enrich_entry_ga_type(entry, stats)
 
-            # --- STEP 2: Tracked flight (always check; display shows it when clock is up) ---
+            # --- STEP 2: Tracked flight (sole FR24 owner for the pin) ---
+            # Tracked / Follow / Radar all consume ``tracked_data`` from here.
+            # Follow must not open a parallel LiveFeed for the same callsign.
             tracked_callsign = load_tracked_callsign()
             if tracked_callsign:
                 stats["tracked_callsign"] = tracked_callsign
@@ -1579,6 +1709,7 @@ class Overhead:
                             if sched:
                                 self._tracked_schedule_cache[tracked_callsign] = sched
                         if sched:
+                            self._tracked_miss_count = 0
                             sched_cs = tracked_callsign
                             if len(sched_cs) >= 3 and sched_cs[:2] in IATA_TO_ICAO and sched_cs[2:3].isdigit():
                                 icao_pfx = IATA_TO_ICAO.get(sched_cs[:2])
@@ -1625,6 +1756,12 @@ class Overhead:
                                 "dest_lat": dest_coords.get("lat") or 0,
                                 "dest_lon": dest_coords.get("lon") or 0,
                             }
+                        else:
+                            # Never located on FR24 and no schedule — stop
+                            # hammering LiveFeed (esp. Follow bypass_cache).
+                            self._tracked_miss_count += 1
+                            if self._tracked_miss_count >= self._TRACKED_MISS_THRESHOLD:
+                                self._do_auto_wipe()
 
             # Keep schedule cache even after flight goes live — arr_time_utc
             # is used as reality check to prevent premature auto-wipe when
@@ -1643,7 +1780,14 @@ class Overhead:
             else:
                 stats["tracked_status"] = ""
 
-            # Drop anything below MIN_HEIGHT before display / web UI
+            # Snapshot before MIN_HEIGHT so the flip board can observe
+            # approaches that radar declutter would hide. Aircraft only —
+            # vessels never come through this list.
+            overhead_data_all = [
+                e for e in overhead_data if e.get("kind") != "vessel"
+            ]
+
+            # Drop anything below MIN_HEIGHT before radar display / web UI
             try:
                 from config import passes_altitude_filter
                 before = len(overhead_data)
@@ -1668,6 +1812,7 @@ class Overhead:
 
             with self._lock:
                 self._data = overhead_data
+                self._data_all = overhead_data_all
                 self._tracked_data = tracked_data
                 self._new_data = True
 
@@ -1676,6 +1821,7 @@ class Overhead:
             flush_flight_counter()
             with self._lock:
                 self._data = []
+                self._data_all = []
                 self._tracked_data = None
                 self._new_data = True
         except Exception as e:
@@ -1683,6 +1829,7 @@ class Overhead:
             flush_flight_counter()
             with self._lock:
                 self._data = []
+                self._data_all = []
                 self._tracked_data = None
                 self._new_data = True
         finally:
@@ -1696,7 +1843,7 @@ class Overhead:
             with open(TRACKED_FILE, "w", encoding="utf-8") as f:
                 json.dump({"callsign": ""}, f)
             _tracked_cache["at"] = 0.0
-            print("Tracked flight ended — auto-cleared.")
+            print("Tracked flight ended - auto-cleared.")
         except Exception as e:
             print(f"Failed to auto-clear tracked flight: {e}")
         self._tracked_was_live = False
@@ -1705,6 +1852,16 @@ class Overhead:
         self._tracked_last_data = None
         self._tracked_last_callsign = ""
         self._tracked_schedule_cache.clear()
+        with self._lock:
+            self._tracked_data = None
+            self._tracking_cleared_notice = TRACKING_CLEARED_NOTICE
+
+    def take_tracking_cleared_notice(self) -> str | None:
+        """Return and clear the one-shot auto-clear popup message, if any."""
+        with self._lock:
+            notice = self._tracking_cleared_notice
+            self._tracking_cleared_notice = None
+            return notice
 
     def _grab_tracked(self, flight_input, zone_flights=None):
         from utilities.aircraft_alert import looks_like_registration
@@ -1725,25 +1882,49 @@ class Overhead:
             # Reuse recent live tracked data so every DATA_REFRESH does not pay
             # for another find_by_callsign + FlightDetails round-trip (~1–2s).
             # Callsign changes clear _tracked_last_data before we get here.
+            # Follow uses a shorter min so the map/details keep up with the pin.
+            poll_min = (
+                self._FOLLOW_POLL_MIN_S
+                if self._follow_pin_poll
+                else self._TRACKED_POLL_MIN_S
+            )
             last = self._tracked_last_data
             if last and last.get("is_live"):
                 try:
                     age = time() - float(last.get("last_seen_ts") or 0)
                 except (TypeError, ValueError):
-                    age = self._TRACKED_POLL_MIN_S
-                if 0 <= age < self._TRACKED_POLL_MIN_S:
+                    age = poll_min
+                if 0 <= age < poll_min:
                     return dict(last)
 
             # Prefer registration filter for tail numbers; callsign otherwise.
             # Zone feed cache can be ~90s stale — still poll FR24, just less often.
+            # Follow bypasses the short callsign-lookup cache so a 2s pin poll
+            # does not reuse a stale LiveFlight from the prior hit.
+            fresh = bool(self._follow_pin_poll)
             if looks_like_registration(original):
                 match = self._api.find_by_registration(original)
                 if not match:
-                    match = self._api.find_by_callsign(flight_input)
+                    match = self._api.find_by_callsign(
+                        flight_input, bypass_cache=fresh
+                    )
             else:
-                match = self._api.find_by_callsign(flight_input)
+                match = self._api.find_by_callsign(
+                    flight_input, bypass_cache=fresh
+                )
                 if not match:
-                    match = self._api.find_by_registration(original)
+                    # Never treat an airline callsign as a tail number — that
+                    # spammed LiveFeed with SWA3755/S-WA3755/… variants and
+                    # stalled Follow updates for many seconds.
+                    last_reg = ""
+                    try:
+                        last_reg = str(
+                            (self._tracked_last_data or {}).get("registration") or ""
+                        ).strip()
+                    except Exception:
+                        last_reg = ""
+                    if looks_like_registration(last_reg):
+                        match = self._api.find_by_registration(last_reg)
 
             if not match:
                 return None
@@ -1846,10 +2027,10 @@ class Overhead:
                     airline_name=airline_name,
                 )
 
-            flight_number = (
-                match.number
-                or self.safe_get(flight_details, "schedule_info", "flight_number", default="")
-                or ""
+            flight_number = prefer_marketing_flight_id(
+                schedule_number=self.safe_get(flight_details, "schedule_info", "flight_number", default=""),
+                live_number=match.number or "",
+                callsign=display_callsign,
             )
             airline_icao = resolve_logo_icao(
                 operator_icao=match.airline_icao or "",
@@ -1940,6 +2121,11 @@ class Overhead:
         with self._lock:
             return list(self._data)
 
+    def peek_data_unfiltered(self):
+        """Aircraft snapshot before MIN_HEIGHT — for flip board observation."""
+        with self._lock:
+            return list(self._data_all)
+
     @property
     def grab_seq(self):
         with self._lock:
@@ -1949,6 +2135,20 @@ class Overhead:
     def tracked_data(self):
         with self._lock:
             return self._tracked_data
+
+    def set_follow_pin_polling(self, enabled: bool) -> None:
+        """Tighten pin LiveFeed polls while Follow is on screen (~2s vs ~9s)."""
+        enabled = bool(enabled)
+        with self._lock:
+            was = self._follow_pin_poll
+            self._follow_pin_poll = enabled
+            if enabled and not was and self._tracked_last_data:
+                # Force the next grab to refresh instead of serving the 9s cache.
+                try:
+                    self._tracked_last_data = dict(self._tracked_last_data)
+                    self._tracked_last_data["last_seen_ts"] = 0.0
+                except Exception:
+                    self._tracked_last_data = None
 
     @property
     def data_is_empty(self):

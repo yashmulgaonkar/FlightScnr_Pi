@@ -15,6 +15,8 @@ Delta DAL). Logos should follow the ticketed airline, not the operating callsign
 
 from __future__ import annotations
 
+import time
+
 # Operators that fly for multiple marketing brands.
 AMBIGUOUS_REGIONALS = {
     "RPA", "SKW", "ENY", "JIA", "EDV", "GJS", "CPZ", "ASQ", "PDT", "JZA",
@@ -40,9 +42,22 @@ MARKETING_BRANDS = {
     "EI": "Aer Lingus",
     "AY": "Finnair",
     "AC": "Air Canada",
+    "EK": "Emirates",
+    "EY": "Etihad Airways",
+    "QR": "Qatar Airways",
+    "SQ": "Singapore Airlines",
+    "CX": "Cathay Pacific",
+    "QF": "Qantas",
+    "NH": "ANA",
+    "JL": "Japan Airlines",
+    "TK": "Turkish Airlines",
+    "LX": "SWISS",
+    "OS": "Austrian",
+    "TP": "TAP Air Portugal",
+    "VS": "Virgin Atlantic",
 }
 
-# Marketing IATA prefix → ICAO code (logo filename)
+# Marketing IATA prefix → ICAO code (logo filename / callsign alias)
 IATA_TO_ICAO = {
     "AA": "AAL",
     "UA": "UAL",
@@ -62,7 +77,22 @@ IATA_TO_ICAO = {
     "AY": "FIN",
     "AC": "ACA",
     "QR": "QTR",
+    "EK": "UAE",
+    "EY": "ETD",
+    "SQ": "SIA",
+    "CX": "CPA",
+    "QF": "QFA",
+    "NH": "ANA",
+    "JL": "JAL",
+    "TK": "THY",
+    "LX": "SWR",
+    "OS": "AUA",
+    "TP": "TAP",
+    "VS": "VIR",
 }
+
+# ICAO airline prefix → passenger-facing IATA (UAL5510 → UA5510)
+ICAO_TO_IATA = {icao: iata for iata, icao in IATA_TO_ICAO.items()}
 
 
 def _normalize(code: str) -> str:
@@ -102,6 +132,43 @@ def marketing_brand_name(flight_id: str) -> str:
     return ""
 
 
+def _to_iata_flight_id(flight_id: str) -> str:
+    """Rewrite known ICAO airline prefixes to IATA (UAL5510 → UA5510).
+
+    Ambiguous regionals (SKW, RPA, …) and unknown prefixes are left unchanged.
+    """
+    fid = _normalize(flight_id)
+    if not fid or fid == "—":
+        return fid
+    if _iata_prefix(fid):
+        return fid
+    icao = _icao_prefix(fid)
+    if icao and icao in ICAO_TO_IATA:
+        return ICAO_TO_IATA[icao] + fid[3:]
+    return fid
+
+
+def prefer_marketing_flight_id(
+    *,
+    schedule_number: str = "",
+    live_number: str = "",
+    callsign: str = "",
+) -> str:
+    """Pick passenger-facing IATA number over ATC/operator callsign.
+
+    FR24 live feed ``extra_info.flight`` is often AS3490 while callsign/schedule
+    may still be SKW3490.
+    """
+    sched = _normalize(schedule_number)
+    live = _normalize(live_number)
+    cs = _normalize(callsign)
+    if live and _iata_prefix(live):
+        sched_op = _icao_prefix(sched) if sched else None
+        if not sched or sched == cs or sched_op in AMBIGUOUS_REGIONALS:
+            return live
+    return sched or live or ""
+
+
 def display_flight_id(
     *,
     flight_number: str = "",
@@ -110,13 +177,21 @@ def display_flight_id(
     """Return the passenger-facing flight ID (e.g. UA5796), not the operator callsign (SKW5796)."""
     fn = _normalize(flight_number)
     cs = _normalize(callsign)
+    chosen = ""
     if fn:
         operator = _icao_prefix(cs) if cs else None
         if operator in AMBIGUOUS_REGIONALS:
-            return fn
-        if fn != cs and (_iata_prefix(fn) or _marketing_icao_from_flight_id(fn)):
-            return fn
-    return cs or fn or "—"
+            chosen = fn
+        elif fn != cs and (_iata_prefix(fn) or _marketing_icao_from_flight_id(fn)):
+            chosen = fn
+        else:
+            # Prefer schedule/flight number when present (UAL1684 → UA1684 below).
+            chosen = fn
+    if not chosen:
+        chosen = cs or fn or "—"
+    if chosen == "—":
+        return "—"
+    return _to_iata_flight_id(chosen)
 
 
 def display_flight_id_for_flight(flight: dict) -> str:
@@ -124,6 +199,69 @@ def display_flight_id_for_flight(flight: dict) -> str:
         flight_number=flight.get("flight_number") or flight.get("number") or "",
         callsign=flight.get("callsign") or flight.get("registration") or "",
     )
+
+
+def raw_callsign_for_flight(flight: dict) -> str:
+    """ATC / ADS-B callsign as transmitted (e.g. SKW5796), not marketing IATA."""
+    cs = _normalize(flight.get("callsign") or "")
+    if cs:
+        return cs
+    return _normalize(flight.get("registration") or "")
+
+
+def raw_tail_for_flight(flight: dict) -> str:
+    """Aircraft registration / tail number (e.g. N12345), empty when unknown."""
+    return _normalize(flight.get("registration") or "")
+
+
+def aircraft_tag_identity(
+    flight: dict,
+    *,
+    mode: str = "flight_number",
+    now: float | None = None,
+    alternate_s: float = 2.5,
+) -> str:
+    """Identity string for the radar aircraft tag top line.
+
+    Modes:
+      flight_number — passenger-facing ID (UA5796)
+      callsign — ATC/ADS-B callsign (SKW5796 / UAL34)
+      tail — registration / N-number when known
+      alternate (legacy: both) — time-cycle unique flight / callsign / tail
+    """
+    flight_disp = display_flight_id_for_flight(flight)
+    callsign_disp = raw_callsign_for_flight(flight) or "—"
+    tail_disp = raw_tail_for_flight(flight)
+    if not flight_disp or flight_disp == "—":
+        flight_disp = callsign_disp
+
+    raw_mode = str(mode or "flight_number").strip().lower()
+    if raw_mode == "both":
+        raw_mode = "alternate"
+
+    if raw_mode == "callsign":
+        return callsign_disp if callsign_disp and callsign_disp != "—" else flight_disp
+    if raw_mode == "tail":
+        if tail_disp and tail_disp != "—":
+            return tail_disp
+        if callsign_disp and callsign_disp != "—":
+            return callsign_disp
+        return flight_disp if flight_disp and flight_disp != "—" else "—"
+    if raw_mode == "alternate":
+        cycle: list[str] = []
+        for value in (flight_disp, callsign_disp, tail_disp):
+            if not value or value == "—":
+                continue
+            if value not in cycle:
+                cycle.append(value)
+        if not cycle:
+            return "—"
+        if len(cycle) == 1:
+            return cycle[0]
+        t = time.time() if now is None else float(now)
+        period = float(alternate_s) if alternate_s and alternate_s > 0 else 2.5
+        return cycle[int(t / period) % len(cycle)]
+    return flight_disp
 
 
 def resolve_logo_icao(

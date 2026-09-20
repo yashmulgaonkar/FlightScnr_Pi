@@ -32,10 +32,11 @@ CACHE_FILE  = os.path.join(BASE_DIR, "airports.json")
 CSV_URL     = "https://raw.githubusercontent.com/datasets/airport-codes/master/data/airport-codes.csv"
 
 # Cache version — increment to force rebuild (e.g. when coordinate parsing changes)
+# v5: persist official facility name (CSV ``name``) alongside municipality
 # v4: persist OurAirports ``type`` for radar major-airport filtering
 # v3: store municipality name for route labels
 # v2: confirmed coordinates field is "latitude, longitude" order
-CACHE_VERSION = 4
+CACHE_VERSION = 6   # 6: field elevation_ft, needed for height above field
 
 # Types drawn on the radar when "show airports" is on (no labels / no runways).
 # Include small public fields — many GA strips are tagged small_airport but still
@@ -43,6 +44,21 @@ CACHE_VERSION = 4
 RADAR_AIRPORT_TYPES = frozenset(
     {"large_airport", "medium_airport", "small_airport"}
 )
+
+# Portal / on-device "minimum airport size" tiers. ``small_paved`` uses the
+# same types as ``small`` plus a paved-runway check in iter_airports_near.
+AIRPORT_SIZE_TIERS = {
+    "large": frozenset({"large_airport"}),
+    "medium": frozenset({"large_airport", "medium_airport"}),
+    "small_paved": RADAR_AIRPORT_TYPES,
+    "small": RADAR_AIRPORT_TYPES,
+}
+
+
+def types_for_min_size(size: str) -> frozenset:
+    return AIRPORT_SIZE_TIERS.get(
+        str(size or "").strip().lower(), RADAR_AIRPORT_TYPES
+    )
 
 # In-memory lookup: both IATA and ICAO -> {lat, lon, name?, type?}
 _db = {}
@@ -66,10 +82,23 @@ def _record_from_row(row: dict) -> dict | None:
     rec: dict = {"lat": lat, "lon": lon}
     municipality = (row.get("municipality") or "").strip()
     if municipality:
+        # Kept as ``name`` for route labels (e.g. "SFO, San Francisco").
         rec["name"] = municipality
+    facility = (row.get("name") or "").strip()
+    if facility:
+        # Official airport / airfield title (e.g. "Moffett Federal Airfield").
+        rec["facility"] = facility
     atype = (row.get("type") or "").strip().lower()
     if atype:
         rec["type"] = atype
+    # Field elevation, when the source row has it. Used by the arrival /
+    # departure board to turn altitudes into height above the field. Absent
+    # from caches built before this was parsed — callers skip the field
+    # rather than treating missing elevation as sea level.
+    try:
+        rec["elevation_ft"] = int(float(row["elevation_ft"]))
+    except (KeyError, TypeError, ValueError):
+        pass
     return rec
 
 
@@ -94,9 +123,20 @@ def build_db_from_csv_text(text: str) -> dict:
     return db
 
 
+def _safe_print(msg: str) -> None:
+    """Print without letting a latin-1 stdout abort airport loading."""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        try:
+            print(msg.encode("ascii", "replace").decode("ascii"))
+        except Exception:
+            pass
+
+
 def _download_and_build():
     """Download CSV and build IATA/ICAO -> coords lookup."""
-    print("[Airports] Downloading airport database...")
+    _safe_print("[Airports] Downloading airport database...")
     try:
         r = requests.get(CSV_URL, timeout=30)
         r.raise_for_status()
@@ -104,11 +144,14 @@ def _download_and_build():
         cache_data = {"_version": CACHE_VERSION, "airports": db}
         with open(CACHE_FILE, "w", encoding="utf-8") as f:
             json.dump(cache_data, f)
-        print(f"[Airports] Database built — {len(db)} entries cached to airports.json (v{CACHE_VERSION})")
+        _safe_print(
+            f"[Airports] Database built - {len(db)} entries cached to "
+            f"airports.json (v{CACHE_VERSION})"
+        )
         return db
 
     except Exception as e:
-        print(f"[Airports] Download failed: {e}")
+        _safe_print(f"[Airports] Download failed: {e}")
         return {}
 
 
@@ -130,20 +173,23 @@ def _load():
                 _loaded = True
                 return
             else:
-                # Stale or unversioned cache — rebuild
+                # Stale or unversioned cache - rebuild
                 version_found = raw.get("_version", "none") if isinstance(raw, dict) else "legacy"
-                print(f"[Airports] Cache version mismatch (found: {version_found}, need: {CACHE_VERSION}) — rebuilding")
+                _safe_print(
+                    f"[Airports] Cache version mismatch "
+                    f"(found: {version_found}, need: {CACHE_VERSION}) - rebuilding"
+                )
                 if isinstance(raw, dict) and isinstance(raw.get("airports"), dict):
                     stale = raw["airports"]
                 elif isinstance(raw, dict) and "_version" not in raw:
                     stale = raw
         except Exception as e:
-            print(f"[Airports] Cache load failed: {e} — re-downloading")
+            _safe_print(f"[Airports] Cache load failed: {e} - re-downloading")
 
     _db = _download_and_build()
     if not _db and stale:
         # Keep lookups working offline until a typed rebuild succeeds.
-        print("[Airports] Using previous cache without type metadata (degraded)")
+        _safe_print("[Airports] Using previous cache without type metadata (degraded)")
         _db = stale
     _loaded = True
 
@@ -163,12 +209,13 @@ def iter_airports_near(
     lon: float,
     max_km: float,
     types: frozenset[str] | set[str] | None = None,
+    small_paved_only: bool = False,
 ) -> list[dict]:
     """Unique airport points within ``max_km`` of ``lat,lon``.
 
     Prefers ICAO ``ident`` keys (4-letter) so IATA duplicates are not drawn twice.
     Default ``types`` is large + medium airports only.
-    Each item: ``{"ident", "lat", "lon", "type", "name", "dist_km"}``.
+    Each item: ``{"ident", "lat", "lon", "type", "name", "facility", "dist_km"}``.
     """
     _load()
     try:
@@ -196,6 +243,11 @@ def iter_airports_near(
         atype = (rec.get("type") or "").strip().lower()
         if wanted and atype not in wanted:
             continue
+        if small_paved_only and atype == "small_airport":
+            from utilities import runways
+
+            if not runways.has_paved_runway(ident):
+                continue
         try:
             alat = float(rec["lat"])
             alon = float(rec["lon"])
@@ -205,16 +257,18 @@ def iter_airports_near(
         if dist > radius:
             continue
         seen.add(ident)
-        out.append(
-            {
-                "ident": ident,
-                "lat": alat,
-                "lon": alon,
-                "type": atype,
-                "name": (rec.get("name") or "").strip(),
-                "dist_km": dist,
-            }
-        )
+        point = {
+            "ident": ident,
+            "lat": alat,
+            "lon": alon,
+            "type": atype,
+            "name": (rec.get("name") or "").strip(),
+            "facility": (rec.get("facility") or "").strip(),
+            "dist_km": dist,
+        }
+        if "elevation_ft" in rec:
+            point["elevation_ft"] = rec["elevation_ft"]
+        out.append(point)
 
     out.sort(key=lambda a: a["dist_km"])
     return out
@@ -281,6 +335,11 @@ def _lookup_record(code: str) -> dict:
 def get_airport_name(code: str) -> str:
     """City/municipality label for an airport code (e.g. SFO → San Francisco)."""
     return (_lookup_record(code).get("name") or "").strip()
+
+
+def get_airport_facility(code: str) -> str:
+    """Official airport / airfield title when known (e.g. KNUQ → Moffett Federal Airfield)."""
+    return (_lookup_record(code).get("facility") or "").strip()
 
 
 def display_airport_code(code: str) -> str:

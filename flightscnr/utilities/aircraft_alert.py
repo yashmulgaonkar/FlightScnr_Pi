@@ -29,6 +29,8 @@ _RIM_REFLASH_S = 4.0
 _attention_until = 0.0
 _ATTENTION_HOLD_S = 20.0
 _rim_flash_military = False
+_rim_flash_watch = False
+_rim_flash_emergency = False
 
 # ICAO types listed under military-* icon categories (e.g. Q9 → military-drone).
 _ICON_MAPPING_PATH = os.path.join(
@@ -103,7 +105,7 @@ def callsign_match_keys(callsign: str) -> frozenset[str]:
         icao = IATA_TO_ICAO.get(cs[:2])
         if icao:
             keys.add(icao + cs[2:])
-    # ICAO → IATA (UAL123 → UA123)
+    # ICAO → IATA (UAL123 → UA123; UAE51N → EK51N)
     if len(cs) >= 4 and cs[:3].isalpha() and cs[3].isdigit():
         icao_prefix = cs[:3]
         for iata, icao in IATA_TO_ICAO.items():
@@ -185,7 +187,8 @@ def flights_share_identity(a: dict, b: dict) -> bool:
 
 
 # FR24 zone positions often lag ADS-B by several km; allow a wider match when
-# altitude agrees and hard identities do not conflict.
+# hard identities do not conflict. Altitude is a cue, not a requirement, when
+# both sides share an ICAO type and one side has no callsign (departure climb).
 _CROSS_FEED_THRESHOLD_KM = 15.0
 _ALT_MATCH_FT = 500.0
 
@@ -237,12 +240,57 @@ def _callsign_keys(flight: dict) -> frozenset[str]:
     return frozenset(keys)
 
 
+def _airline_codes_from_callsign_keys(keys: frozenset[str]) -> frozenset[str]:
+    """IATA + ICAO airline codes present in callsign/flight-number keys."""
+    if not keys:
+        return frozenset()
+    try:
+        from utilities.airline_branding import IATA_TO_ICAO
+    except ImportError:
+        IATA_TO_ICAO = {}
+    icao_to_iata = {icao: iata for iata, icao in IATA_TO_ICAO.items()}
+    codes: set[str] = set()
+    for cs in keys:
+        if looks_like_registration(cs):
+            continue
+        if len(cs) >= 3 and cs[:2].isalpha() and cs[2].isdigit():
+            iata = cs[:2]
+            codes.add(iata)
+            icao = IATA_TO_ICAO.get(iata)
+            if icao:
+                codes.add(icao)
+        elif len(cs) >= 4 and cs[:3].isalpha() and cs[3].isdigit():
+            icao = cs[:3]
+            codes.add(icao)
+            iata = icao_to_iata.get(icao)
+            if iata:
+                codes.add(iata)
+    return frozenset(codes)
+
+
+def flights_share_airline(a: dict, b: dict) -> bool:
+    """True when both assert the same airline (UAE51N ↔ EK225)."""
+    left = _airline_codes_from_callsign_keys(_callsign_keys(a))
+    right = _airline_codes_from_callsign_keys(_callsign_keys(b))
+    return bool(left and right and (left & right))
+
+
+def _normalized_type(flight: dict) -> str:
+    return "".join(str(flight.get("plane") or "").upper().split())
+
+
 def _types_compatible(a: dict, b: dict) -> bool:
-    type_a = "".join(str(a.get("plane") or "").upper().split())
-    type_b = "".join(str(b.get("plane") or "").upper().split())
+    type_a = _normalized_type(a)
+    type_b = _normalized_type(b)
     if type_a and type_b and type_a != type_b:
         return False
     return True
+
+
+def _same_aircraft_type(a: dict, b: dict) -> bool:
+    type_a = _normalized_type(a)
+    type_b = _normalized_type(b)
+    return bool(type_a and type_b and type_a == type_b)
 
 
 def position_merge_threshold_km(a: dict, b: dict, *, near_km: float = 1.2) -> float:
@@ -251,15 +299,28 @@ def position_merge_threshold_km(a: dict, b: dict, *, near_km: float = 1.2) -> fl
         return near_km
     if identity_hard_conflict(a, b):
         return near_km
-    if not _altitudes_match(a, b):
-        return near_km
     if not _types_compatible(a, b):
         return near_km
     keys_a = _callsign_keys(a)
     keys_b = _callsign_keys(b)
     # Extended radius only when at least one side lacks a callsign, or they agree.
-    # Disagreeing callsigns (QTR5Q vs N653ND) stay on the tight threshold.
+    # Disagreeing callsigns (QTR5Q vs UAL100) stay on the tight threshold — unless
+    # both are the same airline with a marketing vs ATC id (UAE51N vs EK225).
     if keys_a and keys_b and keys_a.isdisjoint(keys_b):
+        if not (
+            flights_share_airline(a, b)
+            and _types_compatible(a, b)
+            and _altitudes_match(a, b)
+        ):
+            return near_km
+        return _CROSS_FEED_THRESHOLD_KM
+    # Departure/climb: FR24 can sit at 600 ft near the runway while ADS-B is
+    # already at 2,000+ ft a few km out. Same ICAO type + a blank ident is
+    # enough to use the wide radius without an altitude gate.
+    blank_ident = not keys_a or not keys_b
+    if blank_ident and _same_aircraft_type(a, b):
+        return _CROSS_FEED_THRESHOLD_KM
+    if not _altitudes_match(a, b):
         return near_km
     return _CROSS_FEED_THRESHOLD_KM
 
@@ -288,9 +349,7 @@ def flights_match_by_position(
     # Tight proximity alone is enough (classic dual-feed overlap).
     if dist_km <= 0.45:
         return True
-    type_a = "".join(str(a.get("plane") or "").upper().split())
-    type_b = "".join(str(b.get("plane") or "").upper().split())
-    if type_a and type_b and type_a == type_b:
+    if _same_aircraft_type(a, b):
         return True
     if _altitudes_match(a, b):
         return True
@@ -349,9 +408,13 @@ def dedupe_flights(flights: list[dict], *, threshold_km: float = 1.2) -> list[di
         return score
 
     cell_deg = max(0.005, threshold_km / 111.0)
+    wide_cell_deg = max(cell_deg, _CROSS_FEED_THRESHOLD_KM / 111.0)
 
     def _cell(lat: float, lon: float) -> tuple[int, int]:
         return (int(lat / cell_deg), int(lon / cell_deg))
+
+    def _wide_cell(lat: float, lon: float) -> tuple[int, int]:
+        return (int(lat / wide_cell_deg), int(lon / wide_cell_deg))
 
     def _is_fr24(flight: dict) -> bool:
         return (flight.get("data_source") or "").startswith("fr24")
@@ -363,6 +426,7 @@ def dedupe_flights(flights: list[dict], *, threshold_km: float = 1.2) -> list[di
     kept: list[dict] = []
     by_identity: dict[str, int] = {}
     by_cell: dict[tuple[int, int], list[int]] = {}
+    by_wide_cell: dict[tuple[int, int], list[int]] = {}
     wide_idxs: list[int] = []
 
     def _index(idx: int, flight: dict) -> None:
@@ -375,6 +439,7 @@ def dedupe_flights(flights: list[dict], *, threshold_km: float = 1.2) -> list[di
             lat = lon = None
         if lat is not None:
             by_cell.setdefault(_cell(lat, lon), []).append(idx)
+            by_wide_cell.setdefault(_wide_cell(lat, lon), []).append(idx)
         if _needs_wide(flight) or _is_fr24(flight):
             if idx not in wide_idxs:
                 wide_idxs.append(idx)
@@ -389,12 +454,13 @@ def dedupe_flights(flights: list[dict], *, threshold_km: float = 1.2) -> list[di
         except (KeyError, TypeError, ValueError):
             lat = lon = None
         if lat is not None:
-            bucket = by_cell.get(_cell(lat, lon))
-            if bucket:
-                try:
-                    bucket.remove(idx)
-                except ValueError:
-                    pass
+            for grid, cell_fn in ((by_cell, _cell), (by_wide_cell, _wide_cell)):
+                bucket = grid.get(cell_fn(lat, lon))
+                if bucket:
+                    try:
+                        bucket.remove(idx)
+                    except ValueError:
+                        pass
         try:
             wide_idxs.remove(idx)
         except ValueError:
@@ -422,15 +488,50 @@ def dedupe_flights(flights: list[dict], *, threshold_km: float = 1.2) -> list[di
                         flight, kept[idx], near_km=threshold_km
                     ):
                         return idx
-        # Wide cross-feed: blank-callsign ADS-B vs lagged FR24 (up to ~15 km).
-        if _needs_wide(flight) or _is_fr24(flight):
-            flight_fr24 = _is_fr24(flight)
+        # Wide cross-feed grid (~15 km cells): catches lagged FR24 vs ADS-B when
+        # ATC callsign and IATA flight number disagree (UAE51N vs EK225).
+        wy, wx = _wide_cell(lat, lon)
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                for idx in by_wide_cell.get((wy + dy, wx + dx), ()):
+                    if idx in checked:
+                        continue
+                    checked.add(idx)
+                    other = kept[idx]
+                    if not is_cross_feed_pair(flight, other):
+                        continue
+                    if flights_match_by_position(
+                        flight, other, near_km=threshold_km
+                    ):
+                        return idx
+        # Legacy blank-callsign wide list (covers odd orderings / missing coords).
+        flight_fr24 = _is_fr24(flight)
+        flight_blank = _needs_wide(flight)
+        if flight_blank or flight_fr24:
             for idx in wide_idxs:
                 if idx in checked:
                     continue
                 other = kept[idx]
                 if flight_fr24 == _is_fr24(other):
                     continue  # same feed — tight grid already covered
+                if flights_match_by_position(flight, other, near_km=threshold_km):
+                    return idx
+            if flight_fr24 and flight_blank:
+                for idx, other in enumerate(kept):
+                    if idx in checked:
+                        continue
+                    if _source_kind(other) != "adsb":
+                        continue
+                    checked.add(idx)
+                    if flights_match_by_position(flight, other, near_km=threshold_km):
+                        return idx
+        elif _source_kind(flight) == "adsb":
+            for idx in wide_idxs:
+                if idx in checked:
+                    continue
+                other = kept[idx]
+                if not _is_fr24(other) or _callsign_keys(other):
+                    continue
                 if flights_match_by_position(flight, other, near_km=threshold_km):
                     return idx
         return None
@@ -458,6 +559,8 @@ def dedupe_flights(flights: list[dict], *, threshold_km: float = 1.2) -> list[di
                 flight["callsign"] = duplicate.get("callsign") or flight.get("callsign")
             if not (flight.get("registration") or "").strip():
                 flight["registration"] = duplicate.get("registration") or ""
+            if flight.get("local_adsb") or duplicate.get("local_adsb"):
+                flight["local_adsb"] = True
             _unindex(dup_idx, duplicate)
             kept[dup_idx] = flight
             _index(dup_idx, flight)
@@ -468,6 +571,8 @@ def dedupe_flights(flights: list[dict], *, threshold_km: float = 1.2) -> list[di
                 duplicate["callsign"] = flight.get("callsign") or duplicate.get("callsign")
             if not (duplicate.get("registration") or "").strip():
                 duplicate["registration"] = flight.get("registration") or ""
+            if flight.get("local_adsb") or duplicate.get("local_adsb"):
+                duplicate["local_adsb"] = True
             _index(dup_idx, duplicate)
 
     return kept
@@ -566,11 +671,11 @@ def on_watchlist_type(flight: dict) -> bool:
 def should_alert(flight: dict) -> bool:
     if flight.get("kind") == "vessel":
         return False
-    if alert_prefs.military_enabled() and is_military(flight):
-        return True
     if alert_prefs.emergency_enabled() and is_emergency_squawk(flight):
         return True
     if on_watchlist(flight):
+        return True
+    if alert_prefs.military_enabled() and is_military(flight):
         return True
     return False
 
@@ -598,23 +703,26 @@ def pulse_phase() -> bool:
 
 
 def alert_color(flight: dict):
-    """Icon fill: military → red; emergency / watch → blue."""
+    """Icon fill: emergency → solid red; watch → aqua; military → flashing red."""
     from display.round_touch import theme
 
+    if alert_prefs.emergency_enabled() and is_emergency_squawk(flight):
+        return theme.ALERT_EMERGENCY
+    if on_watchlist(flight):
+        return theme.ALERT_WATCH
     if alert_prefs.military_enabled() and is_military(flight):
         return theme.ALERT_MILITARY
-    if alert_prefs.emergency_enabled() and is_emergency_squawk(flight):
-        return theme.ALERT_OTHER
-    if on_watchlist(flight):
-        return theme.ALERT_OTHER
     return theme.AIRCRAFT
 
 
 def alert_pulse_color(flight: dict):
-    """Alternate pulse color: normal aircraft yellow (not a brighter alert tint)."""
+    """Pulse alternate: emergency solid red; watch+military aqua↔red; else amber."""
     from display.round_touch import theme
 
-    del flight  # same alternate for all alert types
+    if alert_prefs.emergency_enabled() and is_emergency_squawk(flight):
+        return theme.ALERT_EMERGENCY
+    if on_watchlist(flight) and is_military(flight):
+        return theme.ALERT_MILITARY
     return theme.AIRCRAFT
 
 
@@ -626,14 +734,16 @@ def is_in_range(flight: dict) -> bool:
     return geo.local_offset_km(lat, lon)[2] <= geo.inner_ring_max_km()
 
 
-def start_rim_flash(*, military: bool = False, duration: float | None = None) -> None:
+def start_rim_flash(*, military: bool = False, watch: bool = False, emergency: bool = False, duration: float | None = None) -> None:
     """Begin (or restart) the attention rim flash."""
-    global _rim_flash_until, _attention_until, _rim_flash_military
+    global _rim_flash_until, _attention_until, _rim_flash_military, _rim_flash_watch, _rim_flash_emergency
     now = time.time()
     dur = _RIM_FLASH_S if duration is None else float(duration)
     _rim_flash_until = now + dur
     _attention_until = now + max(dur, _ATTENTION_HOLD_S)
     _rim_flash_military = bool(military)
+    _rim_flash_watch = bool(watch)
+    _rim_flash_emergency = bool(emergency)
 
 
 def active_alert_flights(flights: list[dict]) -> list[dict]:
@@ -653,8 +763,12 @@ def reflash_for_visible_alerts(flights: list[dict]) -> bool:
     active = active_alert_flights(flights)
     if not active:
         return False
-    military = any(is_military(f) for f in active)
-    start_rim_flash(military=military, duration=_RIM_REFLASH_S)
+    military = alert_prefs.military_enabled() and any(is_military(f) for f in active)
+    watch = any(on_watchlist(f) for f in active)
+    emergency = (
+        alert_prefs.emergency_enabled() and any(is_emergency_squawk(f) for f in active)
+    )
+    start_rim_flash(military=military, watch=watch, emergency=emergency, duration=_RIM_REFLASH_S)
     return True
 
 
@@ -670,6 +784,8 @@ def check_new_aircraft(flights: list[dict]) -> bool:
         return False
     fired = False
     saw_military = False
+    saw_watch = False
+    saw_emergency = False
     for flight in flights:
         if not should_alert(flight):
             continue
@@ -683,8 +799,12 @@ def check_new_aircraft(flights: list[dict]) -> bool:
             continue
         _mark_seen(h)
         fired = True
-        if is_military(flight):
+        if on_watchlist(flight):
+            saw_watch = True
+        if alert_prefs.military_enabled() and is_military(flight):
             saw_military = True
+        if alert_prefs.emergency_enabled() and is_emergency_squawk(flight):
+            saw_emergency = True
         logger.info(
             "ALERT %s mil=%s emrg=%s watch=%s squawk=%s",
             cs,
@@ -695,7 +815,7 @@ def check_new_aircraft(flights: list[dict]) -> bool:
         )
     if fired:
         now = time.time()
-        start_rim_flash(military=saw_military)
+        start_rim_flash(military=saw_military, watch=saw_watch, emergency=saw_emergency)
         if now - _last_beep_ts >= _BEEP_COOLDOWN_S:
             _last_beep_ts = now
     return fired
@@ -717,6 +837,10 @@ def rim_flash_color():
 
     if not pulse_phase():
         return None
+    if _rim_flash_emergency:
+        return theme.ALERT_EMERGENCY
+    if _rim_flash_watch:
+        return theme.ALERT_WATCH
     if _rim_flash_military:
         return theme.ALERT_MILITARY
     return theme.ALERT_OTHER

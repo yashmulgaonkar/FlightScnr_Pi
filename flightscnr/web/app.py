@@ -321,6 +321,30 @@ def wifi_try_saved():
     ), code
 
 
+@app.post("/wifi/start-setup")
+def wifi_start_setup():
+    """Ask the display process to open the Wi-Fi setup hotspot (manual recovery)."""
+    from utilities import wifi_setup
+
+    if wifi_setup.skip_requested():
+        return jsonify(
+            {
+                "ok": False,
+                "message": "Wi-Fi setup is disabled by FLIGHTSCNR_SKIP_WIFI_SETUP.",
+            }
+        ), 400
+    if not wifi_setup.request_enter_wifi_setup():
+        return jsonify(
+            {"ok": False, "message": "Could not request Wi-Fi setup."}
+        ), 500
+    return jsonify(
+        {
+            "ok": True,
+            "message": "Opening Wi-Fi setup on the display…",
+        }
+    )
+
+
 @app.get("/")
 def index():
     if _wifi_portal_active():
@@ -418,13 +442,19 @@ def location_set():
         except Exception:
             pass
         try:
-            from display.round_touch import wildfire_overlay, map_bg, rainviewer_overlay
+            from display.round_touch import (
+                earthquake_overlay,
+                wildfire_overlay,
+                map_bg,
+                rainviewer_overlay,
+            )
 
             # Invalidate only — display process rebuilds overlays (portal has no
             # pygame display surface for precip tiles).
             map_bg.invalidate()
             rainviewer_overlay.invalidate()
             wildfire_overlay.invalidate()
+            earthquake_overlay.invalidate()
         except Exception:
             print("Map/precip invalidate after location save failed")
         payload = {
@@ -571,11 +601,17 @@ def favourites_select():
         except Exception:
             pass
         try:
-            from display.round_touch import wildfire_overlay, map_bg, rainviewer_overlay
+            from display.round_touch import (
+                earthquake_overlay,
+                wildfire_overlay,
+                map_bg,
+                rainviewer_overlay,
+            )
 
             map_bg.invalidate()
             rainviewer_overlay.invalidate()
             wildfire_overlay.invalidate()
+            earthquake_overlay.invalidate()
         except Exception:
             print("Map/precip invalidate after favourite select failed")
         label = entry.get("name") or entry.get("icao") or "favourite"
@@ -653,6 +689,19 @@ def stats_page():
     """Flight counter stats dashboard."""
     return render_template("stats.html")
 
+@app.get("/stats/position-sources")
+def stats_position_sources():
+    """Live-position fallback usage (extended tracking map): how often
+    each source (dump1090/adsb.fi/OpenSky/ADS-B Exchange/FR24) actually
+    won the fallback race. Answers "how many OpenSky credits are we
+    actually burning" without needing to inspect X-Rate-Limit-Remaining
+    headers by hand."""
+    try:
+        from utilities.position_source_stats import usage_today, usage_history
+
+        return jsonify({"today": usage_today(), "history": usage_history(days=7)})
+    except Exception as e:
+        return jsonify({"today": {}, "history": {}, "error": str(e)}), 500
 
 @app.get("/stats/<date>")
 def stats_day_page(date):
@@ -840,21 +889,36 @@ def display_json():
     return jsonify(
         {
             "brightness_percent": settings.brightness_percent(),
+            "quiet_dim_enabled": settings.quiet_dim_enabled(),
+            "quiet_dim_percent": settings.quiet_dim_percent(),
             "flight_detail_timeout_s": settings.flight_detail_timeout_s(),
             "clock_timeout_s": settings.clock_timeout_s(),
             "auto_idle_clock": settings.auto_idle_clock_enabled(),
             "display_rotation": settings.display_rotation(),
             "clock_12hr": settings.use_12hr_clock(),
+            "date_format": settings.date_format(),
+            "default_clock": settings.default_clock(),
+            "default_clock_off_hours": settings.default_clock_off_hours(),
             "radar_hud_enabled": settings.radar_hud_enabled(),
             "radar_hud_position": settings.radar_hud_position(),
             "radar_hud_opacity": settings.radar_hud_opacity(),
             "radar_hud_dark": settings.radar_hud_dark(),
+            "background_texture": settings.background_texture(),
+            "radar_zoom_buttons": settings.radar_zoom_buttons(),
+            "radar_zoom_position": settings.radar_zoom_position(),
             "hourly_chime_enabled": settings.hourly_chime_enabled(),
             "hourly_chime_volume": settings.hourly_chime_volume(),
             "traffic_sfx_enabled": settings.traffic_sfx_enabled(),
             "traffic_sfx_volume": settings.traffic_sfx_volume(),
             "military_sfx_enabled": settings.military_sfx_enabled(),
             "military_sfx_volume": settings.military_sfx_volume(),
+            "earthquake_voice_enabled": settings.earthquake_voice_enabled(),
+            "earthquake_voice_volume": settings.earthquake_voice_volume(),
+            "lofi_enabled": settings.lofi_enabled(),
+            "lofi_volume": settings.lofi_volume(),
+            "lofi_controls_enabled": settings.lofi_controls_enabled(),
+            "lofi_title_scroll": settings.lofi_title_scroll(),
+            "auto_wifi_setup_hotspot": settings.auto_wifi_setup_hotspot_enabled(),
         }
     )
 
@@ -871,6 +935,13 @@ def display_save():
             return jsonify({"message": "brightness_percent must be a number"}), 400
     if "auto_idle_clock" in data:
         settings.set_auto_idle_clock_enabled(bool(data.get("auto_idle_clock")))
+    if "quiet_dim_enabled" in data:
+        settings.set_quiet_dim_enabled(bool(data.get("quiet_dim_enabled")))
+    if "quiet_dim_percent" in data:
+        try:
+            settings.set_quiet_dim_percent(int(data.get("quiet_dim_percent")))
+        except (TypeError, ValueError):
+            return jsonify({"message": "quiet_dim_percent must be a number"}), 400
     if "flight_detail_timeout_s" in data:
         settings.set_flight_detail_timeout_s(data.get("flight_detail_timeout_s"))
     if "clock_timeout_s" in data:
@@ -879,6 +950,16 @@ def display_save():
         settings.set_display_rotation(data.get("display_rotation"))
     if "clock_12hr" in data:
         settings.set_use_12hr_clock(bool(data.get("clock_12hr")))
+    if "date_format" in data:
+        settings.set_date_format(str(data.get("date_format") or "us"))
+    elif "date_format_eu" in data:
+        settings.set_use_european_date(bool(data.get("date_format_eu")))
+    if "default_clock" in data:
+        settings.set_default_clock(str(data.get("default_clock") or "digital"))
+    if "default_clock_off_hours" in data:
+        settings.set_default_clock_off_hours(
+            str(data.get("default_clock_off_hours") or "digital")
+        )
     if "radar_hud_enabled" in data:
         settings.set_radar_hud_enabled(bool(data.get("radar_hud_enabled")))
     if "radar_hud_position" in data:
@@ -890,6 +971,12 @@ def display_save():
             return jsonify({"message": "radar_hud_opacity must be a number"}), 400
     if "radar_hud_dark" in data:
         settings.set_radar_hud_dark(bool(data.get("radar_hud_dark")))
+    if "background_texture" in data:
+        settings.set_background_texture(bool(data.get("background_texture")))
+    if "radar_zoom_buttons" in data:
+        settings.set_radar_zoom_buttons(bool(data.get("radar_zoom_buttons")))
+    if "radar_zoom_position" in data:
+        settings.set_radar_zoom_position(str(data.get("radar_zoom_position") or "right"))
     if "hourly_chime_enabled" in data:
         settings.set_hourly_chime_enabled(bool(data.get("hourly_chime_enabled")))
     if "hourly_chime_volume" in data:
@@ -911,28 +998,361 @@ def display_save():
             settings.set_military_sfx_volume(int(data.get("military_sfx_volume")))
         except (TypeError, ValueError):
             return jsonify({"message": "military_sfx_volume must be a number"}), 400
+    if "earthquake_voice_enabled" in data:
+        from display.round_touch import earthquake_overlay
+
+        settings.set_earthquake_voice_enabled(bool(data.get("earthquake_voice_enabled")))
+        if settings.earthquake_voice_enabled():
+            earthquake_overlay.prime_voice_seen()
+    if "earthquake_voice_volume" in data:
+        try:
+            settings.set_earthquake_voice_volume(int(data.get("earthquake_voice_volume")))
+        except (TypeError, ValueError):
+            return jsonify({"message": "earthquake_voice_volume must be a number"}), 400
+    if "lofi_enabled" in data:
+        settings.set_lofi_enabled(bool(data.get("lofi_enabled")))
+    if "lofi_volume" in data:
+        try:
+            settings.set_lofi_volume(int(data.get("lofi_volume")))
+        except (TypeError, ValueError):
+            return jsonify({"message": "lofi_volume must be a number"}), 400
+    if "lofi_controls_enabled" in data:
+        settings.set_lofi_controls_enabled(bool(data.get("lofi_controls_enabled")))
+    if "lofi_title_scroll" in data:
+        settings.set_lofi_title_scroll(bool(data.get("lofi_title_scroll")))
+    if "auto_wifi_setup_hotspot" in data:
+        settings.set_auto_wifi_setup_hotspot_enabled(
+            bool(data.get("auto_wifi_setup_hotspot"))
+        )
+        settings.request_reload()
     return jsonify(
         {
             "ok": True,
             "brightness_percent": settings.brightness_percent(),
+            "quiet_dim_enabled": settings.quiet_dim_enabled(),
+            "quiet_dim_percent": settings.quiet_dim_percent(),
             "flight_detail_timeout_s": settings.flight_detail_timeout_s(),
             "clock_timeout_s": settings.clock_timeout_s(),
             "auto_idle_clock": settings.auto_idle_clock_enabled(),
             "display_rotation": settings.display_rotation(),
             "clock_12hr": settings.use_12hr_clock(),
+            "date_format": settings.date_format(),
+            "default_clock": settings.default_clock(),
+            "default_clock_off_hours": settings.default_clock_off_hours(),
             "radar_hud_enabled": settings.radar_hud_enabled(),
             "radar_hud_position": settings.radar_hud_position(),
             "radar_hud_opacity": settings.radar_hud_opacity(),
             "radar_hud_dark": settings.radar_hud_dark(),
+            "background_texture": settings.background_texture(),
+            "radar_zoom_buttons": settings.radar_zoom_buttons(),
+            "radar_zoom_position": settings.radar_zoom_position(),
             "hourly_chime_enabled": settings.hourly_chime_enabled(),
             "hourly_chime_volume": settings.hourly_chime_volume(),
             "traffic_sfx_enabled": settings.traffic_sfx_enabled(),
             "traffic_sfx_volume": settings.traffic_sfx_volume(),
             "military_sfx_enabled": settings.military_sfx_enabled(),
             "military_sfx_volume": settings.military_sfx_volume(),
+            "earthquake_voice_enabled": settings.earthquake_voice_enabled(),
+            "earthquake_voice_volume": settings.earthquake_voice_volume(),
+            "lofi_enabled": settings.lofi_enabled(),
+            "lofi_volume": settings.lofi_volume(),
+            "lofi_controls_enabled": settings.lofi_controls_enabled(),
+            "lofi_title_scroll": settings.lofi_title_scroll(),
+            "auto_wifi_setup_hotspot": settings.auto_wifi_setup_hotspot_enabled(),
             "message": "Display settings saved.",
         }
     )
+
+
+@app.get("/targets/json")
+def targets_json():
+    from display.round_touch import settings
+
+    def _hex(rgb):
+        return "#%02x%02x%02x" % tuple(rgb) if rgb else ""
+
+    return jsonify(
+        {
+            "categories": {
+                cat: {
+                    "color": _hex(settings.target_color(cat)),
+                    "size": settings.target_size_pct(cat),
+                    "form": settings.target_form(cat),
+                }
+                for cat in settings.TARGET_CATEGORIES
+            },
+            "compass": {
+                "color": _hex(settings.compass_color()),
+                "opacity": settings.compass_opacity(),
+                "labels": settings.compass_labels(),
+            },
+            "blip": {
+                "color": _hex(settings.blip_color()),
+                "size": settings.blip_size_pct(),
+                "opacity": settings.blip_opacity(),
+            },
+        }
+    )
+
+
+@app.post("/targets")
+def targets_save():
+    from display.round_touch import settings
+
+    def _rgb(raw):
+        raw = str(raw or "").strip().lstrip("#")
+        if len(raw) != 6:
+            return None
+        try:
+            return tuple(int(raw[i : i + 2], 16) for i in (0, 2, 4))
+        except ValueError:
+            return None
+
+    data = request.get_json(silent=True) or {}
+    cats = data.get("categories") or {}
+    for cat in settings.TARGET_CATEGORIES:
+        entry = cats.get(cat) or {}
+        if "color" in entry:
+            settings.set_target_color(cat, _rgb(entry.get("color")))
+        if "size" in entry:
+            try:
+                settings.set_target_size_pct(cat, int(entry.get("size")))
+            except (TypeError, ValueError):
+                pass
+        if "form" in entry:
+            settings.set_target_form(cat, str(entry.get("form") or ""))
+    compass = data.get("compass") or {}
+    if "color" in compass:
+        settings.set_compass_color(_rgb(compass.get("color")))
+    if "opacity" in compass:
+        try:
+            settings.set_compass_opacity(int(compass.get("opacity")))
+        except (TypeError, ValueError):
+            pass
+    if "labels" in compass:
+        settings.set_compass_labels(str(compass.get("labels") or ""))
+    blip = data.get("blip") or {}
+    if "color" in blip:
+        settings.set_blip_color(_rgb(blip.get("color")))
+    if "size" in blip:
+        try:
+            settings.set_blip_size_pct(int(blip.get("size")))
+        except (TypeError, ValueError):
+            pass
+    if "opacity" in blip:
+        try:
+            settings.set_blip_opacity(int(blip.get("opacity")))
+        except (TypeError, ValueError):
+            pass
+    return jsonify({"ok": True})
+
+
+@app.get("/lofi/tracks")
+def lofi_tracks():
+    from display.round_touch import settings
+    from utilities import lofi_audio
+
+    bundled_set: set[str] = set()
+    for folder in (lofi_audio.BUNDLED_DIR, lofi_audio.PACK_DIR):
+        try:
+            bundled_set.update(
+                n for n in os.listdir(folder) if n.lower().endswith(".mp3")
+            )
+        except OSError:
+            continue
+    bundled = sorted(bundled_set)
+    return jsonify({
+        "bundled": bundled,
+        "user": lofi_audio.user_tracks(),
+        "disabled": settings.lofi_disabled_tracks(),
+    })
+
+
+@app.get("/lofi/stream/<path:name>")
+def lofi_stream(name):
+    from utilities import lofi_audio
+
+    path = lofi_audio.track_path(name)
+    if path is None:
+        return jsonify({"message": "Unknown track."}), 404
+    from flask import send_file
+
+    return send_file(path, mimetype="audio/mpeg", conditional=True)
+
+
+# Starter-pack download — MP3s live on a GitHub Release, not in git, so the
+# OTA `git pull` stays light. Catalog: assets/lofi/pack.json; override URL
+# with LOFI_PACK_URL in the environment.
+_pack_progress = {"state": "idle", "received": 0, "total": 0, "message": ""}
+
+
+def _lofi_pack_url() -> str:
+    from utilities import lofi_audio
+
+    return lofi_audio.default_pack_url()
+
+
+def _pack_tmp_path() -> str:
+    from utilities import lofi_audio
+
+    return lofi_audio.PACK_DIR + ".zip.part"
+
+
+def _pack_download_worker(url: str) -> None:
+    import requests
+
+    from utilities import lofi_audio
+
+    tmp = _pack_tmp_path()
+    lofi_audio.clear_pack_install()
+    _pack_progress.update(
+        {"state": "downloading", "received": 0, "total": 0, "message": ""})
+    try:
+        os.makedirs(os.path.dirname(tmp), exist_ok=True)
+        with requests.get(url, stream=True, timeout=60,
+                          allow_redirects=True) as r:
+            r.raise_for_status()
+            _pack_progress["total"] = int(r.headers.get("Content-Length") or 0)
+            with open(tmp, "wb") as fh:
+                for chunk in r.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        fh.write(chunk)
+                        _pack_progress["received"] += len(chunk)
+        _pack_progress["state"] = "installing"
+        count = lofi_audio.install_pack_zip(tmp)
+        if count > 0:
+            lofi_audio.mark_pack_installed(track_count=count)
+            _pack_progress.update(
+                {"state": "done", "message": f"Installed {count} tracks."})
+        else:
+            _pack_progress.update(
+                {"state": "error", "message": "Pack contained no tracks."})
+    except Exception as exc:
+        _pack_progress.update({"state": "error", "message": str(exc)})
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+        except OSError:
+            pass
+
+
+@app.get("/lofi/pack/status")
+def lofi_pack_status():
+    from utilities import lofi_audio
+
+    pack = lofi_audio.default_pack() or {}
+    count = lofi_audio.pack_track_count()
+    return jsonify({
+        "installed": lofi_audio.is_pack_installed(),
+        "count": count,
+        "pack_id": pack.get("id"),
+        "label": pack.get("label"),
+        "description": pack.get("description"),
+        "size_mb": pack.get("size_mb"),
+        "tracks": pack.get("tracks"),
+        "url": lofi_audio.default_pack_url(),
+        "state": _pack_progress["state"],
+        "received": _pack_progress["received"],
+        "total": _pack_progress["total"],
+        "message": _pack_progress["message"],
+    })
+
+
+@app.post("/lofi/pack/download")
+def lofi_pack_download():
+    import threading
+
+    if _pack_progress["state"] in ("downloading", "installing"):
+        return jsonify({"message": "Download already running."}), 409
+    url = _lofi_pack_url()
+    threading.Thread(
+        target=_pack_download_worker, args=(url,), daemon=True
+    ).start()
+    return jsonify({"ok": True, "url": url})
+
+
+@app.get("/lofi/cover/<path:name>")
+def lofi_cover(name):
+    """Embedded album art (ID3 APIC) for a playlist track."""
+    from utilities import lofi_audio
+
+    path = lofi_audio.track_path(name)
+    if path is None:
+        return jsonify({"message": "Unknown track."}), 404
+    try:
+        from mutagen.id3 import ID3
+
+        pics = ID3(path).getall("APIC")
+    except Exception:
+        pics = []
+    if not pics:
+        return jsonify({"message": "No cover art."}), 404
+    pic = pics[0]
+    # The ID3 mime field is attacker-controlled (uploads); never echo it.
+    allowed = {
+        "image/png": "image/png",
+        "image/jpeg": "image/jpeg",
+        "image/jpg": "image/jpeg",
+        "image/gif": "image/gif",
+        "image/webp": "image/webp",
+    }
+    mime = allowed.get((pic.mime or "").lower())
+    if mime is None:
+        return jsonify({"message": "Unsupported cover type."}), 415
+    resp = app.response_class(pic.data, mimetype=mime)
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    resp.headers["Content-Disposition"] = "inline; filename=cover"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = "default-src 'none'; img-src 'self'"
+    return resp
+
+
+@app.post("/lofi/toggle_disabled")
+def lofi_toggle_disabled():
+    from display.round_touch import settings
+    from utilities import lofi_audio
+
+    data = request.get_json(silent=True) or {}
+    name = lofi_audio.safe_track_name(str(data.get("name") or ""))
+    if name is None:
+        return jsonify({"message": "Bad track name."}), 400
+    disabled = set(settings.lofi_disabled_tracks())
+    if name in disabled:
+        disabled.discard(name)
+    else:
+        disabled.add(name)
+    settings.set_lofi_disabled_tracks(sorted(disabled))
+    return jsonify({"ok": True, "disabled": settings.lofi_disabled_tracks()})
+
+
+@app.post("/lofi/upload")
+def lofi_upload():
+    from utilities import lofi_audio
+
+    file = request.files.get("track")
+    if file is None or not file.filename:
+        return jsonify({"message": "Choose an MP3 file first."}), 400
+    data = file.read()
+    if len(data) > 30 * 1024 * 1024:
+        return jsonify({"message": "MP3 too large (30 MB max)."}), 400
+    path = lofi_audio.save_user_track(file.filename, data)
+    if path is None:
+        return jsonify({"message": "Only .mp3 files are accepted."}), 400
+    return jsonify({"ok": True, "user": lofi_audio.user_tracks(),
+                    "message": f"Added {os.path.basename(path)} to the playlist."})
+
+
+@app.post("/lofi/delete")
+def lofi_delete():
+    from utilities import lofi_audio
+
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name") or "")
+    if not lofi_audio.delete_user_track(name):
+        return jsonify({"message": "Track not found."}), 404
+    return jsonify({"ok": True, "user": lofi_audio.user_tracks(),
+                    "message": f"Removed {name}."})
 
 
 @app.post("/display/chime-preview")
@@ -998,6 +1418,42 @@ def display_military_sfx_preview():
     )
 
 
+@app.post("/display/earthquake-voice-preview")
+def display_earthquake_voice_preview():
+    """Play the earthquake alert voice clip once."""
+    from display.round_touch import earthquake_overlay, settings
+
+    data = request.get_json(silent=True) or {}
+    if "earthquake_voice_volume" in data:
+        try:
+            settings.set_earthquake_voice_volume(int(data.get("earthquake_voice_volume")))
+        except (TypeError, ValueError):
+            return jsonify({"message": "earthquake_voice_volume must be a number"}), 400
+    if "lofi_enabled" in data:
+        settings.set_lofi_enabled(bool(data.get("lofi_enabled")))
+    if "lofi_volume" in data:
+        try:
+            settings.set_lofi_volume(int(data.get("lofi_volume")))
+        except (TypeError, ValueError):
+            return jsonify({"message": "lofi_volume must be a number"}), 400
+    if "lofi_controls_enabled" in data:
+        settings.set_lofi_controls_enabled(bool(data.get("lofi_controls_enabled")))
+    if "lofi_title_scroll" in data:
+        settings.set_lofi_title_scroll(bool(data.get("lofi_title_scroll")))
+    earthquake_overlay.play_voice_preview()
+    return jsonify(
+        {
+            "ok": True,
+            "earthquake_voice_volume": settings.earthquake_voice_volume(),
+            "lofi_enabled": settings.lofi_enabled(),
+            "lofi_volume": settings.lofi_volume(),
+            "lofi_controls_enabled": settings.lofi_controls_enabled(),
+            "lofi_title_scroll": settings.lofi_title_scroll(),
+            "message": "Playing earthquake alert preview.",
+        }
+    )
+
+
 @app.post("/settings/reload")
 def settings_reload():
     """Signal the on-device display to re-apply settings / location from disk."""
@@ -1032,20 +1488,34 @@ def radar_json():
             "scale_index": idx,
             "range_value": scale.format_display_value(idx, units),
             "range_presets_mi": list(scale.PRESET_STATUTE_MILES),
+            "range_presets": {u: list(v) for u, v in scale.UNIT_BANDS.items()},
             "min_height_ft": settings.min_height_ft(),
             "max_height_ft": settings.max_height_ft(),
             "theme_rgb": list(settings.theme_rgb()),
             "runway_darkmap_rgb": list(settings.runway_darkmap_rgb()),
+            "runway_light_rgb": list(settings.runway_light_rgb()),
+            "tag_text_dark_rgb": list(settings.tag_text_dark_rgb()),
+            "tag_text_light_rgb": list(settings.tag_text_light_rgb()),
             "show_compass_rose": settings.show_compass_rose(),
             "show_range_rings": settings.show_range_rings(),
+            "color_by_altitude": settings.color_by_altitude(),
             "show_aircraft_tag": settings.show_aircraft_tag(),
             "traffic_labels": settings.traffic_labels(),
+            "aircraft_tag_id": settings.aircraft_tag_id(),
             "facing_deg": settings.facing_deg(),
             "show_sweep_line": settings.show_sweep_line(),
+            "show_tag_leaders": settings.tag_leaders_preferred(),
+            "rim_target_style": settings.rim_target_style(),
             "show_precipitation": settings.show_precipitation(),
             "show_wildfires": settings.show_wildfires(),
+            "show_earthquakes": settings.show_earthquakes(),
+            "earthquake_voice_enabled": settings.earthquake_voice_enabled(),
             "show_airport_centerlines": settings.show_airport_centerlines(),
             "show_airport_icons": settings.show_airport_icons(),
+            "airport_icon_style": settings.airport_icon_style(),
+            "airport_min_size": settings.airport_min_size(),
+            "flip_board_sound": settings.flip_board_sound_enabled(),
+            "flip_board_id": settings.flip_board_id(),
             "show_ground_vehicles": settings.show_ground_vehicles(),
             "traffic_mode": settings.traffic_mode(),
             "ais_enabled": settings.ais_enabled(),
@@ -1055,6 +1525,10 @@ def radar_json():
             "map_style_options": list(settings.MAP_STYLES),
             "vfr_map_opacity": settings.vfr_map_opacity(),
             "dump1090": dump1090_portal_status(),
+            "live_map_heading_up": settings.live_map_heading_up(),
+            "live_tracking_preview_minutes": settings.live_tracking_preview_minutes(),
+            "live_tracking_min_radius_km": settings.live_tracking_min_radius_km(),
+            "live_tracking_max_radius_km": settings.live_tracking_max_radius_km(),
         }
     )
 
@@ -1065,16 +1539,71 @@ def dump1090_portal_status() -> dict:
     return dump1090_settings()
 
 
+@app.get("/dump1090/status.json")
+def dump1090_live_status():
+    """Live local ADS-B feed health + last radar merge counts for the portal."""
+    from secrets_store import dump1090_settings
+    from utilities import dump1090_client
+
+    cfg = dump1090_settings()
+    enabled = bool(cfg.get("DUMP1090_ENABLED"))
+    url = (cfg.get("DUMP1090_URL") or "").strip()
+    out: dict = {
+        "enabled": enabled,
+        "url": url,
+        "reachable": None,
+        "aircraft_total": 0,
+        "aircraft_fresh": 0,
+        "error": "",
+        "radar": {},
+    }
+    radar = dump1090_client.read_radar_status()
+    if radar:
+        out["radar"] = {
+            "ok": radar.get("ok"),
+            "raw": int(radar.get("raw") or 0),
+            "added": int(radar.get("added") or 0),
+            "updated": int(radar.get("updated") or 0),
+            "ts": radar.get("ts"),
+            "error": radar.get("error") or "",
+        }
+    if not enabled:
+        out["error"] = "disabled"
+        return jsonify(out)
+    probe = dump1090_client.probe_feed_status(url or None)
+    out["reachable"] = bool(probe.get("reachable"))
+    out["url"] = probe.get("url") or url
+    out["aircraft_total"] = int(probe.get("aircraft_total") or 0)
+    out["aircraft_fresh"] = int(probe.get("aircraft_fresh") or 0)
+    out["error"] = probe.get("error") or ""
+    return jsonify(out)
+
+
 @app.post("/radar")
 def radar_save():
     from display.round_touch import map_bg, rainviewer_overlay, scale, settings
 
     data = request.get_json(silent=True) or {}
+    units_before = settings.distance_units()
     if "unit_preset" in data:
         settings.set_unit_preset(str(data.get("unit_preset") or ""))
     elif "distance_units" in data:
         settings.set_distance_units(data.get("distance_units"))
     units = settings.distance_units()
+    if units != units_before:
+        # Round-number bands are per-unit, so a unit switch moves the real
+        # coverage a few percent — refetch the basemap and overlays.
+        map_bg.request_background()
+        rainviewer_overlay.request_overlay()
+        try:
+            from display.round_touch import earthquake_overlay, wildfire_overlay
+
+            wildfire_overlay.invalidate()
+            wildfire_overlay.request_refresh(force=True)
+            earthquake_overlay.invalidate()
+            earthquake_overlay.request_refresh(force=True)
+        except Exception:
+            pass
     if "range_value" in data:
         raw = str(data.get("range_value", "")).strip()
         try:
@@ -1089,10 +1618,12 @@ def radar_save():
         map_bg.request_background()
         rainviewer_overlay.request_overlay()
         try:
-            from display.round_touch import wildfire_overlay
+            from display.round_touch import earthquake_overlay, wildfire_overlay
 
             wildfire_overlay.invalidate()
             wildfire_overlay.request_refresh(force=True)
+            earthquake_overlay.invalidate()
+            earthquake_overlay.request_refresh(force=True)
         except Exception:
             pass
     elif "scale_index" in data:
@@ -1101,10 +1632,12 @@ def radar_save():
         map_bg.request_background()
         rainviewer_overlay.request_overlay()
         try:
-            from display.round_touch import wildfire_overlay
+            from display.round_touch import earthquake_overlay, wildfire_overlay
 
             wildfire_overlay.invalidate()
             wildfire_overlay.request_refresh(force=True)
+            earthquake_overlay.invalidate()
+            earthquake_overlay.request_refresh(force=True)
         except Exception:
             pass
     if "min_height_ft" in data:
@@ -1126,18 +1659,44 @@ def radar_save():
             settings.set_runway_darkmap_rgb(int(rgb[0]), int(rgb[1]), int(rgb[2]))
         except (TypeError, ValueError, IndexError):
             return jsonify({"ok": False, "message": "runway_darkmap_rgb must be [r,g,b]"}), 400
+    if "runway_light_rgb" in data:
+        rgb = data.get("runway_light_rgb") or []
+        try:
+            settings.set_runway_light_rgb(int(rgb[0]), int(rgb[1]), int(rgb[2]))
+        except (TypeError, ValueError, IndexError):
+            return jsonify({"ok": False, "message": "runway_light_rgb must be [r,g,b]"}), 400
+    if "tag_text_dark_rgb" in data:
+        rgb = data.get("tag_text_dark_rgb") or []
+        try:
+            settings.set_tag_text_dark_rgb(int(rgb[0]), int(rgb[1]), int(rgb[2]))
+        except (TypeError, ValueError, IndexError):
+            return jsonify({"ok": False, "message": "tag_text_dark_rgb must be [r,g,b]"}), 400
+    if "tag_text_light_rgb" in data:
+        rgb = data.get("tag_text_light_rgb") or []
+        try:
+            settings.set_tag_text_light_rgb(int(rgb[0]), int(rgb[1]), int(rgb[2]))
+        except (TypeError, ValueError, IndexError):
+            return jsonify({"ok": False, "message": "tag_text_light_rgb must be [r,g,b]"}), 400
     if "show_compass_rose" in data:
         settings.set_show_compass_rose(bool(data.get("show_compass_rose")))
     if "show_range_rings" in data:
         settings.set_show_range_rings(bool(data.get("show_range_rings")))
+    if "color_by_altitude" in data:
+        settings.set_color_by_altitude(bool(data.get("color_by_altitude")))
     if "traffic_labels" in data:
         settings.set_traffic_labels(data.get("traffic_labels"))
     elif "show_aircraft_tag" in data:
         settings.set_show_aircraft_tag(bool(data.get("show_aircraft_tag")))
+    if "aircraft_tag_id" in data:
+        settings.set_aircraft_tag_id(data.get("aircraft_tag_id"))
     if "facing_deg" in data:
         settings.set_facing_deg(data.get("facing_deg"))
     if "show_sweep_line" in data:
         settings.set_show_sweep_line(bool(data.get("show_sweep_line")))
+    if "show_tag_leaders" in data:
+        settings.set_show_tag_leaders(bool(data.get("show_tag_leaders")))
+    if "rim_target_style" in data:
+        settings.set_rim_target_style(str(data.get("rim_target_style") or ""))
     if "show_precipitation" in data:
         settings.set_show_precipitation(bool(data.get("show_precipitation")))
         rainviewer_overlay.invalidate()
@@ -1150,6 +1709,19 @@ def radar_save():
         wildfire_overlay.invalidate()
         if settings.show_wildfires():
             wildfire_overlay.request_refresh(force=True)
+    if "show_earthquakes" in data:
+        from display.round_touch import earthquake_overlay
+
+        settings.set_show_earthquakes(bool(data.get("show_earthquakes")))
+        earthquake_overlay.invalidate()
+        if settings.show_earthquakes():
+            earthquake_overlay.request_refresh(force=True)
+    if "earthquake_voice_enabled" in data:
+        from display.round_touch import earthquake_overlay
+
+        settings.set_earthquake_voice_enabled(bool(data.get("earthquake_voice_enabled")))
+        if settings.earthquake_voice_enabled():
+            earthquake_overlay.prime_voice_seen()
     if "show_airport_centerlines" in data or "show_airport_icons" in data:
         from display.round_touch import airport_overlay
 
@@ -1158,6 +1730,20 @@ def radar_save():
         if "show_airport_icons" in data:
             settings.set_show_airport_icons(bool(data.get("show_airport_icons")))
         airport_overlay.invalidate()
+    if "airport_icon_style" in data:
+        from display.round_touch import airport_overlay
+
+        settings.set_airport_icon_style(str(data.get("airport_icon_style") or "classic"))
+        airport_overlay.invalidate()
+    if "airport_min_size" in data:
+        from display.round_touch import airport_overlay
+
+        settings.set_airport_min_size(str(data.get("airport_min_size") or "small"))
+        airport_overlay.invalidate()
+    if "flip_board_sound" in data:
+        settings.set_flip_board_sound_enabled(bool(data.get("flip_board_sound")))
+    if "flip_board_id" in data:
+        settings.set_flip_board_id(str(data.get("flip_board_id") or "tail"))
     if "show_ground_vehicles" in data:
         settings.set_show_ground_vehicles(bool(data.get("show_ground_vehicles")))
     if "map_style" in data:
@@ -1192,6 +1778,20 @@ def radar_save():
                 "dump1090_enabled": bool(data.get("dump1090_enabled")),
                 "dump1090_url": str(data.get("dump1090_url") or "").strip(),
             }
+        )
+    if "live_map_heading_up" in data:
+        settings.set_live_map_heading_up(bool(data.get("live_map_heading_up")))
+    if "live_tracking_preview_minutes" in data:
+        settings.set_live_tracking_preview_minutes(
+            data.get("live_tracking_preview_minutes")
+        )
+    if "live_tracking_min_radius_km" in data:
+        settings.set_live_tracking_min_radius_km(
+            data.get("live_tracking_min_radius_km")
+        )
+    if "live_tracking_max_radius_km" in data:
+        settings.set_live_tracking_max_radius_km(
+            data.get("live_tracking_max_radius_km")
         )
     settings.request_reload()
     return jsonify({"ok": True, "message": "Radar settings saved."})
@@ -1270,6 +1870,41 @@ def updates_apply():
     return jsonify(updater.start_update())
 
 
+@app.post("/updates/tonight")
+def updates_tonight():
+    from utilities import updater
+
+    updater.schedule_update_tonight()
+    return jsonify(updater.check_for_update())
+
+
+@app.post("/updates/auto")
+def updates_auto():
+    from utilities import updater
+
+    data = request.get_json(silent=True) or {}
+    updater.set_auto_off_hours(bool(data.get("auto_off_hours")))
+    if "auto_update_time" in data:
+        updater.set_auto_update_time(str(data.get("auto_update_time") or ""))
+    if "hide_banner" in data:
+        updater.set_hide_banner(bool(data.get("hide_banner")))
+    return jsonify(updater.check_for_update())
+
+
+@app.post("/updates/resync")
+def updates_resync():
+    from utilities import updater
+
+    return jsonify(updater.start_install_resync())
+
+
+@app.post("/updates/repair")
+def updates_repair():
+    from utilities import updater
+
+    return jsonify(updater.start_ota_repair())
+
+
 @app.get("/atc/airports")
 def atc_airports():
     from utilities import atc_audio
@@ -1327,14 +1962,13 @@ def atc_save():
         settings.set_atc_quiet_end(str(data.get("quiet_end") or ""))
 
     action = str(data.get("action") or "").strip().lower()
+    # Legacy Play/Stop map onto the single enable switch.
     if action == "play":
-        if not settings.atc_enabled():
-            atc_audio.apply_enabled(True)
-        result = atc_audio.start(override=True)
+        result = atc_audio.apply_enabled(True)
         settings.request_reload()
         return jsonify(result)
     if action == "stop":
-        result = atc_audio.stop()
+        result = atc_audio.apply_enabled(False)
         settings.request_reload()
         return jsonify(result)
 
@@ -1453,6 +2087,30 @@ def bluetooth_route():
     return jsonify(result)
 
 
+@app.get("/disclaimer/json")
+def disclaimer_json():
+    """Status of on-device remembered disclaimer acceptance (read-only)."""
+    from display.round_touch import disclaimer_acceptance
+
+    return jsonify(disclaimer_acceptance.status())
+
+
+@app.post("/disclaimer/clear")
+def disclaimer_clear():
+    """Clear saved disclaimer acceptance (version 0). Portal cannot enable/remember."""
+    from display.round_touch import disclaimer_acceptance, settings
+
+    disclaimer_acceptance.clear()
+    settings.request_reload()
+    payload = disclaimer_acceptance.status()
+    payload["ok"] = True
+    payload["message"] = (
+        "Saved disclaimer acceptance cleared. "
+        "The next boot will wait for Accept (no countdown)."
+    )
+    return jsonify(payload)
+
+
 @app.post("/system/reboot")
 def system_reboot():
     from utilities import system_control
@@ -1474,6 +2132,16 @@ def system_restart_app():
     return jsonify(system_control.request_app_restart())
 
 
+@app.post("/system/factory-reset")
+def system_factory_reset():
+    from utilities import updater
+
+    result = updater.start_factory_reset()
+    if not result.get("ok"):
+        return jsonify(result), 409
+    return jsonify(result)
+
+
 @app.get("/settings/export")
 def settings_export():
     """Download all user preference JSON as a versioned ``.config`` file.
@@ -1492,6 +2160,29 @@ def settings_export():
         as_attachment=True,
         download_name=settings_backup.export_filename(),
         mimetype="application/json",
+        max_age=0,
+    )
+
+
+@app.get("/diagnostics/export")
+def diagnostics_export():
+    """Download a support diagnostics zip (device info + logs, secrets redacted)."""
+    from utilities import diagnostics_bundle
+
+    try:
+        payload = diagnostics_bundle.build_diagnostics_zip(data_dir=DATA_DIR)
+    except diagnostics_bundle.DiagnosticsBundleError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 500
+    except Exception as exc:
+        return jsonify({"ok": False, "message": f"Diagnostics export failed: {exc}"}), 500
+
+    buf = BytesIO(payload)
+    buf.seek(0)
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=diagnostics_bundle.export_filename(),
+        mimetype="application/zip",
         max_age=0,
     )
 
@@ -1559,4 +2250,10 @@ def settings_import():
 
 
 if __name__ == "__main__":
+    try:
+        from utilities.app_logging import configure_app_logging
+
+        configure_app_logging()
+    except Exception:
+        pass
     app.run(host="0.0.0.0", port=WEB_PORT, debug=False)

@@ -23,7 +23,33 @@ _settings_mtime: float | None = None
 # True when _state matches disk. Slider drags set this False until persist.
 _disk_synced = True
 
-MIN_HEIGHT_OPTIONS = (0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000)
+
+class _SettingsState(dict):
+    """Settings dict that remembers which keys this process has assigned.
+
+    The display and the web portal are separate processes, each holding a full
+    copy of the settings. Writing a whole copy back rolled every key the other
+    process had changed since this one last read the file. Recording the keys a
+    setter actually assigns lets ``_save`` write those and leave the rest of
+    the file alone.
+    """
+
+    __slots__ = ("dirty",)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.dirty: set[str] = set()
+
+    def __setitem__(self, key, value):
+        self.dirty.add(key)
+        super().__setitem__(key, value)
+
+    def update(self, *args, **kwargs):  # noqa: D102 - dict override
+        other = dict(*args, **kwargs)
+        self.dirty.update(other)
+        super().update(other)
+
+MIN_HEIGHT_OPTIONS = (0, 100, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000)
 # AIS vessels slower than or equal to this (kt) are hidden; 0 = no speed floor.
 VESSEL_MIN_SPEED_OPTIONS = (0, 1, 2, 3, 5, 8, 10, 15)
 # Aircraft slower than or equal to this GS (kt) are hidden; 0 = no speed floor.
@@ -52,6 +78,35 @@ TRAFFIC_LABEL_LABELS = {
     "both": "Aircraft and Marine",
     "off": "OFF",
 }
+# Radar aircraft identity line: marketing flight number, ATC callsign, tail, or
+# time-alternating through whichever of those differ.
+AIRCRAFT_TAG_ID_MODES = ("flight_number", "callsign", "tail", "alternate")
+AIRCRAFT_TAG_ID_LABELS = {
+    "flight_number": "Flight number",
+    "callsign": "Callsign",
+    "tail": "Tail number",
+    "alternate": "Alternate",
+}
+# Seconds between identity swaps when aircraft_tag_id == alternate.
+AIRCRAFT_TAG_ID_ALTERNATE_S = 2.5
+# Split-flap board row identity: tail number, marketing flight, or ATC callsign.
+FLIP_BOARD_ID_MODES = ("tail", "flight_number", "callsign")
+FLIP_BOARD_ID_LABELS = {
+    "tail": "Tail number",
+    "flight_number": "Flight number",
+    "callsign": "Callsign",
+}
+# Out-of-range aircraft on the radar rim (PR118).
+RIM_TARGET_STYLES = ("plane", "dot")
+RIM_TARGET_STYLE_LABELS = {
+    "plane": "Aircraft icon",
+    "dot": "Dot blip",
+}
+# Follow speed-based zoom bounds (issue #114) — portal / settings.json.
+LIVE_TRACKING_PREVIEW_MINUTES_MIN = 1.0
+LIVE_TRACKING_PREVIEW_MINUTES_MAX = 30.0
+LIVE_TRACKING_RADIUS_KM_FLOOR = 1.0
+LIVE_TRACKING_RADIUS_KM_CEILING = 200.0
 # Distance + speed pairs for Display → Units (stored as "{dist}_{speed}").
 UNIT_PRESETS = ("nm_kts", "mi_mph", "km_kph", "mi_kts", "km_kts")
 UNIT_PRESET_LABELS = {
@@ -61,9 +116,33 @@ UNIT_PRESET_LABELS = {
     "mi_kts": "mi, kts",
     "km_kts": "km, kts",
 }
-_LEGACY_DISTANCE_TO_PRESET = {"km": "km_kph", "mi": "mi_mph", "nm": "nm_kts"}
-# Stored ids for basemap (labels live in map_style_label()).
-MAP_STYLES = ("dark", "light", "voyager", "vfr")
+_LEGACY_DISTANCE_TO_PRESET = {"km": "km_kph", "mi": "mi_kts", "nm": "nm_kts"}
+# Stored ids for basemap (labels live in MAP_STYLE_LABELS / map_style_label()).
+# Order matches Dark / Light / Street / Satellite groups in the picker.
+MAP_STYLES = (
+    "dark",
+    "osm",
+    "stadia_dark",
+    "black",
+    "light",
+    "toner",
+    "vfr",
+    "streets",
+    "voyager",
+    "satellite",
+)
+MAP_STYLE_LABELS = {
+    "dark": "Dark: Carto",
+    "osm": "Dark: OSM",
+    "stadia_dark": "Dark: Stadia (needs STADIA_MAPS_API_KEY)",
+    "black": "Dark: Flat",
+    "light": "Light: Carto",
+    "toner": "Light: Toner (needs STADIA_MAPS_API_KEY)",
+    "vfr": "Light: VFR",
+    "streets": "Street: Esri",
+    "voyager": "Street: Voyager",
+    "satellite": "Satellite: Esri",
+}
 
 # Waveshare DSI panels stay lit near ~3% (raw ~8/255); 10% was needlessly bright at night.
 BRIGHTNESS_MIN_PERCENT = 3
@@ -78,6 +157,14 @@ ATC_VOLUME_MAX = 100
 RADAR_HUD_OPACITY_MIN = 0
 RADAR_HUD_OPACITY_MAX = 100
 RADAR_HUD_POSITIONS = ("top", "bottom")
+DEFAULT_CLOCKS = ("digital", "analog", "night", "flieger")
+DEFAULT_CLOCK_LABELS = {
+    "digital": "Digital",
+    "analog": "Analog",
+    "night": "Analog (altimeter, night)",
+    "flieger": "Flieger chronograph",
+}
+DATE_FORMATS = ("us", "eu")
 HOURLY_CHIME_VOLUME_MIN = 0
 HOURLY_CHIME_VOLUME_MAX = 100
 # Shared 0–100 scale for tracked-enter / military alert SFX.
@@ -87,7 +174,7 @@ SFX_VOLUME_MAX = 100
 MASTER_SOUND_VOLUME_MIN = 0
 MASTER_SOUND_VOLUME_MAX = 100
 # HUD volume-popover channel keys.
-HUD_VOLUME_CHANNELS = ("speaker", "chime", "alert", "atc")
+HUD_VOLUME_CHANNELS = ("speaker", "chime", "alert", "atc", "lofi")
 
 
 def clamp_brightness_percent(value: int) -> int:
@@ -141,25 +228,27 @@ RADAR_HUD_LAYOUT_KEYS = (
     "temp",
     "wind",
     "aqi",
+    "home",
     "clock",
     "speaker",
     "chime",
     "alert",
     "atc",
+    "lofi",
 )
 # Absolute px clamp so load works before display theme.s() is ready (~theme.s(48) @720).
 RADAR_HUD_LAYOUT_OFFSET_MAX = 96
 
 # Baked top-pill offsets (from device arrange pass, 2026-07-31).
 RADAR_HUD_LAYOUT_TOP_DEFAULT = {
-    "wx_icon": [-29, 31],
+    "wx_icon": [-24, 40],
     "temp": [42, -29],
-    "wind": [14, -6],
+    "wind": [5, -5],
 }
 
 # Baked bottom-pill offsets (from device arrange pass, 2026-07-31).
 RADAR_HUD_LAYOUT_BOTTOM_DEFAULT = {
-    "wx_icon": [2, -6],
+    "wx_icon": [9, -13],
     "wind": [4, 0],
 }
 
@@ -231,23 +320,44 @@ def radar_hud_arrange_debug_enabled() -> bool:
 
 _defaults = {
     "brightness_percent": 100,
-    "distance_units": "km",
-    "unit_preset": "km_kph",
+    "distance_units": "mi",
+    "unit_preset": "mi_kts",
     "show_compass_rose": True,
+    "color_by_altitude": False,
     "show_range_rings": True,
     # Legacy bool kept in sync with traffic_labels for older readers.
     "show_aircraft_tag": True,
     # aircraft | marine | both | off — which callsign/name tags to draw
-    "traffic_labels": "both",
+    "traffic_labels": "aircraft",
+    # flight_number | callsign | both — aircraft identity line content
+    "aircraft_tag_id": "flight_number",
     # Real-world direction at the top of the screen (0=north-up).
     "facing_deg": 0.0,
     "show_sweep": True,
+    # Split-flap clatter while the arrivals board turns.
+    "flip_board_sound": True,
+    # Hockey-stick underline + diagonal from tag to blip.
+    "show_tag_leaders": True,
+    # Out-of-range rim targets: plane | dot (PR118). Seeded from config on first load.
+    "rim_target_style": "plane",
+    # Follow speed-based zoom (issue #114) — seeded from config on first load.
+    "live_tracking_preview_minutes": 5.0,
+    "live_tracking_min_radius_km": 3.22,
+    "live_tracking_max_radius_km": 120.0,
     "show_precipitation": True,
     "show_wildfires": False,
+    "show_earthquakes": False,
+    "earthquake_voice_enabled": False,
     # OurAirports runway centerlines on dark/light maps (not VFR).
-    "show_airport_centerlines": False,
+    "show_airport_centerlines": True,
     # airport.png pins for large/medium/small airports in range.
-    "show_airport_icons": False,
+    "show_airport_icons": True,
+    # classic (airport.png pin) | chart (sectional-style vector icon).
+    "airport_icon_style": "classic",
+    # large | medium | small_paved | small — smallest airport tier drawn.
+    "airport_min_size": "small",
+    # tail | flight_number | callsign — which identity the board flaps show.
+    "flip_board_id": "tail",
     # Airport ground vehicles (GRND/GVEH/… icon category) on the radar.
     "show_ground_vehicles": True,
     # Hide AIS vessels at or below this SOG (knots). 0 = show all speeds.
@@ -259,19 +369,27 @@ _defaults = {
     "theme_custom": True,
     "custom_theme_rgb": list(color_presets.DEFAULT_CUSTOM_RGB),
     "runway_darkmap_rgb": list(color_presets.DEFAULT_RUNWAY_DARKMAP_RGB),
+    "runway_light_rgb": list(color_presets.DEFAULT_RUNWAY_LIGHT_RGB),
+    "tag_text_dark_rgb": list(color_presets.DEFAULT_TAG_TEXT_DARK_RGB),
+    "tag_text_light_rgb": list(color_presets.DEFAULT_TAG_TEXT_LIGHT_RGB),
     "theme_palette_v": color_presets.THEME_PALETTE_V,
     "clock_12hr": True,
+    # us | eu — digital and altimeter clock date order (Flieger unchanged).
+    "date_format": "us",
     "auto_timezone": True,
     "min_height_ft": 1000,
     "max_height_ft": 100000,
     "auto_idle_clock": True,
+    "default_clock": "digital",
+    # Clock face while Off-Hours window is active (force-clock / idle / open).
+    "default_clock_off_hours": "digital",
     "flight_detail_timeout_s": 20,
     "clock_timeout_s": 10,
     # aircraft | marine | both — what the radar shows
-    "traffic_mode": "aircraft",
+    "traffic_mode": "both",
     # Kept in sync with traffic_mode for older readers / portal payloads
-    "ais_enabled": False,
-    # dark | light | voyager | vfr — radar basemap (see map_bg)
+    "ais_enabled": True,
+    # dark | osm | stadia_dark | toner | satellite | streets | black | light | voyager | vfr
     "map_style": "dark",
     "vfr_map_opacity": 45,
     # Clockwise UI + touch mapping: 0, 90, 180, 270 (physical panel mount).
@@ -284,15 +402,54 @@ _defaults = {
     "atc_quiet_hours_enabled": True,
     "atc_quiet_start": "",
     "atc_quiet_end": "",
-    # Resume after app restart / reboot if True when Stop was not pressed.
+    # Dim the display during quiet hours (screen-side quiet mode).
+    "quiet_dim_enabled": False,
+    "quiet_dim_percent": 20,
+    # Last non-zero dim level, restored by the screen-off button.
+    "quiet_dim_restore": 20,
+    # One-time fold of legacy off-hours dim/off into quiet dim.
+    "quiet_dim_migrated": False,
+    # Targets page: per-category appearance ("" = today's default look).
+    "tgt_plane_color": "",
+    "tgt_heli_color": "",
+    "tgt_drone_color": "",
+    "tgt_vessel_color": "",
+    "tgt_plane_size": 100,
+    "tgt_heli_size": 100,
+    "tgt_drone_size": 100,
+    "tgt_vessel_size": 100,
+    "tgt_plane_form": "icon",
+    "tgt_heli_form": "icon",
+    "tgt_drone_form": "icon",
+    "tgt_vessel_form": "icon",
+    "compass_color": "",
+    "compass_opacity": 100,
+    "compass_labels": "letters",
+    "blip_color": "",
+    "blip_size": 100,
+    "blip_opacity": 100,
+    # Resume after app restart / reboot when ATC was left enabled.
     "atc_want_playing": False,
-    # User pressed Play during quiet hours — resume may keep overriding.
+    # User enabled ATC during quiet hours — resume may keep overriding.
     "atc_quiet_override": False,
     # Radar clock HUD (Option A glass pill).
     "radar_hud_enabled": True,
     "radar_hud_position": "top",
     "radar_hud_opacity": 72,
-    "radar_hud_dark": False,
+    "radar_hud_dark": True,
+    # Lofi music bed under the live ATC stream.
+    "lofi_enabled": False,
+    "lofi_volume": 25,
+    # Prev/next track pill on the radar rim (needs lofi_enabled too).
+    "lofi_controls_enabled": False,
+    # Marquee-scroll the track name in the pill; off = truncate at 20 chars.
+    "lofi_title_scroll": True,
+    # Topo contour texture behind settings/detail screens.
+    "background_texture": True,
+    # Faint − / + range-step buttons on the radar rim.
+    "radar_zoom_buttons": True,
+    # right | left — which rim edge holds the zoom pill.
+    "radar_zoom_position": "right",
     "radar_hud_arrange": False,  # legacy; arrange is gated by FLIGHTSCNR_HUD_ARRANGE
     "radar_hud_layout_top": copy_radar_hud_layout_top_default(),
     "radar_hud_layout_bottom": copy_radar_hud_layout_bottom_default(),
@@ -302,6 +459,7 @@ _defaults = {
     "traffic_sfx_volume": 80,
     "military_sfx_enabled": True,
     "military_sfx_volume": 80,
+    "earthquake_voice_volume": 80,
     # Master mute for ATC / chime / alert SFX (radar HUD volume icon).
     "master_sound_enabled": True,
     # Master gain (0–100%); multiplies every HUD audio path when unmuted.
@@ -313,12 +471,35 @@ _defaults = {
     "bluetooth_speaker_name": "",
     # Active playback route for ATC / chime: "usb" | "bluetooth".
     "audio_route": "usb",
-    # First-run safety disclaimer (not for safety-critical / certified use).
-    "safety_disclaimer_accepted": False,
+    # Safety disclaimer "Don't show again" version (0 = not remembered).
+    # Matches disclaimer_acceptance.CURRENT_VERSION when opted in on-device.
+    "safety_disclaimer_version": 0,
+    # When True (default), lost-link / offline grace may open the setup hotspot.
+    # First-boot with no saved Wi-Fi still enters setup even when False.
+    "auto_wifi_setup_hotspot": True,
 }
 
 # Live preview while calibrating facing (not persisted until save).
 _facing_preview: float | None = None
+
+
+def _clamp_preview_minutes(value) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        v = 5.0
+    return max(
+        LIVE_TRACKING_PREVIEW_MINUTES_MIN,
+        min(LIVE_TRACKING_PREVIEW_MINUTES_MAX, v),
+    )
+
+
+def _clamp_radius_km(value, *, default: float) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        v = float(default)
+    return max(LIVE_TRACKING_RADIUS_KM_FLOOR, min(LIVE_TRACKING_RADIUS_KM_CEILING, v))
 
 
 def _normalize_facing(deg) -> float:
@@ -406,7 +587,7 @@ def _normalize_unit_preset(value) -> str:
     # Legacy distance-only values.
     if raw in _LEGACY_DISTANCE_TO_PRESET:
         return _LEGACY_DISTANCE_TO_PRESET[raw]
-    return "km_kph"
+    return "mi_kts"
 
 
 def _env_min_height() -> int:
@@ -453,14 +634,14 @@ def _seed_from_env(state: dict) -> None:
 
         state["distance_units"] = "mi" if DISTANCE_UNITS.strip().lower() == "imperial" else "km"
         state["unit_preset"] = (
-            "mi_mph" if state["distance_units"] == "mi" else "km_kph"
+            "mi_kts" if state["distance_units"] == "mi" else "km_kph"
         )
         state["scale_index"] = scale.index_for_radius_nm(SEARCH_RADIUS_NM)
         state["min_height_ft"] = _snap_min_height(MIN_HEIGHT)
         state["max_height_ft"] = _snap_max_height(MAX_HEIGHT)
         _ensure_height_band(state)
         env_style = map_bg.normalize_map_style(os.environ.get("RADAR_MAP_PROVIDER", "dark"))
-        # UI cycles dark/light/voyager/vfr; map legacy osm to dark for first-run seed.
+        # UI cycles dark/black/light/voyager/vfr; map legacy osm to dark for first-run seed.
         state["map_style"] = env_style if env_style in MAP_STYLES else "dark"
         state["display_rotation"] = _env_display_rotation()
         state["show_wildfires"] = _default_show_wildfires()
@@ -493,38 +674,76 @@ _ATC_PRESERVE_KEYS = (
     "atc_quiet_hours_enabled",
     "atc_quiet_start",
     "atc_quiet_end",
+    "quiet_dim_enabled",
+    "quiet_dim_percent",
+    "quiet_dim_restore",
     "atc_want_playing",
     "atc_quiet_override",
 )
 
 
+def _fresh_state(base=None) -> "_SettingsState":
+    """A clean settings state that still tracks assignments.
+
+    Tests reset settings between cases. Assigning a plain ``dict`` to
+    ``_state`` silently turns every later save back into a whole-file write,
+    so use this instead.
+    """
+    return _SettingsState(_defaults if base is None else base)
+
+
+def _read_disk() -> dict | None:
+    """Current file contents, or None when it is missing or unreadable."""
+    try:
+        with open(SETTINGS_PATH, encoding="utf-8") as fh:
+            disk = json.load(fh)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    return disk if isinstance(disk, dict) else None
+
+
 def _save(data, *, merge_atc_from_disk: bool = True):
     global _state, _settings_mtime, _disk_synced
     out = dict(data)
-    if merge_atc_from_disk:
-        try:
-            with open(SETTINGS_PATH, encoding="utf-8") as fh:
-                disk = json.load(fh)
-            if isinstance(disk, dict):
-                for key in _ATC_PRESERVE_KEYS:
-                    if key in disk:
-                        out[key] = disk[key]
-                        # Module load may call _save before _state is assigned.
-                        if "_state" in globals() and isinstance(_state, dict):
-                            _state[key] = disk[key]
-        except (OSError, json.JSONDecodeError, TypeError):
-            pass
+
+    # Write only the keys this process actually set, over whatever is on disk
+    # right now. Writing a whole stale copy rolled back every preference the
+    # other process had changed since our last read. Callers that pass a plain
+    # dict (``_rmw_save``) have already merged it onto fresh disk contents, so
+    # leave those alone.
+    disk = _read_disk()
+    dirty = getattr(data, "dirty", None)
+    if disk is not None and dirty is not None:
+        changed = {key: out[key] for key in dirty if key in out}
+        out = {**disk, **changed}
+        if merge_atc_from_disk:
+            # Keep the historical guarantee explicit: ATC playback keys are
+            # never rolled back by a save that did not set them.
+            for key in _ATC_PRESERVE_KEYS:
+                if key in disk and key not in changed:
+                    out[key] = disk[key]
+                    # Module load may call _save before _state is assigned.
+                    if "_state" in globals() and isinstance(_state, dict):
+                        _state[key] = disk[key]
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
         tmp_path = SETTINGS_PATH + ".tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(out, f, indent=2)
         os.replace(tmp_path, SETTINGS_PATH)
+        # Match sibling prefs (weather/alert): world-writable so the Pi user
+        # can edit /var/lib/flightscnr/round_touch_settings.json in Cursor.
+        try:
+            os.chmod(SETTINGS_PATH, 0o666)
+        except OSError:
+            pass
         try:
             _settings_mtime = os.path.getmtime(SETTINGS_PATH)
         except OSError:
             _settings_mtime = None
         _disk_synced = True
+        if dirty is not None:
+            dirty.clear()
     except OSError as exc:
         logger.warning("Could not save display settings to %s: %s", SETTINGS_PATH, exc)
 
@@ -556,7 +775,7 @@ def _rmw_save(updates: dict) -> None:
 def _load():
     fresh = not os.path.exists(SETTINGS_PATH)
     if fresh:
-        state = dict(_defaults)
+        state = _SettingsState(_defaults)
         _seed_from_env(state)
         _save(state)
         logger.info("Created display settings at %s", SETTINGS_PATH)
@@ -567,12 +786,12 @@ def _load():
             data = json.load(f)
     except (OSError, json.JSONDecodeError, TypeError) as exc:
         logger.warning("Could not read %s (%s) — using defaults", SETTINGS_PATH, exc)
-        state = dict(_defaults)
+        state = _SettingsState(_defaults)
         _seed_from_env(state)
         _save(state)
         return state
 
-    state = {**_defaults, **data}
+    state = _SettingsState({**_defaults, **data})
     migrated = False
     if "min_height_ft" not in data:
         state["min_height_ft"] = _env_min_height()
@@ -593,7 +812,7 @@ def _load():
         del state["distance_miles"]
         migrated = True
     if "distance_units" not in state:
-        state["distance_units"] = "km"
+        state["distance_units"] = "mi"
         migrated = True
     # Compound distance+speed presets (nm,kts / mi,mph / …).
     preset = _normalize_unit_preset(state.get("unit_preset"))
@@ -601,7 +820,7 @@ def _load():
         preset = _normalize_unit_preset(
             state.get("unit_preset")
             or _LEGACY_DISTANCE_TO_PRESET.get(
-                str(state.get("distance_units", "km")).lower(), "km_kph"
+                str(state.get("distance_units", "mi")).lower(), "mi_kts"
             )
         )
         state["unit_preset"] = preset
@@ -625,22 +844,38 @@ def _load():
         if "ais_enabled" in data:
             state["traffic_mode"] = "both" if data.get("ais_enabled") else "aircraft"
         else:
-            state["traffic_mode"] = mode if mode in TRAFFIC_MODES else "aircraft"
+            state["traffic_mode"] = mode if mode in TRAFFIC_MODES else "both"
         migrated = True
     state["ais_enabled"] = state["traffic_mode"] in ("marine", "both")
     # Migrate legacy show_aircraft_tag bool → traffic_labels enum
     labels = str(state.get("traffic_labels") or "").strip().lower()
     if "traffic_labels" not in data or labels not in TRAFFIC_LABEL_MODES:
         if "show_aircraft_tag" in data:
-            state["traffic_labels"] = "both" if data.get("show_aircraft_tag") else "off"
+            state["traffic_labels"] = "aircraft" if data.get("show_aircraft_tag") else "off"
         else:
             state["traffic_labels"] = (
-                labels if labels in TRAFFIC_LABEL_MODES else "both"
+                labels if labels in TRAFFIC_LABEL_MODES else "aircraft"
             )
         migrated = True
     else:
         state["traffic_labels"] = labels
     state["show_aircraft_tag"] = state["traffic_labels"] != "off"
+    tag_id = str(state.get("aircraft_tag_id") or "").strip().lower()
+    if tag_id == "both":
+        # Legacy two-way alternate → three-way (flight / callsign / tail).
+        state["aircraft_tag_id"] = "alternate"
+        migrated = True
+    elif tag_id not in AIRCRAFT_TAG_ID_MODES:
+        state["aircraft_tag_id"] = "flight_number"
+        migrated = True
+    else:
+        state["aircraft_tag_id"] = tag_id
+    board_id = str(state.get("flip_board_id") or "").strip().lower()
+    if board_id not in FLIP_BOARD_ID_MODES:
+        state["flip_board_id"] = "tail"
+        migrated = True
+    else:
+        state["flip_board_id"] = board_id
     state["facing_deg"] = _normalize_facing(state.get("facing_deg", 0))
     if "map_style" not in data:
         try:
@@ -652,8 +887,14 @@ def _load():
             state["map_style"] = "dark"
         migrated = True
     else:
-        raw = str(state.get("map_style") or "dark").strip().lower()
-        state["map_style"] = raw if raw in MAP_STYLES else "dark"
+        try:
+            from display.round_touch import map_bg
+
+            style = map_bg.normalize_map_style(state.get("map_style"))
+            state["map_style"] = style if style in MAP_STYLES else "dark"
+        except ImportError:
+            raw = str(state.get("map_style") or "dark").strip().lower()
+            state["map_style"] = raw if raw in MAP_STYLES else "dark"
     try:
         if "vfr_map_opacity" not in data:
             state["vfr_map_opacity"] = 45
@@ -677,6 +918,16 @@ def _load():
         migrated = True
     else:
         state["show_wildfires"] = bool(state.get("show_wildfires"))
+    if "show_earthquakes" not in data:
+        state["show_earthquakes"] = False
+        migrated = True
+    else:
+        state["show_earthquakes"] = bool(state.get("show_earthquakes"))
+    if "earthquake_voice_enabled" not in data:
+        state["earthquake_voice_enabled"] = False
+        migrated = True
+    else:
+        state["earthquake_voice_enabled"] = bool(state.get("earthquake_voice_enabled"))
     # Split legacy show_airports into centerlines + icons (old toggle did both).
     legacy_airports = bool(data.get("show_airports", False)) if "show_airports" in data else False
     if "show_airport_centerlines" not in data:
@@ -723,6 +974,36 @@ def _load():
         migrated = True
     else:
         state["radar_hud_position"] = pos
+    clock_face = str(state.get("default_clock") or "digital").strip().lower()
+    if clock_face not in DEFAULT_CLOCKS:
+        state["default_clock"] = "digital"
+        migrated = True
+    else:
+        state["default_clock"] = clock_face
+    if "default_clock_off_hours" not in data:
+        # Migrate: night-as-default → day analog + off-hours night.
+        day = state["default_clock"]
+        if day == "night":
+            state["default_clock"] = "analog"
+            state["default_clock_off_hours"] = "night"
+        elif day == "analog":
+            state["default_clock_off_hours"] = "night"
+        else:
+            state["default_clock_off_hours"] = day
+        migrated = True
+    else:
+        night_face = str(state.get("default_clock_off_hours") or "digital").strip().lower()
+        if night_face not in DEFAULT_CLOCKS:
+            state["default_clock_off_hours"] = "digital"
+            migrated = True
+        else:
+            state["default_clock_off_hours"] = night_face
+    date_fmt = str(state.get("date_format") or "us").strip().lower()
+    if date_fmt not in DATE_FORMATS:
+        state["date_format"] = "us"
+        migrated = True
+    else:
+        state["date_format"] = date_fmt
     try:
         if "radar_hud_opacity" not in data:
             state["radar_hud_opacity"] = 72
@@ -735,7 +1016,7 @@ def _load():
         state["radar_hud_opacity"] = 72
         migrated = True
     if "radar_hud_dark" not in data:
-        state["radar_hud_dark"] = False
+        state["radar_hud_dark"] = True
         migrated = True
     else:
         state["radar_hud_dark"] = bool(state.get("radar_hud_dark"))
@@ -795,7 +1076,32 @@ def _load():
             migrated = True
         else:
             state[_sfx_en_key] = bool(state.get(_sfx_en_key))
-    for _sfx_vol_key in ("traffic_sfx_volume", "military_sfx_volume"):
+    # Single ATC power switch: enabled and want_playing must stay in sync.
+    # Only keep ATC on when both legacy flags were true (gate + Play intent).
+    on = bool(state.get("atc_enabled", False)) and bool(
+        state.get("atc_want_playing", False)
+    )
+    if bool(state.get("atc_enabled", False)) != on or bool(
+        state.get("atc_want_playing", False)
+    ) != on:
+        state["atc_enabled"] = on
+        state["atc_want_playing"] = on
+        migrated = True
+    # LoFi only beds under ATC — clear stale armed state when ATC is off.
+    if not bool(state.get("atc_enabled", False)) and bool(
+        state.get("lofi_enabled", False)
+    ):
+        state["lofi_enabled"] = False
+        migrated = True
+    # Soft-mute layer removed — keep legacy key frozen unmuted.
+    if not bool(state.get("atc_sound_enabled", True)):
+        state["atc_sound_enabled"] = True
+        migrated = True
+    for _sfx_vol_key in (
+        "traffic_sfx_volume",
+        "military_sfx_volume",
+        "earthquake_voice_volume",
+    ):
         try:
             if _sfx_vol_key not in data:
                 state[_sfx_vol_key] = 80
@@ -840,13 +1146,73 @@ def _load():
         state["audio_route"] = route
     if "audio_route" not in data:
         migrated = True
-    if "safety_disclaimer_accepted" not in data:
-        state["safety_disclaimer_accepted"] = False
+    # Legacy boolean alone never counts as remembered; drop it for versioned key.
+    if "safety_disclaimer_accepted" in state:
+        del state["safety_disclaimer_accepted"]
+        migrated = True
+    try:
+        version = int(state.get("safety_disclaimer_version", 0) or 0)
+    except (TypeError, ValueError):
+        version = 0
+    if version < 0:
+        version = 0
+    if (
+        "safety_disclaimer_version" not in data
+        or state.get("safety_disclaimer_version") != version
+    ):
+        migrated = True
+    state["safety_disclaimer_version"] = version
+    # Rim target style (PR118) — seed from config when unset.
+    rim = str(state.get("rim_target_style") or "").strip().lower()
+    if "rim_target_style" not in data or rim not in RIM_TARGET_STYLES:
+        try:
+            from config import RADAR_RIM_STYLE
+
+            rim = str(RADAR_RIM_STYLE or "plane").strip().lower()
+        except Exception:
+            rim = "plane"
+        state["rim_target_style"] = rim if rim in RIM_TARGET_STYLES else "plane"
         migrated = True
     else:
-        state["safety_disclaimer_accepted"] = bool(
-            state.get("safety_disclaimer_accepted")
+        state["rim_target_style"] = rim
+    # Follow zoom (issue #114) — seed from config when unset.
+    try:
+        from config import (
+            LIVE_TRACKING_PREVIEW_MINUTES as _CFG_PREVIEW,
+            LIVE_TRACKING_MIN_RADIUS_KM as _CFG_MIN_R,
+            LIVE_TRACKING_MAX_RADIUS_KM as _CFG_MAX_R,
         )
+    except Exception:
+        _CFG_PREVIEW, _CFG_MIN_R, _CFG_MAX_R = 5.0, 3.22, 120.0
+    if "live_tracking_preview_minutes" not in data:
+        state["live_tracking_preview_minutes"] = float(_CFG_PREVIEW)
+        migrated = True
+    else:
+        state["live_tracking_preview_minutes"] = _clamp_preview_minutes(
+            state.get("live_tracking_preview_minutes")
+        )
+    if "live_tracking_min_radius_km" not in data:
+        state["live_tracking_min_radius_km"] = float(_CFG_MIN_R)
+        migrated = True
+    else:
+        state["live_tracking_min_radius_km"] = _clamp_radius_km(
+            state.get("live_tracking_min_radius_km"), default=3.22
+        )
+    if "live_tracking_max_radius_km" not in data:
+        state["live_tracking_max_radius_km"] = float(_CFG_MAX_R)
+        migrated = True
+    else:
+        state["live_tracking_max_radius_km"] = _clamp_radius_km(
+            state.get("live_tracking_max_radius_km"), default=120.0
+        )
+    # Keep max >= min.
+    if float(state["live_tracking_max_radius_km"]) < float(
+        state["live_tracking_min_radius_km"]
+    ):
+        state["live_tracking_max_radius_km"] = float(
+            state["live_tracking_min_radius_km"]
+        )
+        migrated = True
     if color_presets.migrate_theme_index(state):
         migrated = True
     if migrated:
@@ -871,16 +1237,28 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("theme_custom"),
         tuple(color_presets.normalize_rgb(state.get("custom_theme_rgb"))),
         tuple(color_presets.normalize_rgb(state.get("runway_darkmap_rgb"))),
+        tuple(color_presets.normalize_rgb(state.get("runway_light_rgb"))),
+        tuple(color_presets.normalize_rgb(state.get("tag_text_dark_rgb"))),
+        tuple(color_presets.normalize_rgb(state.get("tag_text_light_rgb"))),
         state.get("show_compass_rose"),
         state.get("show_range_rings"),
+        state.get("color_by_altitude"),
         state.get("show_aircraft_tag"),
         state.get("traffic_labels"),
+        state.get("aircraft_tag_id"),
         _normalize_facing(state.get("facing_deg", 0)),
         state.get("show_sweep"),
+        state.get("show_tag_leaders"),
         state.get("show_precipitation"),
         state.get("show_wildfires"),
+        state.get("show_earthquakes"),
+        state.get("earthquake_voice_enabled"),
         state.get("show_airport_centerlines"),
         state.get("show_airport_icons"),
+        str(state.get("airport_icon_style") or "classic"),
+        str(state.get("airport_min_size") or "small"),
+        str(state.get("flip_board_id") or "tail"),
+        bool(state.get("flip_board_sound", True)),
         state.get("show_ground_vehicles"),
         state.get("vessel_min_speed_kt"),
         state.get("aircraft_min_speed_kt"),
@@ -888,9 +1266,12 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("max_height_ft"),
         state.get("brightness_percent"),
         state.get("auto_idle_clock"),
+        str(state.get("default_clock") or "digital"),
+        str(state.get("default_clock_off_hours") or "digital"),
         state.get("flight_detail_timeout_s"),
         state.get("clock_timeout_s"),
         state.get("clock_12hr"),
+        str(state.get("date_format") or "us"),
         state.get("auto_timezone"),
         state.get("traffic_mode"),
         state.get("ais_enabled"),
@@ -911,7 +1292,15 @@ def _settings_snapshot(state: dict) -> tuple:
         bool(state.get("radar_hud_enabled", True)),
         str(state.get("radar_hud_position") or "top"),
         clamp_radar_hud_opacity(state.get("radar_hud_opacity", 72)),
-        bool(state.get("radar_hud_dark", False)),
+        bool(state.get("radar_hud_dark", True)),
+        bool(state.get("lofi_enabled", False)),
+        int(state.get("lofi_volume", 25) or 0),
+        bool(state.get("lofi_controls_enabled", False)),
+        bool(state.get("lofi_title_scroll", True)),
+        tuple(sorted(str(n) for n in (state.get("lofi_disabled_tracks") or []))),
+        bool(state.get("background_texture", True)),
+        bool(state.get("radar_zoom_buttons", True)),
+        str(state.get("radar_zoom_position") or "right"),
         bool(radar_hud_arrange_debug_enabled()),
         tuple(
             sorted(
@@ -935,13 +1324,14 @@ def _settings_snapshot(state: dict) -> tuple:
         clamp_sfx_volume(state.get("traffic_sfx_volume", 80)),
         bool(state.get("military_sfx_enabled", True)),
         clamp_sfx_volume(state.get("military_sfx_volume", 80)),
+        clamp_sfx_volume(state.get("earthquake_voice_volume", 80)),
         bool(state.get("master_sound_enabled", True)),
         clamp_master_sound_volume(state.get("master_sound_volume", 100)),
         bool(state.get("atc_sound_enabled", True)),
         str(state.get("bluetooth_speaker_mac") or "").strip().upper(),
         str(state.get("bluetooth_speaker_name") or "").strip(),
         str(state.get("audio_route") or "usb").strip().lower(),
-        bool(state.get("safety_disclaimer_accepted", False)),
+        int(state.get("safety_disclaimer_version", 0) or 0),
     )
 
 
@@ -1124,6 +1514,220 @@ def brightness_percent():
     return int(_state.get("brightness_percent", 100))
 
 
+def flush_pending() -> None:
+    """Persist in-memory slider edits that never reached disk.
+
+    A drag that loses its release path (page change mid-drag, gesture
+    abort) left ``_disk_synced`` False forever, which also wedged
+    ``maybe_reload`` — the display then ignored portal-written settings
+    until restart. The app calls this whenever no slider owns the
+    finger; it is a no-op when memory and disk already agree.
+
+    Only the keys that actually differ from disk are written, through
+    the read-modify-write path, so preserve-listed keys keep the
+    pending value instead of snapping back to the disk copy.
+    """
+    global _disk_synced
+    if _disk_synced:
+        return
+    try:
+        with open(SETTINGS_PATH, encoding="utf-8") as fh:
+            disk = json.load(fh)
+        if not isinstance(disk, dict):
+            disk = {}
+    except (OSError, json.JSONDecodeError, TypeError):
+        disk = {}
+    pending = {k: v for k, v in _state.items() if disk.get(k) != v}
+    if pending:
+        _rmw_save(pending)
+    else:
+        _disk_synced = True
+
+
+def quiet_dim_enabled() -> bool:
+    return bool(_state.get("quiet_dim_enabled", False))
+
+
+def set_quiet_dim_enabled(enabled: bool) -> None:
+    _rmw_save({"quiet_dim_enabled": bool(enabled)})
+
+
+def quiet_dim_percent() -> int:
+    try:
+        pct = int(_state.get("quiet_dim_percent", 20))
+    except (TypeError, ValueError):
+        pct = 20
+    return max(0, min(100, pct))
+
+
+TARGET_CATEGORIES = ("plane", "heli", "drone", "vessel")
+TARGET_FORMS = ("icon", "triangle", "dot")
+COMPASS_LABEL_MODES = ("letters", "degrees", "both")
+TARGET_SIZE_MIN, TARGET_SIZE_MAX = 50, 150
+
+
+def _parse_rgb(raw) -> tuple[int, int, int] | None:
+    try:
+        parts = [int(p) for p in str(raw or "").split(",")]
+        if len(parts) == 3:
+            return tuple(max(0, min(255, p)) for p in parts)
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def _rgb_str(rgb) -> str:
+    if not rgb:
+        return ""
+    r, g, b = rgb
+    return f"{int(r)},{int(g)},{int(b)}"
+
+
+def target_color(cat: str) -> tuple[int, int, int] | None:
+    """Custom accent for a target category, or None for today's default."""
+    return _parse_rgb(_state.get(f"tgt_{cat}_color", ""))
+
+
+def set_target_color(cat: str, rgb, *, persist: bool = True) -> None:
+    if cat not in TARGET_CATEGORIES:
+        return
+    _rmw_save({f"tgt_{cat}_color": _rgb_str(rgb)})
+
+
+def target_size_pct(cat: str) -> int:
+    try:
+        v = int(_state.get(f"tgt_{cat}_size", 100))
+    except (TypeError, ValueError):
+        v = 100
+    return max(TARGET_SIZE_MIN, min(TARGET_SIZE_MAX, v))
+
+
+def set_target_size_pct(cat: str, value: int, *, persist: bool = True) -> None:
+    global _disk_synced
+    if cat not in TARGET_CATEGORIES:
+        return
+    v = max(TARGET_SIZE_MIN, min(TARGET_SIZE_MAX, int(value)))
+    if persist:
+        _rmw_save({f"tgt_{cat}_size": v})
+    else:
+        _state[f"tgt_{cat}_size"] = v
+        _disk_synced = False
+
+
+def target_form(cat: str) -> str:
+    v = str(_state.get(f"tgt_{cat}_form", "icon"))
+    return v if v in TARGET_FORMS else "icon"
+
+
+def set_target_form(cat: str, form: str) -> None:
+    if cat in TARGET_CATEGORIES and form in TARGET_FORMS:
+        _rmw_save({f"tgt_{cat}_form": form})
+
+
+def compass_color() -> tuple[int, int, int] | None:
+    return _parse_rgb(_state.get("compass_color", ""))
+
+
+def set_compass_color(rgb) -> None:
+    _rmw_save({"compass_color": _rgb_str(rgb)})
+
+
+def compass_opacity() -> int:
+    try:
+        v = int(_state.get("compass_opacity", 100))
+    except (TypeError, ValueError):
+        v = 100
+    return max(20, min(100, v))
+
+
+def set_compass_opacity(value: int, *, persist: bool = True) -> None:
+    global _disk_synced
+    v = max(20, min(100, int(value)))
+    if persist:
+        _rmw_save({"compass_opacity": v})
+    else:
+        _state["compass_opacity"] = v
+        _disk_synced = False
+
+
+def compass_labels() -> str:
+    v = str(_state.get("compass_labels", "letters"))
+    return v if v in COMPASS_LABEL_MODES else "letters"
+
+
+def set_compass_labels(mode: str) -> None:
+    if mode in COMPASS_LABEL_MODES:
+        _rmw_save({"compass_labels": mode})
+
+
+def blip_color() -> tuple[int, int, int] | None:
+    return _parse_rgb(_state.get("blip_color", ""))
+
+
+def set_blip_color(rgb) -> None:
+    _rmw_save({"blip_color": _rgb_str(rgb)})
+
+
+def blip_size_pct() -> int:
+    try:
+        v = int(_state.get("blip_size", 100))
+    except (TypeError, ValueError):
+        v = 100
+    return max(TARGET_SIZE_MIN, min(TARGET_SIZE_MAX, v))
+
+
+def set_blip_size_pct(value: int, *, persist: bool = True) -> None:
+    global _disk_synced
+    v = max(TARGET_SIZE_MIN, min(TARGET_SIZE_MAX, int(value)))
+    if persist:
+        _rmw_save({"blip_size": v})
+    else:
+        _state["blip_size"] = v
+        _disk_synced = False
+
+
+def blip_opacity() -> int:
+    try:
+        v = int(_state.get("blip_opacity", 100))
+    except (TypeError, ValueError):
+        v = 100
+    return max(20, min(100, v))
+
+
+def set_blip_opacity(value: int, *, persist: bool = True) -> None:
+    global _disk_synced
+    v = max(20, min(100, int(value)))
+    if persist:
+        _rmw_save({"blip_opacity": v})
+    else:
+        _state["blip_opacity"] = v
+        _disk_synced = False
+
+
+def quiet_dim_restore() -> int:
+    try:
+        pct = int(_state.get("quiet_dim_restore", 20))
+    except (TypeError, ValueError):
+        pct = 20
+    return max(1, min(100, pct))
+
+
+def set_quiet_dim_restore(value: int) -> None:
+    _rmw_save({"quiet_dim_restore": max(1, min(100, int(value)))})
+
+
+def set_quiet_dim_percent(value: int, *, persist: bool = True):
+    global _disk_synced
+    pct = max(0, min(100, int(value)))
+    if persist:
+        # Preserve-listed key: a plain _save(_state) would re-read the old
+        # disk value over the new one (the snap-back-to-default bug).
+        _rmw_save({"quiet_dim_percent": pct})
+    else:
+        _state["quiet_dim_percent"] = pct
+        _disk_synced = False
+
+
 def set_brightness_percent(value: int, *, persist: bool = True):
     global _disk_synced
     _state["brightness_percent"] = clamp_brightness_percent(value)
@@ -1138,7 +1742,7 @@ def unit_preset() -> str:
 
 
 def unit_preset_label() -> str:
-    return UNIT_PRESET_LABELS.get(unit_preset(), "km, kph")
+    return UNIT_PRESET_LABELS.get(unit_preset(), "mi, kts")
 
 
 def distance_units() -> str:
@@ -1196,8 +1800,85 @@ def set_show_sweep_line(enabled: bool):
     _save(_state)
 
 
+def tag_leaders_preferred() -> bool:
+    """Stored Tag Leaders preference, even when traffic labels are off."""
+    return bool(_state.get("show_tag_leaders", True))
+
+
+def show_tag_leaders() -> bool:
+    """Hockey-stick connectors only when a label mode is actually drawing tags."""
+    return tag_leaders_preferred() and show_aircraft_tag()
+
+
+def toggle_tag_leaders():
+    if not show_aircraft_tag():
+        return
+    _state["show_tag_leaders"] = not tag_leaders_preferred()
+    _save(_state)
+
+
+def set_show_tag_leaders(enabled: bool):
+    _state["show_tag_leaders"] = bool(enabled)
+    _save(_state)
+
+
 def show_precipitation() -> bool:
     return bool(_state.get("show_precipitation", True))
+
+def live_map_heading_up() -> bool:
+    """Extended-tracking live map orientation. False (default) = north-up,
+    per the design decision to keep it consistently readable when swiping
+    back and forth from the route map (which is also north-up)."""
+    return bool(_state.get("live_map_heading_up", False))
+
+
+def set_live_map_heading_up(enabled: bool):
+    _state["live_map_heading_up"] = bool(enabled)
+    _save(_state)
+
+
+def live_tracking_preview_minutes() -> float:
+    """Follow zoom: projected travel window in minutes (issue #114)."""
+    return _clamp_preview_minutes(_state.get("live_tracking_preview_minutes", 5.0))
+
+
+def set_live_tracking_preview_minutes(value) -> None:
+    _state["live_tracking_preview_minutes"] = _clamp_preview_minutes(value)
+    _save(_state)
+
+
+def live_tracking_min_radius_km() -> float:
+    """Follow zoom min clamp (speed curve floor; taxi snap is separate)."""
+    return _clamp_radius_km(
+        _state.get("live_tracking_min_radius_km", 3.22), default=3.22
+    )
+
+
+def set_live_tracking_min_radius_km(value) -> None:
+    mn = _clamp_radius_km(value, default=3.22)
+    mx = live_tracking_max_radius_km()
+    if mn > mx:
+        mx = mn
+        _state["live_tracking_max_radius_km"] = mx
+    _state["live_tracking_min_radius_km"] = mn
+    _save(_state)
+
+
+def live_tracking_max_radius_km() -> float:
+    """Follow zoom max clamp (cruise / high-speed ceiling)."""
+    return _clamp_radius_km(
+        _state.get("live_tracking_max_radius_km", 120.0), default=120.0
+    )
+
+
+def set_live_tracking_max_radius_km(value) -> None:
+    mx = _clamp_radius_km(value, default=120.0)
+    mn = live_tracking_min_radius_km()
+    if mx < mn:
+        mn = mx
+        _state["live_tracking_min_radius_km"] = mn
+    _state["live_tracking_max_radius_km"] = mx
+    _save(_state)
 
 
 def toggle_show_precipitation():
@@ -1224,8 +1905,52 @@ def set_show_wildfires(enabled: bool):
     _save(_state)
 
 
+def show_earthquakes() -> bool:
+    return bool(_state.get("show_earthquakes", False))
+
+
+def toggle_show_earthquakes():
+    _state["show_earthquakes"] = not show_earthquakes()
+    _save(_state)
+
+
+def set_show_earthquakes(enabled: bool):
+    _state["show_earthquakes"] = bool(enabled)
+    _save(_state)
+
+
+def earthquake_voice_enabled() -> bool:
+    return bool(_state.get("earthquake_voice_enabled", False))
+
+
+def toggle_earthquake_voice_enabled():
+    _state["earthquake_voice_enabled"] = not earthquake_voice_enabled()
+    _save(_state)
+    return earthquake_voice_enabled()
+
+
+def set_earthquake_voice_enabled(enabled: bool):
+    _state["earthquake_voice_enabled"] = bool(enabled)
+    _save(_state)
+
+
+def earthquake_voice_volume() -> int:
+    return clamp_sfx_volume(_state.get("earthquake_voice_volume", 80))
+
+
+def set_earthquake_voice_volume(value: int, *, persist: bool = True) -> int:
+    global _disk_synced
+    vol = clamp_sfx_volume(value)
+    _state["earthquake_voice_volume"] = vol
+    if persist:
+        _rmw_save({"earthquake_voice_volume": vol})
+    else:
+        _disk_synced = False
+    return vol
+
+
 def show_airport_centerlines() -> bool:
-    return bool(_state.get("show_airport_centerlines", False))
+    return bool(_state.get("show_airport_centerlines", True))
 
 
 def toggle_show_airport_centerlines():
@@ -1239,7 +1964,7 @@ def set_show_airport_centerlines(enabled: bool):
 
 
 def show_airport_icons() -> bool:
-    return bool(_state.get("show_airport_icons", False))
+    return bool(_state.get("show_airport_icons", True))
 
 
 def toggle_show_airport_icons():
@@ -1250,6 +1975,76 @@ def toggle_show_airport_icons():
 def set_show_airport_icons(enabled: bool):
     _state["show_airport_icons"] = bool(enabled)
     _save(_state)
+
+
+def flip_board_id() -> str:
+    """Which identity the split-flap rows show: tail, flight number, or callsign."""
+    mode = str(_state.get("flip_board_id") or "").strip().lower()
+    if mode in FLIP_BOARD_ID_MODES:
+        return mode
+    return "tail"
+
+
+def flip_board_id_label() -> str:
+    return FLIP_BOARD_ID_LABELS.get(flip_board_id(), "Tail number")
+
+
+def set_flip_board_id(mode: str) -> str:
+    raw = str(mode or "").strip().lower()
+    if raw not in FLIP_BOARD_ID_MODES:
+        raw = "tail"
+    _state["flip_board_id"] = raw
+    _save(_state)
+    return raw
+
+
+AIRPORT_ICON_STYLES = ("classic", "chart")
+AIRPORT_ICON_STYLE_LABELS = {"classic": "Classic pins", "chart": "Chart style"}
+
+
+def airport_icon_style() -> str:
+    style = str(_state.get("airport_icon_style") or "classic").strip().lower()
+    return style if style in AIRPORT_ICON_STYLES else "classic"
+
+
+def set_airport_icon_style(style: str) -> str:
+    value = str(style or "classic").strip().lower()
+    if value not in AIRPORT_ICON_STYLES:
+        value = "classic"
+    _state["airport_icon_style"] = value
+    _save(_state)
+    return value
+
+
+def airport_icon_style_label() -> str:
+    return AIRPORT_ICON_STYLE_LABELS.get(airport_icon_style(), "Classic pins")
+
+
+AIRPORT_MIN_SIZES = ("large", "medium", "small_paved", "small")
+AIRPORT_MIN_SIZE_LABELS = {
+    "large": "Large only",
+    "medium": "Large + medium",
+    "small_paved": "Small (paved only)",
+    "small": "All small strips",
+}
+
+
+def airport_min_size() -> str:
+    size = str(_state.get("airport_min_size") or "small").strip().lower()
+    return size if size in AIRPORT_MIN_SIZES else "small"
+
+
+def set_airport_min_size(size: str) -> str:
+    value = str(size or "small").strip().lower()
+    if value not in AIRPORT_MIN_SIZES:
+        value = "small"
+    _state["airport_min_size"] = value
+    _save(_state)
+    return value
+
+
+def airport_min_size_label() -> str:
+    return AIRPORT_MIN_SIZE_LABELS.get(airport_min_size(), "All small strips")
 
 
 def show_ground_vehicles() -> bool:
@@ -1335,13 +2130,7 @@ def map_style() -> str:
 
 
 def map_style_label() -> str:
-    labels = {
-        "dark": "Dark",
-        "light": "Light",
-        "voyager": "Voyager",
-        "vfr": "VFR Sectional",
-    }
-    return labels.get(map_style(), "Dark")
+    return MAP_STYLE_LABELS.get(map_style(), "Dark: Carto")
 
 
 def set_map_style(value: str) -> str:
@@ -1488,6 +2277,44 @@ def set_show_compass_rose(enabled: bool):
     _save(_state)
 
 
+def color_by_altitude():
+    return bool(_state.get("color_by_altitude", False))
+
+
+def toggle_color_by_altitude():
+    _state["color_by_altitude"] = not color_by_altitude()
+    _save(_state)
+
+
+def set_color_by_altitude(enabled: bool):
+    _state["color_by_altitude"] = bool(enabled)
+    _save(_state)
+
+
+def rim_target_style() -> str:
+    """How out-of-range targets render on the rim: plane | dot."""
+    raw = str(_state.get("rim_target_style") or "").strip().lower()
+    if raw in RIM_TARGET_STYLES:
+        return raw
+    try:
+        from config import RADAR_RIM_STYLE
+
+        raw = str(RADAR_RIM_STYLE or "plane").strip().lower()
+    except Exception:
+        raw = "plane"
+    return raw if raw in RIM_TARGET_STYLES else "plane"
+
+
+def rim_target_style_label() -> str:
+    return RIM_TARGET_STYLE_LABELS.get(rim_target_style(), "Aircraft icon")
+
+
+def set_rim_target_style(value: str):
+    raw = str(value or "").strip().lower()
+    _state["rim_target_style"] = raw if raw in RIM_TARGET_STYLES else "plane"
+    _save(_state)
+
+
 def show_range_rings() -> bool:
     return bool(_state.get("show_range_rings", True))
 
@@ -1516,7 +2343,7 @@ def traffic_labels() -> str:
 
 
 def traffic_labels_label() -> str:
-    return TRAFFIC_LABEL_LABELS.get(traffic_labels(), "Aircraft and Marine")
+    return TRAFFIC_LABEL_LABELS.get(traffic_labels(), "Aircraft Only")
 
 
 def show_aircraft_labels() -> bool:
@@ -1554,6 +2381,31 @@ def toggle_show_aircraft_tag():
 def set_show_aircraft_tag(enabled: bool):
     """Legacy setter: True → both, False → off."""
     set_traffic_labels("both" if enabled else "off")
+
+
+def aircraft_tag_id() -> str:
+    """Aircraft tag identity: flight_number, callsign, tail, or alternate."""
+    mode = str(_state.get("aircraft_tag_id") or "").strip().lower()
+    if mode == "both":
+        return "alternate"
+    if mode in AIRCRAFT_TAG_ID_MODES:
+        return mode
+    return "flight_number"
+
+
+def aircraft_tag_id_label() -> str:
+    return AIRCRAFT_TAG_ID_LABELS.get(aircraft_tag_id(), "Flight number")
+
+
+def set_aircraft_tag_id(mode: str) -> str:
+    raw = str(mode or "").strip().lower()
+    if raw == "both":
+        raw = "alternate"
+    if raw not in AIRCRAFT_TAG_ID_MODES:
+        raw = "flight_number"
+    _state["aircraft_tag_id"] = raw
+    _save(_state)
+    return raw
 
 
 def facing_deg() -> float:
@@ -1705,6 +2557,54 @@ def set_runway_darkmap_rgb(r: int, g: int, b: int, *, persist: bool = True):
     apply_theme_colors()
 
 
+def runway_light_rgb() -> tuple[int, int, int]:
+    return color_presets.normalize_rgb(
+        _state.get("runway_light_rgb", color_presets.DEFAULT_RUNWAY_LIGHT_RGB)
+    )
+
+
+def set_runway_light_rgb(r: int, g: int, b: int, *, persist: bool = True):
+    global _disk_synced
+    _state["runway_light_rgb"] = list(color_presets.normalize_rgb((r, g, b)))
+    if persist:
+        _save(_state)
+    else:
+        _disk_synced = False
+    apply_theme_colors()
+
+
+def tag_text_dark_rgb() -> tuple[int, int, int]:
+    return color_presets.normalize_rgb(
+        _state.get("tag_text_dark_rgb", color_presets.DEFAULT_TAG_TEXT_DARK_RGB)
+    )
+
+
+def set_tag_text_dark_rgb(r: int, g: int, b: int, *, persist: bool = True):
+    global _disk_synced
+    _state["tag_text_dark_rgb"] = list(color_presets.normalize_rgb((r, g, b)))
+    if persist:
+        _save(_state)
+    else:
+        _disk_synced = False
+    apply_theme_colors()
+
+
+def tag_text_light_rgb() -> tuple[int, int, int]:
+    return color_presets.normalize_rgb(
+        _state.get("tag_text_light_rgb", color_presets.DEFAULT_TAG_TEXT_LIGHT_RGB)
+    )
+
+
+def set_tag_text_light_rgb(r: int, g: int, b: int, *, persist: bool = True):
+    global _disk_synced
+    _state["tag_text_light_rgb"] = list(color_presets.normalize_rgb((r, g, b)))
+    if persist:
+        _save(_state)
+    else:
+        _disk_synced = False
+    apply_theme_colors()
+
+
 def persist_theme_settings():
     """Flush in-memory theme edits (used after RGB slider release)."""
     _save(_state)
@@ -1725,6 +2625,28 @@ def toggle_clock_format():
     return set_use_12hr_clock(not use_12hr_clock())
 
 
+def date_format() -> str:
+    fmt = str(_state.get("date_format") or "us").strip().lower()
+    return fmt if fmt in DATE_FORMATS else "us"
+
+
+def use_european_date() -> bool:
+    return date_format() == "eu"
+
+
+def set_date_format(fmt: str) -> str:
+    value = str(fmt or "us").strip().lower()
+    if value not in DATE_FORMATS:
+        value = "us"
+    _state["date_format"] = value
+    _save(_state)
+    return value
+
+
+def set_use_european_date(enabled: bool) -> str:
+    return set_date_format("eu" if enabled else "us")
+
+
 def auto_idle_clock_enabled() -> bool:
     return bool(_state.get("auto_idle_clock", True))
 
@@ -1737,6 +2659,72 @@ def toggle_auto_idle_clock():
 def set_auto_idle_clock_enabled(enabled: bool):
     _state["auto_idle_clock"] = bool(enabled)
     _save(_state)
+
+
+def auto_wifi_setup_hotspot_enabled() -> bool:
+    """True when lost-link may automatically open the Wi-Fi setup hotspot."""
+    return bool(_state.get("auto_wifi_setup_hotspot", True))
+
+
+def set_auto_wifi_setup_hotspot_enabled(enabled: bool) -> None:
+    _state["auto_wifi_setup_hotspot"] = bool(enabled)
+    _save(_state)
+
+
+def default_clock() -> str:
+    face = str(_state.get("default_clock") or "digital").strip().lower()
+    return face if face in DEFAULT_CLOCKS else "digital"
+
+
+def default_clock_label() -> str:
+    return DEFAULT_CLOCK_LABELS.get(default_clock(), "Digital")
+
+
+def set_default_clock(face: str) -> str:
+    value = str(face or "digital").strip().lower()
+    if value not in DEFAULT_CLOCKS:
+        value = "digital"
+    _state["default_clock"] = value
+    _save(_state)
+    return value
+
+
+def toggle_default_clock() -> str:
+    order = list(DEFAULT_CLOCKS)
+    i = order.index(default_clock()) if default_clock() in order else 0
+    return set_default_clock(order[(i + 1) % len(order)])
+
+
+def default_clock_off_hours() -> str:
+    face = str(_state.get("default_clock_off_hours") or "digital").strip().lower()
+    return face if face in DEFAULT_CLOCKS else "digital"
+
+
+def default_clock_off_hours_label() -> str:
+    return DEFAULT_CLOCK_LABELS.get(default_clock_off_hours(), "Digital")
+
+
+def set_default_clock_off_hours(face: str) -> str:
+    value = str(face or "digital").strip().lower()
+    if value not in DEFAULT_CLOCKS:
+        value = "digital"
+    _state["default_clock_off_hours"] = value
+    _save(_state)
+    return value
+
+
+def preferred_clock_face(*, in_off_hours: bool | None = None) -> str:
+    """Day or off-hours clock face for auto-open / force-clock / idle."""
+    if in_off_hours is None:
+        try:
+            from display.round_touch import off_hours
+
+            in_off_hours = bool(off_hours.in_off_hours())
+        except Exception:
+            in_off_hours = False
+    if in_off_hours:
+        return default_clock_off_hours()
+    return default_clock()
 
 
 def flight_detail_timeout_s() -> int:
@@ -1796,6 +2784,9 @@ def apply_theme_colors():
     theme.TAG_ALT_ASCEND = (0, 255, 255)
     theme.TAG_ALT_DESCEND = (255, 0, 255)
     theme.RUNWAY_DARKMAP = runway_darkmap_rgb()
+    theme.RUNWAY_LIGHT = runway_light_rgb()
+    theme.TAG_TEXT_DARK = tag_text_dark_rgb()
+    theme.TAG_TEXT_LIGHT = tag_text_light_rgb()
 
 
 def _night_quiet_defaults() -> tuple[str, str]:
@@ -1833,7 +2824,15 @@ def atc_enabled() -> bool:
 
 
 def set_atc_enabled(enabled: bool) -> None:
-    _rmw_save({"atc_enabled": bool(enabled)})
+    on = bool(enabled)
+    if on:
+        _rmw_save({"atc_enabled": True})
+        return
+    # LoFi only beds under ATC — turning ATC off also disarms LoFi.
+    updates = {"atc_enabled": False}
+    if bool(_state.get("lofi_enabled", False)):
+        updates["lofi_enabled"] = False
+    _rmw_save(updates)
 
 
 def atc_airport() -> str:
@@ -2026,8 +3025,23 @@ def set_radar_hud_opacity(value: int, *, persist: bool = True) -> int:
     return pct
 
 
+def background_texture() -> bool:
+    """Subtle topo contour texture behind settings/detail screens."""
+    return bool(_state.get("background_texture", True))
+
+
+def set_background_texture(enabled: bool) -> None:
+    _state["background_texture"] = bool(enabled)
+    _save(_state)
+
+
+def toggle_background_texture() -> bool:
+    set_background_texture(not background_texture())
+    return background_texture()
+
+
 def radar_hud_dark() -> bool:
-    return bool(_state.get("radar_hud_dark", False))
+    return bool(_state.get("radar_hud_dark", True))
 
 
 def set_radar_hud_dark(enabled: bool) -> None:
@@ -2035,9 +3049,126 @@ def set_radar_hud_dark(enabled: bool) -> None:
     _save(_state)
 
 
+def lofi_enabled() -> bool:
+    """Lofi music bed under live ATC audio."""
+    return bool(_state.get("lofi_enabled", False))
+
+
+def set_lofi_enabled(enabled: bool) -> None:
+    """Enable the LoFi bed. Refuses to arm when ATC power is off."""
+    on = bool(enabled)
+    if on and not atc_enabled():
+        on = False
+    _state["lofi_enabled"] = on
+    _save(_state)
+
+
+def toggle_lofi_enabled() -> bool:
+    set_lofi_enabled(not lofi_enabled())
+    return lofi_enabled()
+
+
+def lofi_disabled_tracks() -> list[str]:
+    """Built-in track filenames the user has switched off."""
+    raw = _state.get("lofi_disabled_tracks")
+    if not isinstance(raw, list):
+        return []
+    return [str(n) for n in raw if str(n).strip()]
+
+
+def set_lofi_disabled_tracks(names) -> list[str]:
+    clean = sorted({str(n).strip() for n in (names or []) if str(n).strip()})
+    _state["lofi_disabled_tracks"] = clean
+    _save(_state)
+    return clean
+
+
+def lofi_controls_enabled() -> bool:
+    """Prev/next track pill on the radar rim opposite the HUD."""
+    return bool(_state.get("lofi_controls_enabled", False))
+
+
+def set_lofi_controls_enabled(enabled: bool) -> None:
+    _state["lofi_controls_enabled"] = bool(enabled)
+    _save(_state)
+
+
+def toggle_lofi_controls_enabled() -> bool:
+    set_lofi_controls_enabled(not lofi_controls_enabled())
+    return lofi_controls_enabled()
+
+
+def lofi_title_scroll() -> bool:
+    """Marquee-scroll the track name in the radar pill; off = truncate."""
+    return bool(_state.get("lofi_title_scroll", True))
+
+
+def set_lofi_title_scroll(enabled: bool) -> None:
+    _state["lofi_title_scroll"] = bool(enabled)
+    _save(_state)
+
+
+def toggle_lofi_title_scroll() -> bool:
+    set_lofi_title_scroll(not lofi_title_scroll())
+    return lofi_title_scroll()
+
+
+def lofi_volume() -> int:
+    try:
+        return max(0, min(100, int(_state.get("lofi_volume", 25))))
+    except (TypeError, ValueError):
+        return 25
+
+
+def set_lofi_volume(value: int, *, persist: bool = True) -> int:
+    global _disk_synced
+    try:
+        vol = max(0, min(100, int(value)))
+    except (TypeError, ValueError):
+        vol = 25
+    _state["lofi_volume"] = vol
+    if persist:
+        _save(_state)
+    else:
+        _disk_synced = False
+    return vol
+
+
 def toggle_radar_hud_dark() -> bool:
     set_radar_hud_dark(not radar_hud_dark())
     return radar_hud_dark()
+
+
+RADAR_ZOOM_POSITIONS = ("right", "left")
+
+
+def radar_zoom_buttons() -> bool:
+    """Faint − / + range buttons on the radar rim."""
+    return bool(_state.get("radar_zoom_buttons", True))
+
+
+def radar_zoom_position() -> str:
+    pos = str(_state.get("radar_zoom_position") or "right").strip().lower()
+    return pos if pos in RADAR_ZOOM_POSITIONS else "right"
+
+
+def set_radar_zoom_position(position: str) -> str:
+    pos = str(position or "right").strip().lower()
+    if pos not in RADAR_ZOOM_POSITIONS:
+        pos = "right"
+    _state["radar_zoom_position"] = pos
+    _save(_state)
+    return pos
+
+
+def set_radar_zoom_buttons(enabled: bool) -> None:
+    _state["radar_zoom_buttons"] = bool(enabled)
+    _save(_state)
+
+
+def toggle_radar_zoom_buttons() -> bool:
+    set_radar_zoom_buttons(not radar_zoom_buttons())
+    return radar_zoom_buttons()
 
 
 def radar_hud_arrange() -> bool:
@@ -2254,6 +3385,20 @@ def set_alert_sfx_volume(value: int, *, persist: bool = True) -> int:
     return vol
 
 
+def flip_board_sound_enabled() -> bool:
+    return bool(_state.get("flip_board_sound", True))
+
+
+def set_flip_board_sound_enabled(enabled: bool) -> None:
+    _state["flip_board_sound"] = bool(enabled)
+    _save(_state)
+
+
+def toggle_flip_board_sound_enabled() -> bool:
+    set_flip_board_sound_enabled(not flip_board_sound_enabled())
+    return flip_board_sound_enabled()
+
+
 def master_sound_enabled() -> bool:
     return bool(_state.get("master_sound_enabled", True))
 
@@ -2300,17 +3445,26 @@ def apply_master_gain(volume_pct: int | float) -> int:
 
 
 def atc_sound_enabled() -> bool:
-    return bool(_state.get("atc_sound_enabled", True))
+    """Deprecated soft-mute flag — ATC power is ``atc_enabled`` only.
+
+    Kept for settings schema compatibility; mirrors ``atc_enabled``.
+    """
+    return atc_enabled()
 
 
 def set_atc_sound_enabled(enabled: bool) -> None:
-    _state["atc_sound_enabled"] = bool(enabled)
+    """Deprecated — soft mute removed; keep legacy key frozen unmuted."""
+    del enabled  # unused; mute layer no longer exists
+    _state["atc_sound_enabled"] = True
     _save(_state)
 
 
 def toggle_atc_sound_enabled() -> bool:
-    set_atc_sound_enabled(not atc_sound_enabled())
-    return atc_sound_enabled()
+    """Deprecated — prefer ``utilities.atc_audio.toggle_power`` from UI handlers."""
+    from utilities import atc_audio
+
+    atc_audio.toggle_power()
+    return atc_enabled()
 
 
 def hud_channel_volume(channel: str) -> int:
@@ -2324,6 +3478,8 @@ def hud_channel_volume(channel: str) -> int:
         return alert_sfx_volume()
     if key == "atc":
         return atc_volume()
+    if key == "lofi":
+        return lofi_volume()
     return 0
 
 
@@ -2340,6 +3496,8 @@ def set_hud_channel_volume(
         return set_alert_sfx_volume(value, persist=persist)
     if key == "atc":
         return set_atc_volume(value, persist=persist)
+    if key == "lofi":
+        return set_lofi_volume(value, persist=persist)
     return 0
 
 
@@ -2353,7 +3511,9 @@ def hud_channel_muted(channel: str) -> bool:
     if key == "alert":
         return not alert_sfx_enabled()
     if key == "atc":
-        return not atc_sound_enabled() or atc_volume() <= 0
+        return not atc_enabled() or atc_volume() <= 0
+    if key == "lofi":
+        return not lofi_enabled()
     return True
 
 
@@ -2367,7 +3527,13 @@ def toggle_hud_channel_mute(channel: str) -> bool:
     if key == "alert":
         return toggle_alert_sfx_enabled()
     if key == "atc":
-        return toggle_atc_sound_enabled()
+        # Same power switch as Settings → ATC Audio (start/stop mpv).
+        from utilities import atc_audio
+
+        atc_audio.toggle_power()
+        return atc_enabled()
+    if key == "lofi":
+        return toggle_lofi_enabled()
     return False
 
 
@@ -2405,15 +3571,39 @@ def set_audio_route(route: str) -> str:
     return value
 
 
+def safety_disclaimer_version() -> int:
+    """Persisted disclaimer acceptance version (0 = not remembered)."""
+    try:
+        value = int(_state.get("safety_disclaimer_version", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return value if value >= 0 else 0
+
+
+def set_safety_disclaimer_version(version: int) -> None:
+    """Persist disclaimer acceptance version via RMW (portal/display safe)."""
+    try:
+        value = int(version)
+    except (TypeError, ValueError):
+        value = 0
+    if value < 0:
+        value = 0
+    _rmw_save({"safety_disclaimer_version": value})
+
+
 def safety_disclaimer_accepted() -> bool:
-    """True if Accept was tapped at least once (diagnostic only; boot always shows)."""
-    return bool(_state.get("safety_disclaimer_accepted", False))
+    """True when a non-zero acceptance version is stored (diagnostic)."""
+    return safety_disclaimer_version() > 0
 
 
 def set_safety_disclaimer_accepted(accepted: bool) -> None:
-    """Record Accept for this session; does not skip the next boot disclaimer."""
-    _state["safety_disclaimer_accepted"] = bool(accepted)
-    _save(_state)
+    """Legacy helper: ``False`` clears; ``True`` does not write CURRENT_VERSION.
+
+    Only on-device ``disclaimer_acceptance.remember_current()`` may persist
+    remembered acceptance after the touchscreen checkbox + Accept.
+    """
+    if not accepted:
+        set_safety_disclaimer_version(0)
 
 
 def cycle_audio_route() -> str:

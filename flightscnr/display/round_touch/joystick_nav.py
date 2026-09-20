@@ -22,7 +22,12 @@ import logging
 
 import pygame
 
-from display.round_touch.input_handler import SWIPE_LEFT, SWIPE_RIGHT
+from display.round_touch.input_handler import (
+    SWIPE_DOWN,
+    SWIPE_LEFT,
+    SWIPE_RIGHT,
+    SWIPE_UP,
+)
 
 logger = logging.getLogger("flightscnr.joystick")
 
@@ -37,8 +42,10 @@ def _button_bindings() -> dict:
     try:
         from config import (
             JOYSTICK_BTN_RADAR,
+            JOYSTICK_BTN_SWIPE_DOWN,
             JOYSTICK_BTN_SWIPE_LEFT,
             JOYSTICK_BTN_SWIPE_RIGHT,
+            JOYSTICK_BTN_SWIPE_UP,
             JOYSTICK_BTN_ZOOM_IN,
             JOYSTICK_BTN_ZOOM_OUT,
         )
@@ -47,6 +54,8 @@ def _button_bindings() -> dict:
     pairs = (
         (JOYSTICK_BTN_SWIPE_LEFT, SWIPE_LEFT),
         (JOYSTICK_BTN_SWIPE_RIGHT, SWIPE_RIGHT),
+        (JOYSTICK_BTN_SWIPE_UP, SWIPE_UP),
+        (JOYSTICK_BTN_SWIPE_DOWN, SWIPE_DOWN),
         (JOYSTICK_BTN_RADAR, ACTION_RADAR),
         (JOYSTICK_BTN_ZOOM_IN, ACTION_ZOOM_IN),
         (JOYSTICK_BTN_ZOOM_OUT, ACTION_ZOOM_OUT),

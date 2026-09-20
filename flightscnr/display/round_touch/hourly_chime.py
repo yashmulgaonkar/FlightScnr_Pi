@@ -171,8 +171,19 @@ def _speaker_ready() -> bool:
         return True
 
 
-def _play_file(path: str, *, volume_pct: int | None = None) -> None:
-    """Play audio without stopping ATC — prefer PipeWire so streams mix on USB."""
+def _play_file(
+    path: str,
+    *,
+    volume_pct: int | None = None,
+    end_s: float | None = None,
+    start_s: float | None = None,
+) -> None:
+    """Play audio without stopping ATC — prefer PipeWire so streams mix on USB.
+
+    ``start_s`` / ``end_s`` trim in the player (mpv/ffplay). ``pw-play``
+    cannot do this, so it is skipped when either is set. ``end_s`` is an
+    absolute timestamp in the file, matching mpv ``--end``.
+    """
     if not _speaker_ready():
         return
     ext = os.path.splitext(path)[1].lower()
@@ -188,6 +199,22 @@ def _play_file(path: str, *, volume_pct: int | None = None) -> None:
     pw_vol = max(0.0, min(1.0, vol_pct / 100.0))
     # paplay uses PA_VOLUME_NORM=65536 scale.
     pa_vol = int(round(65536 * pw_vol))
+    trim_s = float(end_s) if end_s is not None and float(end_s) > 0 else 0.0
+    start_at = float(start_s) if start_s is not None and float(start_s) > 0 else 0.0
+    mpv_end: list[str] = []
+    ffplay_end: list[str] = []
+    if start_at:
+        mpv_end.append(f"--start={start_at:.3f}")
+        ffplay_end.extend(["-ss", f"{start_at:.3f}"])
+    if trim_s:
+        fade = min(0.05, max(0.0, (trim_s - start_at) / 4.0) if trim_s > start_at else 0.05)
+        mpv_end.append(f"--end={trim_s:.3f}")
+        if fade > 0 and trim_s > start_at:
+            mpv_end.append(
+                f"--af=afade=t=out:st={max(0.0, trim_s - fade):.3f}:d={fade:.3f}"
+            )
+        ffplay_end.extend(["-t", f"{max(0.0, trim_s - start_at):.3f}"])
+    needs_trim = bool(start_at or trim_s)
     # Native PipeWire mixes with ATC. paplay needs pipewire-pulse (often broken
     # here). Avoid bare aplay while ATC holds ALSA via PipeWire.
     mpv_mix = [
@@ -198,13 +225,19 @@ def _play_file(path: str, *, volume_pct: int | None = None) -> None:
         "--ao=pipewire",
         "--audio-client-name=flightscnr-chime",
         "--no-config",
+        *mpv_end,
         path,
     ]
-    mix_cmds: list[list[str]] = [
-        ["pw-play", f"--volume={pw_vol:.3f}", path],
-        mpv_mix,
-        ["paplay", f"--volume={pa_vol}", path],
-    ]
+    mix_cmds: list[list[str]] = []
+    if not needs_trim:
+        mix_cmds.append(["pw-play", f"--volume={pw_vol:.3f}", path])
+    mix_cmds.extend(
+        [
+            mpv_mix,
+            ["paplay", f"--volume={pa_vol}", path] if not needs_trim else [],
+        ]
+    )
+    mix_cmds = [cmd for cmd in mix_cmds if cmd]
     if ext != ".mp3":
         mix_cmds.append(
             [
@@ -215,6 +248,7 @@ def _play_file(path: str, *, volume_pct: int | None = None) -> None:
                 "quiet",
                 "-volume",
                 str(mpv_vol),
+                *ffplay_end,
                 path,
             ]
         )
@@ -222,6 +256,8 @@ def _play_file(path: str, *, volume_pct: int | None = None) -> None:
     if atc_on:
         cmds = mix_cmds
     elif ext == ".mp3":
+        cmds = mix_cmds
+    elif needs_trim:
         cmds = mix_cmds
     else:
         cmds = [*mix_cmds, ["aplay", "-q", path]]
@@ -263,6 +299,8 @@ def play_file_async(
     thread_name: str = "sfx",
     volume_pct: int | None = None,
     apply_master: bool = True,
+    end_s: float | None = None,
+    start_s: float | None = None,
 ) -> None:
     """Play any audio file asynchronously (mixes with ATC when possible)."""
     if not path or not os.path.isfile(path):
@@ -287,7 +325,7 @@ def play_file_async(
 
     def _run():
         with _play_lock:
-            _play_file(path, volume_pct=effective)
+            _play_file(path, volume_pct=effective, end_s=end_s, start_s=start_s)
 
     threading.Thread(target=_run, name=thread_name, daemon=True).start()
 

@@ -55,7 +55,13 @@ def rotate_offset(dx_km: float, dy_km: float, facing_deg: float = 0.0):
 
 
 def screen_heading(heading_deg: float, facing_deg: float | None = None) -> float:
-    """Map geographic heading to screen heading (nose angle for icons)."""
+    """Map geographic heading to screen heading (nose angle for icons).
+
+    0° = screen-up, 90° = screen-right — the same convention as the vector
+    silhouette and ``pygame.transform.rotate(icon, -heading)``. Subtracting
+    ``facing_deg`` keeps the nose along track when the compass is not north-up
+    (east-up: geographic east → screen-up).
+    """
     if facing_deg is None:
         facing_deg = settings.effective_facing_deg()
     return float(heading_deg or 0) - float(facing_deg or 0)

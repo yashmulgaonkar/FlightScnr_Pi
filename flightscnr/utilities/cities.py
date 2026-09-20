@@ -78,7 +78,10 @@ def _download_and_build():
         cache_data = {"_version": CACHE_VERSION, "cities": cities}
         with open(CACHE_FILE, "w", encoding="utf-8") as f:
             json.dump(cache_data, f)
-        print(f"[Cities] Database built — {len(cities)} cities cached to cities.json (v{CACHE_VERSION})")
+        print(
+            f"[Cities] Database built - {len(cities)} cities cached to "
+            f"cities.json (v{CACHE_VERSION})"
+        )
         return cities
 
     except Exception as e:
@@ -106,10 +109,15 @@ def _load():
                     _loaded = True
                     return
                 else:
-                    version_found = raw.get("_version", "none") if isinstance(raw, dict) else "legacy"
-                    print(f"[Cities] Cache version mismatch (found: {version_found}, need: {CACHE_VERSION}) — rebuilding")
+                    version_found = (
+                        raw.get("_version", "none") if isinstance(raw, dict) else "legacy"
+                    )
+                    print(
+                        f"[Cities] Cache version mismatch "
+                        f"(found: {version_found}, need: {CACHE_VERSION}) - rebuilding"
+                    )
             except Exception as e:
-                print(f"[Cities] Cache load failed: {e} — re-downloading")
+                print(f"[Cities] Cache load failed: {e} - re-downloading")
 
         _db = _download_and_build()
         _loaded = True

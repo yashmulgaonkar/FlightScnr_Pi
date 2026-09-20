@@ -110,13 +110,17 @@ def _from_opensky(flight: dict) -> dict | None:
         "route_source": "opensky",
     }
 
-
 def fetch_route_enrichment(flight: dict) -> dict | None:
-    """Try each source in config.ROUTE_SOURCE_ORDER in turn, filling only the
+    """Try each source in ROUTE_SOURCE_ORDER in turn, filling only the
     gaps left by earlier sources, stopping as soon as both origin and
     destination are present. Omitting a source from ROUTE_SOURCE_ORDER
     disables it entirely (e.g. ROUTE_SOURCE_ORDER=opensky for a fully
-    free/open-source lookup that never calls AirLabs or FlightAware)."""
+    free/open-source lookup that never calls AirLabs or FlightAware).
+    Reads the order fresh from secrets_store on every call (same as
+    dump1090_settings() for DUMP1090_URL) rather than the config module
+    value captured at process start, so a portal save takes effect
+    immediately in the display process without a service restart."""
+
     callsign = lookup_callsign(flight)
     if (
         not callsign
@@ -124,18 +128,22 @@ def fetch_route_enrichment(flight: dict) -> dict | None:
         and not (flight.get("icao_hex") or flight.get("hex") or "").strip()
     ):
         return None
- 
+
     try:
-        from config import ROUTE_SOURCE_ORDER
+        from secrets_store import route_source_order_setting
+        ROUTE_SOURCE_ORDER = route_source_order_setting()["ROUTE_SOURCE_ORDER_EFFECTIVE"]
+        ROUTE_SOURCE_ORDER = tuple(
+            p for p in ROUTE_SOURCE_ORDER.split(",") if p
+        ) or ("airlabs", "flightaware", "opensky")
     except Exception:
         ROUTE_SOURCE_ORDER = ("airlabs", "flightaware", "opensky")
- 
+
     fetchers = {
         "airlabs": lambda: _from_airlabs(callsign) if callsign else None,
         "flightaware": lambda: _from_flightaware(flight, callsign),
         "opensky": lambda: _from_opensky(flight),
     }
- 
+
     merged: dict = {}
     sources_used: list[str] = []
     for name in ROUTE_SOURCE_ORDER:
@@ -161,7 +169,7 @@ def fetch_route_enrichment(flight: dict) -> dict | None:
             merged.get("destination")
         ):
             break  # both ends filled — no need to call any further sources
- 
+
     if not merged:
         return None
     if sources_used:

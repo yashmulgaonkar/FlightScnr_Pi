@@ -24,7 +24,7 @@ class TestUnitPresets(unittest.TestCase):
         from display.round_touch import settings
 
         self.assertEqual(settings._normalize_unit_preset("km"), "km_kph")
-        self.assertEqual(settings._normalize_unit_preset("mi"), "mi_mph")
+        self.assertEqual(settings._normalize_unit_preset("mi"), "mi_kts")
         self.assertEqual(settings._normalize_unit_preset("nm"), "nm_kts")
         self.assertEqual(settings._normalize_unit_preset("mi_kts"), "mi_kts")
         self.assertEqual(settings._normalize_unit_preset("km, kts"), "km_kts")

@@ -58,6 +58,48 @@ class RadarHudSettingsTests(unittest.TestCase):
             self.assertTrue(settings.toggle_radar_hud_dark())
             self.assertFalse(settings.toggle_radar_hud_dark())
 
+    def test_tag_text_rgb_defaults_and_setters(self):
+        from display.round_touch import color_presets, settings, theme
+
+        with mock.patch.object(settings, "_save"):
+            settings._state["tag_text_dark_rgb"] = list(
+                color_presets.DEFAULT_TAG_TEXT_DARK_RGB
+            )
+            settings._state["tag_text_light_rgb"] = list(
+                color_presets.DEFAULT_TAG_TEXT_LIGHT_RGB
+            )
+            settings.apply_theme_colors()
+            self.assertEqual(
+                settings.tag_text_dark_rgb(), color_presets.DEFAULT_TAG_TEXT_DARK_RGB
+            )
+            self.assertEqual(
+                settings.tag_text_light_rgb(), color_presets.DEFAULT_TAG_TEXT_LIGHT_RGB
+            )
+
+            settings.set_tag_text_dark_rgb(10, 20, 30)
+            settings.set_tag_text_light_rgb(200, 210, 220)
+            self.assertEqual(theme.TAG_TEXT_DARK, (10, 20, 30))
+            self.assertEqual(theme.TAG_TEXT_LIGHT, (200, 210, 220))
+
+    def test_migrate_adds_tag_text_rgb(self):
+        from display.round_touch import color_presets
+
+        state = {
+            "theme_palette_v": color_presets.THEME_PALETTE_V,
+            "theme_custom": True,
+            "custom_theme_rgb": [0, 255, 0],
+            "theme_index": 2,
+        }
+        self.assertTrue(color_presets.migrate_theme_index(state))
+        self.assertEqual(
+            state["tag_text_dark_rgb"], list(color_presets.DEFAULT_TAG_TEXT_DARK_RGB)
+        )
+        self.assertEqual(
+            state["tag_text_light_rgb"], list(color_presets.DEFAULT_TAG_TEXT_LIGHT_RGB)
+        )
+        self.assertNotIn("hud_text_dark_rgb", state)
+        self.assertNotIn("hud_text_light_rgb", state)
+
     def test_chime_toggle(self):
         from display.round_touch import settings
 
@@ -84,9 +126,20 @@ class RadarHudSettingsTests(unittest.TestCase):
                 settings.radar_hud_layout_top(),
                 settings.copy_radar_hud_layout_top_default(),
             )
-            self.assertEqual(settings.radar_hud_layout_offset("wx_icon"), (-29, 31))
-            self.assertEqual(settings.radar_hud_layout_offset("temp"), (42, -29))
-            self.assertEqual(settings.radar_hud_layout_offset("wind"), (14, -6))
+            top = settings.copy_radar_hud_layout_top_default()
+            self.assertEqual(
+                settings.radar_hud_layout_offset("wx_icon"),
+                tuple(top["wx_icon"]),
+            )
+            self.assertEqual(
+                settings.radar_hud_layout_offset("temp"),
+                tuple(top["temp"]),
+            )
+            self.assertEqual(
+                settings.radar_hud_layout_offset("wind"),
+                tuple(top["wind"]),
+            )
+            self.assertEqual(settings.radar_hud_layout_offset("aqi"), (0, 0))
             self.assertEqual(settings.radar_hud_layout_offset("clock"), (0, 0))
 
     def test_arrange_gated_by_env(self):
@@ -119,9 +172,67 @@ class RadarHudSettingsTests(unittest.TestCase):
                 settings.radar_hud_layout_bottom(),
                 settings.copy_radar_hud_layout_bottom_default(),
             )
-            self.assertEqual(settings.radar_hud_layout_offset("wx_icon"), (2, -6))
-            self.assertEqual(settings.radar_hud_layout_offset("wind"), (4, 0))
+            bottom = settings.copy_radar_hud_layout_bottom_default()
+            self.assertEqual(
+                settings.radar_hud_layout_offset("wx_icon"),
+                tuple(bottom["wx_icon"]),
+            )
+            self.assertEqual(
+                settings.radar_hud_layout_offset("wind"),
+                tuple(bottom["wind"]),
+            )
+            self.assertEqual(settings.radar_hud_layout_offset("aqi"), (0, 0))
             self.assertEqual(settings.radar_hud_layout_offset("clock"), (0, 0))
+
+    def test_load_layout_without_aqi_does_not_keyerror(self):
+        """Regression: baked defaults omit aqi; injection must not assume the key."""
+        import json
+        import tempfile
+
+        from display.round_touch import settings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "round_touch_settings.json")
+            Path(path).write_text(
+                json.dumps(
+                    {
+                        "radar_hud_layout_top": {
+                            "wx_icon": [-24, 40],
+                            "temp": [42, -29],
+                            "wind": [5, -5],
+                        },
+                        "radar_hud_layout_bottom": {
+                            "wx_icon": [9, -13],
+                            "wind": [4, 0],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(settings, "SETTINGS_PATH", path), mock.patch.object(
+                settings, "DATA_DIR", tmp
+            ), mock.patch.object(settings, "RELOAD_REQUEST_PATH", path + ".reload"):
+                loaded = settings._load()
+            self.assertNotIn("aqi", loaded["radar_hud_layout_top"])
+            self.assertNotIn("aqi", loaded["radar_hud_layout_bottom"])
+
+    def test_fresh_settings_then_reload_does_not_keyerror(self):
+        """Fresh install writes layouts without aqi; second _load must not crash."""
+        import tempfile
+
+        from display.round_touch import settings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "round_touch_settings.json")
+            with mock.patch.object(settings, "SETTINGS_PATH", path), mock.patch.object(
+                settings, "DATA_DIR", tmp
+            ), mock.patch.object(settings, "RELOAD_REQUEST_PATH", path + ".reload"):
+                first = settings._load()
+                self.assertTrue(Path(path).is_file())
+                self.assertNotIn("aqi", first.get("radar_hud_layout_top") or {})
+                second = settings._load()
+            self.assertNotIn("aqi", second.get("radar_hud_layout_top") or {})
+            self.assertNotIn("aqi", second.get("radar_hud_layout_bottom") or {})
 
 
 class HourlyChimeGuardTests(unittest.TestCase):
@@ -240,8 +351,11 @@ class RadarHudGeometryTests(unittest.TestCase):
                                         self.assertTrue(radar_hud.hit_chime(*g["chime_c"]))
                                         self.assertTrue(radar_hud.hit_speaker(*g["speaker_c"]))
                                         self.assertFalse(radar_hud.hit_chime(theme.CENTER_X, theme.CENTER_Y))
-                                        # Top: volume left of chime (chime is farthest right).
+                                        # Top: volume left of chime.
                                         self.assertLess(g["speaker_c"][0], g["chime_c"][0])
+                                        # Home sits immediately left of the clock.
+                                        self.assertTrue(radar_hud.hit_home(*g["home_c"]))
+                                        self.assertLess(g["home_c"][0], g["clock_c"][0])
                                         # With weather+wind present, left cluster is left of clock.
                                         wx = {
                                             "ready": True,
@@ -254,12 +368,15 @@ class RadarHudGeometryTests(unittest.TestCase):
                                         }
                                         g2 = radar_hud._geometry(wx)
                                         self.assertLess(g2["weather_c"][0], g2["wind_c"][0])
-                                        self.assertLess(g2["wind_c"][0], g2["clock_c"][0])
+                                        self.assertLess(g2["wind_c"][0], g2["home_c"][0])
+                                        self.assertLess(g2["home_c"][0], g2["clock_c"][0])
                                         self.assertLess(g2["clock_c"][0], g2["speaker_c"][0])
                                         self.assertLess(g2["speaker_c"][0], g2["chime_c"][0])
                                         self.assertLess(g2["chime_c"][0], g2["alert_c"][0])
                                         self.assertLess(g2["alert_c"][0], g2["atc_c"][0])
+                                        self.assertLess(g2["atc_c"][0], g2["lofi_c"][0])
                                         self.assertTrue(radar_hud.hit_alert(*g2["alert_c"]))
+                                        self.assertTrue(radar_hud.hit_lofi(*g2["lofi_c"]))
                                         # Clock stays at the arc midpoint (centered on N).
                                         self.assertAlmostEqual(
                                             g2["clock_c"][0], theme.CENTER_X, delta=2
@@ -273,20 +390,33 @@ class RadarHudGeometryTests(unittest.TestCase):
                                         d_sc = g2["chime_c"][0] - g2["speaker_c"][0]
                                         d_ca = g2["alert_c"][0] - g2["chime_c"][0]
                                         d_aa = g2["atc_c"][0] - g2["alert_c"][0]
+                                        d_al = g2["lofi_c"][0] - g2["atc_c"][0]
                                         self.assertAlmostEqual(d_sc, d_ca, delta=theme.s(3))
                                         self.assertAlmostEqual(d_ca, d_aa, delta=theme.s(3))
+                                        self.assertAlmostEqual(d_aa, d_al, delta=theme.s(3))
                                         wind_w, _, _ = radar_hud._wind_bits(
                                             wx, g2["arrow_px"], (0, 0, 0)
                                         )
-                                        clock_w, _, _ = radar_hud._clock_bits((0, 0, 0))
-                                        edge_gap = (g2["clock_c"][0] - clock_w // 2) - (
-                                            g2["wind_c"][0] + wind_w // 2
+                                        # Home sits between wind and clock with a major_gap.
+                                        self.assertGreater(
+                                            g2["home_c"][0] - g2["wind_c"][0],
+                                            wind_w // 2,
                                         )
-                                        # Chordal gap can be ~1px under the arc major_gap.
-                                        self.assertGreaterEqual(edge_gap, theme.s(7))
                                         self.assertGreater(g2["weather_c"][1], g2["clock_c"][1])
-                                        self.assertGreater(g2["atc_c"][1], g2["clock_c"][1])
+                                        self.assertGreater(g2["lofi_c"][1], g2["clock_c"][1])
                                         self.assertTrue(radar_hud.hit_atc(*g2["atc_c"]))
+                                        radar_hud._refresh_hit_targets(g2)
+                                        self.assertEqual(
+                                            radar_hud.handle_tap(*g2["home_c"]), "home"
+                                        )
+                                        self.assertFalse(radar_hud.volume_popover_open())
+                                        self.assertEqual(
+                                            radar_hud.handle_tap(*g2["lofi_c"]), "lofi"
+                                        )
+                                        self.assertEqual(
+                                            radar_hud.volume_popover_channel(), "lofi"
+                                        )
+                                        radar_hud.close_volume_popover()
 
     def test_wind_arrow_tip_points_from(self):
         """Tip extends toward the meteorological FROM direction (not downwind)."""
@@ -472,21 +602,43 @@ class HudVolumeControlTests(unittest.TestCase):
             settings._state["military_sfx_enabled"] = True
             settings._state["traffic_sfx_volume"] = 40
             settings._state["military_sfx_volume"] = 40
-            settings._state["atc_sound_enabled"] = True
+            settings._state["atc_enabled"] = True
             settings._state["atc_volume"] = 85
+            settings._state["lofi_enabled"] = True
+            settings._state["lofi_volume"] = 25
+
+            def _flip_atc_enabled(**_kwargs):
+                settings._state["atc_enabled"] = not bool(
+                    settings._state.get("atc_enabled", False)
+                )
 
             for channel, vol_key, mute_fn in (
                 ("speaker", "master_sound_volume", settings.master_sound_enabled),
                 ("chime", "hourly_chime_volume", settings.hourly_chime_enabled),
                 ("alert", "traffic_sfx_volume", settings.alert_sfx_enabled),
-                ("atc", "atc_volume", settings.atc_sound_enabled),
+                ("atc", "atc_volume", settings.atc_enabled),
+                ("lofi", "lofi_volume", settings.lofi_enabled),
             ):
                 before = settings._state[vol_key]
                 self.assertFalse(settings.hud_channel_muted(channel))
-                settings.toggle_hud_channel_mute(channel)
+                if channel == "atc":
+                    with mock.patch(
+                        "utilities.atc_audio.toggle_power",
+                        side_effect=_flip_atc_enabled,
+                    ):
+                        settings.toggle_hud_channel_mute(channel)
+                else:
+                    settings.toggle_hud_channel_mute(channel)
                 self.assertTrue(settings.hud_channel_muted(channel))
                 self.assertEqual(settings._state[vol_key], before)
-                settings.toggle_hud_channel_mute(channel)
+                if channel == "atc":
+                    with mock.patch(
+                        "utilities.atc_audio.toggle_power",
+                        side_effect=_flip_atc_enabled,
+                    ):
+                        settings.toggle_hud_channel_mute(channel)
+                else:
+                    settings.toggle_hud_channel_mute(channel)
                 self.assertFalse(settings.hud_channel_muted(channel))
                 self.assertEqual(settings.hud_channel_volume(channel), before)
 
@@ -507,6 +659,7 @@ class HudVolumeControlTests(unittest.TestCase):
             settings._state["traffic_sfx_volume"] = 55
             settings._state["military_sfx_volume"] = 55
             settings._state["atc_volume"] = 66
+            settings._state["lofi_volume"] = 25
 
             radar_hud.close_volume_popover()
             self.assertIsNone(radar_hud.volume_popover_channel())
@@ -534,6 +687,13 @@ class HudVolumeControlTests(unittest.TestCase):
             self.assertEqual(value, 100)
             self.assertEqual(settings.traffic_sfx_volume(), 100)
             self.assertEqual(settings.military_sfx_volume(), 100)
+
+            self.assertEqual(radar_hud.open_volume_popover("lofi"), "lofi")
+            with mock.patch.object(radar_hud, "_wx_snapshot", return_value=None):
+                radar_hud.draw_hud(surf, include_popover=True)
+            value = radar_hud.apply_volume_at_x(radar_hud._slider_track.centerx, persist=False)
+            self.assertIsNotNone(value)
+            self.assertEqual(settings.lofi_volume(), value)
             radar_hud.close_volume_popover()
 
     def test_tap_opens_popover_long_press_helper_mutes(self):
@@ -553,7 +713,8 @@ class HudVolumeControlTests(unittest.TestCase):
             settings._state["hourly_chime_enabled"] = True
             settings._state["traffic_sfx_enabled"] = True
             settings._state["military_sfx_enabled"] = True
-            settings._state["atc_sound_enabled"] = True
+            settings._state["atc_enabled"] = True
+            settings._state["lofi_enabled"] = True
             with mock.patch.object(settings, "radar_hud_layout", return_value={}):
                 with mock.patch.object(radar_hud, "_wx_snapshot", return_value=None):
                     surf = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
@@ -569,6 +730,26 @@ class HudVolumeControlTests(unittest.TestCase):
                     muted = radar_hud.handle_long_press_mute(*g["chime_c"])
                     self.assertEqual(muted, "chime")
                     self.assertFalse(settings.hourly_chime_enabled())
+                    self.assertEqual(radar_hud.volume_popover_channel(), "speaker")
+
+                    with mock.patch(
+                        "utilities.atc_audio.toggle_power",
+                        side_effect=lambda **_k: settings._state.__setitem__(
+                            "atc_enabled", False
+                        ),
+                    ):
+                        powered = radar_hud.handle_long_press_mute(*g["atc_c"])
+                    self.assertEqual(powered, "atc")
+                    self.assertFalse(settings.atc_enabled())
+                    self.assertEqual(radar_hud.volume_popover_channel(), "speaker")
+
+                    lofi_muted = radar_hud.handle_long_press_mute(*g["lofi_c"])
+                    self.assertEqual(lofi_muted, "lofi")
+                    self.assertFalse(settings.lofi_enabled())
+                    self.assertEqual(radar_hud.volume_popover_channel(), "speaker")
+
+                    home_action = radar_hud.handle_tap(*g["home_c"])
+                    self.assertEqual(home_action, "home")
                     self.assertEqual(radar_hud.volume_popover_channel(), "speaker")
 
 
@@ -589,7 +770,7 @@ class HudSettingsRowTests(unittest.TestCase):
     def test_sound_toggles_share_the_volume_rows(self):
         from display.round_touch.screens import info
 
-        for action in ("hourly_chime", "traffic_sfx", "military_sfx"):
+        for action in ("hourly_chime", "traffic_sfx", "military_sfx", "earthquake_voice"):
             self.assertNotIn(action, info.HUD_ACTIONS)
         for action in info._HUD_VOLUME_ACTIONS:
             self.assertIn(action, info.HUD_ACTIONS)
@@ -601,7 +782,9 @@ class HudSettingsRowTests(unittest.TestCase):
 
         surface = pygame.Surface((theme.SIZE, theme.SIZE))
         max_scroll = info.draw_info(surface, info.PAGE_HUD, 0, -1)
-        self.assertEqual(max_scroll, 0)
+        # Card rows are taller than the old text rows; the page may scroll
+        # by up to ~two rows, but never degenerate into a long crawl.
+        self.assertLessEqual(max_scroll, info._row_pitch() * 6)
 
     def test_switch_and_slider_hit_targets_do_not_overlap(self):
         from display.round_touch.screens import info
@@ -610,21 +793,31 @@ class HudSettingsRowTests(unittest.TestCase):
             "chime_volume": "hourly_chime",
             "traffic_sfx_volume": "traffic_sfx",
             "military_sfx_volume": "military_sfx",
+            "earthquake_voice_volume": "earthquake_voice",
         }
+        from display.round_touch import nav
+
+        body_top = nav.content_top_y(has_dots=True)
         for action, toggle in expected.items():
-            ry = info._hud_volume_row_y(action)
-            self.assertIsNotNone(ry)
+            # Scroll each row into the body band first — card rows are
+            # taller, so the lowest rows start below the fold.
+            ry0 = info._hud_volume_row_y(action, 0)
+            self.assertIsNotNone(ry0)
+            offset = max(0, int(ry0) - body_top - info._row_pitch())
+            ry = info._hud_volume_row_y(action, offset)
             switch = info._hud_switch_rect(action, ry)
-            _hit, track_x, track_w = info._hud_volume_slider_geometry(action)
+            _hit, track_x, track_w = info._hud_volume_slider_geometry(action, offset)
             self.assertLess(switch.right, track_x)
             self.assertEqual(
-                info.hud_sound_toggle_at(switch.centerx, switch.centery), toggle
+                info.hud_sound_toggle_at(
+                    switch.centerx, switch.centery, offset), toggle
             )
             self.assertIsNone(
-                info.hud_volume_slider_at(switch.centerx, switch.centery)
+                info.hud_volume_slider_at(switch.centerx, switch.centery, offset)
             )
             mid_x = track_x + track_w // 2
-            self.assertEqual(info.hud_volume_slider_at(mid_x, switch.centery), action)
+            self.assertEqual(
+                info.hud_volume_slider_at(mid_x, switch.centery, offset), action)
             self.assertIsNone(
                 info.hud_sound_toggle_at(mid_x, switch.centery)
             )
@@ -635,7 +828,8 @@ class HudSettingsRowTests(unittest.TestCase):
         pages = (
             (info.DISPLAY_ACTIONS, info._display_row_labels()),
             (info.HUD_ACTIONS, info._hud_row_labels()),
-            (info.LAYERS_ACTIONS, info._layers_row_labels()),
+            # layers_actions() drops rows whose parent feature is off.
+            (info.layers_actions(), info._layers_row_labels()),
             (info.ATC_QUIET_ACTIONS, info._atc_quiet_row_labels()),
         )
         for actions, labels in pages:
@@ -664,9 +858,12 @@ class HudSettingsRowTests(unittest.TestCase):
         from display.round_touch.screens import info
 
         bottom = nav.content_bottom_y()
+        body_top = nav.content_top_y(has_dots=True)
         for action in info._HUD_VOLUME_ACTIONS:
-            hit, _track_x, _track_w = info._hud_volume_slider_geometry(action)
-            self.assertLess(hit.bottom, bottom)
+            ry0 = info._hud_volume_row_y(action, 0)
+            offset = max(0, int(ry0) - body_top - info._row_pitch())
+            hit, _track_x, _track_w = info._hud_volume_slider_geometry(action, offset)
+            self.assertLess(hit.bottom, bottom + info._row_pitch())
 
 
 if __name__ == "__main__":

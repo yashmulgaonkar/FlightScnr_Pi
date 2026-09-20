@@ -9,6 +9,8 @@
 
 """Flight / vessel detail screen — photo header + compact text for the round display."""
 
+import pygame
+
 from display.round_touch import aircraft, draw, geo, nav, theme
 from display.round_touch.screens import common
 from utilities.airline_branding import display_flight_id_for_flight
@@ -23,19 +25,115 @@ except ImportError:
 FOOTER_BUTTONS = ("prev", "next", "radar")
 FOOTER_EMPTY = ("radar",)
 
+# "Follow this Flight" pill + its confirm popup (replace-follow warning).
+_follow_btn_rect = None
+_confirm_follow_rect = None
+_confirm_cancel_rect = None
+
+
+def follow_button_hit(x: int, y: int) -> bool:
+    if _follow_btn_rect is None:
+        return False
+    return _follow_btn_rect.collidepoint(int(x), int(y))
+
+
+def follow_confirm_hit(x: int, y: int) -> str | None:
+    """"follow" / "cancel" when a popup button is hit, else None."""
+    if _confirm_follow_rect is not None and _confirm_follow_rect.collidepoint(x, y):
+        return "follow"
+    if _confirm_cancel_rect is not None and _confirm_cancel_rect.collidepoint(x, y):
+        return "cancel"
+    return None
+
+
+def _draw_follow_row(
+    surface,
+    flight,
+    y: int,
+    *,
+    chrome_top: int,
+    bottom: int,
+) -> int:
+    """Follow pill as the last scrollable row — below telemetry, not over it."""
+    global _follow_btn_rect
+    _follow_btn_rect = None
+    callsign = str(flight.get("callsign") or "").strip()
+    if not callsign or flight.get("kind") == "vessel":
+        return y
+    try:
+        from utilities.overhead import load_tracked_callsign
+
+        already = load_tracked_callsign() == callsign.upper()
+    except Exception:
+        already = False
+    label_text = "Following" if already else "Follow this Flight"
+    try:
+        font = draw.load_font(theme.s(13), bold=True)
+        label = font.render(label_text, True, theme.LABEL if already else theme.MUTED)
+    except Exception:
+        return y
+    pad_x, pad_y = theme.s(16), theme.s(7)
+    gap = theme.s(6)
+    y += gap
+    rect = pygame.Rect(0, 0, label.get_width() + 2 * pad_x, label.get_height() + 2 * pad_y)
+    rect.midtop = (theme.CENTER_X, int(y))
+    if rect.bottom > chrome_top and rect.top < bottom:
+        pygame.draw.rect(surface, (24, 27, 31), rect, border_radius=rect.height // 2)
+        pygame.draw.rect(
+            surface, theme.GRID, rect, width=1, border_radius=rect.height // 2
+        )
+        surface.blit(label, label.get_rect(center=rect.center))
+        if not already:
+            _follow_btn_rect = pygame.Rect(rect).inflate(theme.s(8), theme.s(8))
+    return y + rect.height + gap
+
+
+def draw_follow_confirm(surface, new_id: str, current_id: str) -> None:
+    """Modal: following ``new_id`` will stop following ``current_id``."""
+    global _confirm_follow_rect, _confirm_cancel_rect
+    title_font = draw.load_font(theme.s(15), bold=True)
+    body_font = draw.load_font(theme.s(13))
+    btn_font = draw.load_font(theme.s(13), bold=True)
+    lines = [
+        title_font.render(f"Follow {new_id}?", True, theme.MUTED),
+        body_font.render(f"This stops following {current_id}.", True, theme.HINT),
+    ]
+    w = max(l.get_width() for l in lines) + theme.s(44)
+    panel = pygame.Rect(0, 0, max(w, theme.s(230)), theme.s(118))
+    panel.center = (theme.CENTER_X, theme.CENTER_Y)
+    pygame.draw.rect(surface, (18, 20, 24), panel, border_radius=theme.s(14))
+    pygame.draw.rect(surface, theme.GRID, panel, width=1, border_radius=theme.s(14))
+    y = panel.top + theme.s(14)
+    for line in lines:
+        surface.blit(line, line.get_rect(midtop=(panel.centerx, y)))
+        y += line.get_height() + theme.s(4)
+
+    def _btn(label_text, cx, accent):
+        label = btn_font.render(label_text, True, (240, 244, 248) if accent else theme.MUTED)
+        r = pygame.Rect(0, 0, label.get_width() + theme.s(28), label.get_height() + theme.s(12))
+        r.center = (cx, panel.bottom - theme.s(24))
+        pygame.draw.rect(surface, (26, 120, 52) if accent else (30, 33, 38), r,
+                         border_radius=r.height // 2)
+        pygame.draw.rect(surface, theme.GRID, r, width=1, border_radius=r.height // 2)
+        surface.blit(label, label.get_rect(center=r.center))
+        return pygame.Rect(r).inflate(theme.s(6), theme.s(6))
+
+    _confirm_follow_rect = _btn("Follow", panel.centerx - panel.width // 4, True)
+    _confirm_cancel_rect = _btn("Cancel", panel.centerx + panel.width // 4, False)
+
+
+def clear_follow_confirm() -> None:
+    global _confirm_follow_rect, _confirm_cancel_rect
+    _confirm_follow_rect = None
+    _confirm_cancel_rect = None
+
 
 def footer_labels(flights) -> tuple[str, ...]:
     return FOOTER_BUTTONS if flights else FOOTER_EMPTY
 
 
 def tap_footer_action(x: int, y: int, flights) -> str | None:
-    labels = footer_labels(flights)
-    idx = nav.tap_footer_button(x, y, len(labels))
-    if idx is None:
-        return None
-    if not flights:
-        return "radar"
-    return ("prev", "next", "radar")[idx]
+    return nav.curved_footer_hit(x, y, list(footer_labels(flights)))
 
 
 def _vessel_rows(f: dict, title_font, body_font, detail_font) -> list[tuple[str, object, tuple]]:
@@ -157,7 +255,7 @@ def _flight_rows(
 
 
 def draw_flight_detail(surface, flights, selected_index, scroll_offset: int = 0) -> int:
-    draw.fill_background(surface)
+    draw.fill_background_textured(surface)
     # Slightly smaller type so photo + details fit the round viewport.
     title_font = draw.load_font(theme.s(18), bold=True)
     body_font = draw.load_font(theme.s(14))
@@ -166,9 +264,11 @@ def draw_flight_detail(surface, flights, selected_index, scroll_offset: int = 0)
     line_gap = theme.s(1)
     bottom = nav.content_bottom_y()
 
+    global _follow_btn_rect
     if not flights:
-        nav.draw_breadcrumb(surface, ["Radar", "Detail"])
-        nav.draw_footer_buttons(surface, list(FOOTER_EMPTY))
+        _follow_btn_rect = None
+        nav.draw_curved_breadcrumb(surface, ["Radar", "Detail"])
+        nav.draw_curved_footer(surface, list(FOOTER_EMPTY))
         common.draw_center_row(surface, "No traffic", chrome_top, body_font, theme.MUTED)
         return 0
 
@@ -180,14 +280,10 @@ def draw_flight_detail(surface, flights, selected_index, scroll_offset: int = 0)
         if is_vessel
         else display_flight_id_for_flight(f)
     )
-    nav.draw_breadcrumb(
+    nav.draw_curved_breadcrumb(
         surface, ["Radar", "Vessel" if is_vessel else "Flight", crumb]
     )
-    nav.draw_page_dots(surface, idx, len(flights), active_color=theme.LABEL)
-
-    has_photo = bool((f.get("photo_path") or "").strip())
-    show_logo = (not is_vessel) and bool(SHOW_AIRLINE_LOGOS) and not has_photo
-    show_flag = is_vessel and not has_photo
+    nav.draw_curved_page_dots(surface, idx, len(flights), active_color=theme.LABEL)
 
     rows = (
         _vessel_rows(f, title_font, body_font, detail_font)
@@ -197,26 +293,36 @@ def draw_flight_detail(surface, flights, selected_index, scroll_offset: int = 0)
         )
     )
 
-    if has_photo:
-        header_h = theme.s(112)
-    elif show_logo or show_flag:
-        header_h = theme.s(36) if show_flag else theme.s(32)
-    else:
-        header_h = 0
-    rows_h = sum(font.get_height() + line_gap for _, font, _ in rows) - line_gap
-    total_h = header_h + theme.s(4) + rows_h
-    max_scroll = max(0, total_h - (bottom - chrome_top))
+    clip_prev = common.begin_detail_body_clip(surface, chrome_top, bottom)
+    try:
+        y = chrome_top - scroll_offset
+        y = common.draw_logo(
+            surface, f, y, allow_airline_logo=bool(SHOW_AIRLINE_LOGOS)
+        )
+        y = common.draw_detail_rows(
+            surface,
+            rows,
+            y,
+            chrome_top=chrome_top,
+            bottom=bottom,
+            line_gap=line_gap,
+        )
+        if not is_vessel:
+            y = _draw_follow_row(
+                surface, f, y, chrome_top=chrome_top, bottom=bottom
+            )
+        else:
+            _follow_btn_rect = None
+    finally:
+        max_scroll = common.finish_detail_scroll(
+            surface,
+            chrome_top=chrome_top,
+            bottom=bottom,
+            content_end=y,
+            scroll_offset=scroll_offset,
+            clip_prev=clip_prev,
+            curved=True,
+        )
 
-    y = chrome_top - scroll_offset
-    y = common.draw_logo(
-        surface, f, y, allow_airline_logo=bool(SHOW_AIRLINE_LOGOS)
-    )
-    for text, font, color in rows:
-        h = font.get_height()
-        # Full line must clear the footer so HDG can't sit under the radar button.
-        if y >= chrome_top and y + h <= bottom:
-            common.draw_center_row(surface, text, int(y), font, color)
-        y += h + line_gap
-
-    nav.draw_footer_buttons(surface, list(FOOTER_BUTTONS))
+    nav.draw_curved_footer(surface, list(FOOTER_BUTTONS))
     return max_scroll

@@ -17,10 +17,10 @@ from display.round_touch import draw, nav, settings, theme, weather_data, weathe
 
 FOOTER_BUTTONS = ("radar",)
 
-# Tight vertical rhythm — matches firmware reference (390px ref, scaled).
-_LINE_GAP = lambda: theme.s(2)
-_AFTER_TIME = lambda: theme.s(2)
-_SECTION_GAP = lambda: theme.s(4)
+# Vertical rhythm — no breadcrumb chrome, so use a bit more air between blocks.
+_LINE_GAP = lambda: theme.s(4)
+_AFTER_TIME = lambda: theme.s(8)
+_SECTION_GAP = lambda: theme.s(12)
 _WEATHER_ICON = lambda: theme.s(40)
 _SUN_OFFSET = lambda: theme.s(82)
 
@@ -38,7 +38,11 @@ def _time_strings(now: datetime | None = None):
 
 def _date_string(now: datetime | None = None) -> str:
     now = now or datetime.now()
-    return f"{now.strftime('%a, %b')} {now.day}"
+    weekday = now.strftime("%a")
+    month = now.strftime("%b")
+    if settings.use_european_date():
+        return f"{weekday}, {now.day} {month}"
+    return f"{weekday}, {month} {now.day}"
 
 
 def _format_sun_time(value: str) -> str:
@@ -79,8 +83,10 @@ def _footer_limit_y() -> int:
 
 
 def _clock_start_y() -> int:
-    """Anchor the clock block just below the breadcrumb."""
-    return nav.content_top_y() + theme.s(2)
+    """Anchor the clock block near the dial rim (no breadcrumb clearance)."""
+    # content_top_y() reserves breadcrumb height; reclaim most of that band so
+    # the time sits higher and section gaps below can breathe.
+    return nav.content_top_y() - theme.s(28)
 
 
 def _draw_time_block(surface, y: int) -> int:
@@ -206,6 +212,46 @@ def _draw_sun_row(surface, y: int, wx, detail_font) -> int:
     return y + row_h + _LINE_GAP()
 
 
+def _draw_moon_row(surface, y: int, detail_font) -> int:
+    """Moonrise/moonset under the sun row, same layout, vector moon glyphs."""
+    from display.round_touch.screens import moon
+
+    try:
+        data = moon.get_moon_data()
+        rise = moon.format_event_time(data.get("moonrise"))
+        set_ = moon.format_event_time(data.get("moonset"))
+    except Exception:
+        return y
+    if rise == "—" and set_ == "—":
+        return y
+    if detail_font is None:
+        detail_font = draw.load_font(theme.FONT_DETAIL)
+
+    # A touch smaller than the sun icons — the crescents read heavier.
+    icon_size = max(10, weather_icons.sun_icon_size() - theme.s(2))
+    offset = _SUN_OFFSET()
+    row_h = 0
+    for center_x, time_str, up in (
+        (theme.CENTER_X - offset, rise, True),
+        (theme.CENTER_X + offset, set_, False),
+    ):
+        if time_str == "—":
+            continue
+        text = detail_font.render(time_str, True, theme.HINT)
+        gap = theme.s(4)
+        total_w = icon_size + gap + text.get_width()
+        left = center_x - total_w // 2
+        mid_y = y + max(icon_size, text.get_height()) // 2
+        moon.draw_rise_set_icon(
+            surface, (left + icon_size // 2, mid_y), icon_size, up_arrow=up
+        )
+        surface.blit(text, text.get_rect(midleft=(left + icon_size + gap, mid_y)))
+        row_h = max(row_h, max(icon_size, text.get_height()))
+    if row_h == 0:
+        return y
+    return y + row_h + _LINE_GAP()
+
+
 def time_tap_rect() -> pygame.Rect:
     time_font = draw.load_font(theme.FONT_CLOCK, bold=True)
     ampm_font = draw.load_font(theme.FONT_CLOCK_AMPM, bold=True)
@@ -237,8 +283,7 @@ def tap_on_time(x: int, y: int) -> bool:
 
 
 def draw_clock(surface):
-    draw.fill_background(surface)
-    nav.draw_breadcrumb(surface, ["Radar", "Clock"])
+    draw.fill_background_textured(surface)
 
     wx = weather_data.refresh() or weather_data.snapshot()
     date_str = _date_string()
@@ -258,6 +303,8 @@ def draw_clock(surface):
         if _sun_row_height(wx) and y < limit_y:
             y += _SECTION_GAP()
             y = _draw_sun_row(surface, y, wx, detail_font)
+        if y < limit_y:
+            y = _draw_moon_row(surface, y, detail_font)
 
     nav.draw_footer_buttons(surface, list(FOOTER_BUTTONS))
     weather_icons.draw_attribution(surface)

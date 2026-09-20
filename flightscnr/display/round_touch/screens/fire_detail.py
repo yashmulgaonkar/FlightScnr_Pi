@@ -23,13 +23,7 @@ def footer_labels(fires) -> tuple[str, ...]:
 
 
 def tap_footer_action(x: int, y: int, fires) -> str | None:
-    labels = footer_labels(fires)
-    idx = nav.tap_footer_button(x, y, len(labels))
-    if idx is None:
-        return None
-    if not fires:
-        return "radar"
-    return ("prev", "next", "radar")[idx]
+    return nav.curved_footer_hit(x, y, list(footer_labels(fires)))
 
 
 def _fmt_acres(acres) -> str:
@@ -112,7 +106,7 @@ def _fire_rows(fire: dict, title_font, body_font, detail_font) -> list[tuple[str
 
 
 def draw_fire_detail(surface, fires, selected_index, scroll_offset: int = 0) -> int:
-    draw.fill_background(surface)
+    draw.fill_background_textured(surface)
     title_font = draw.load_font(theme.s(18), bold=True)
     body_font = draw.load_font(theme.s(14))
     detail_font = draw.load_font(theme.s(13))
@@ -121,50 +115,60 @@ def draw_fire_detail(surface, fires, selected_index, scroll_offset: int = 0) -> 
     bottom = nav.content_bottom_y()
 
     if not fires:
-        nav.draw_breadcrumb(surface, ["Radar", "Fire"])
-        nav.draw_footer_buttons(surface, list(FOOTER_EMPTY))
+        nav.draw_curved_breadcrumb(surface, ["Radar", "Fire"])
+        nav.draw_curved_footer(surface, list(FOOTER_EMPTY))
         common.draw_center_row(surface, "No wildfires", chrome_top, body_font, theme.MUTED)
         return 0
 
     idx = max(0, min(selected_index, len(fires) - 1))
     fire = fires[idx]
     crumb = (fire.get("name") or "Fire").strip()
-    nav.draw_breadcrumb(surface, ["Radar", "Fire", crumb])
-    nav.draw_page_dots(surface, idx, len(fires), active_color=theme.LABEL)
+    nav.draw_curved_breadcrumb(surface, ["Radar", "Fire", crumb])
+    nav.draw_curved_page_dots(surface, idx, len(fires), active_color=theme.LABEL)
 
     map_path = (fire.get("map_path") or "").strip()
     has_map = bool(map_path)
     rows = _fire_rows(fire, title_font, body_font, detail_font)
 
-    header_h = theme.s(112) if has_map else theme.s(36)
-    rows_h = sum(font.get_height() + line_gap for _, font, _ in rows) - line_gap
-    total_h = header_h + theme.s(4) + rows_h
-    max_scroll = max(0, total_h - (bottom - chrome_top))
-
-    y = chrome_top - scroll_offset
-    if has_map:
-        max_h = theme.s(108)
-        max_w = int(theme.VISIBLE_RADIUS * 1.45)
-        photo = aircraft_photos.load_photo_surface(
-            map_path, max_h, max_w=max_w, radius=theme.s(8)
-        )
-        if photo is not None:
-            rect = photo.get_rect(midtop=(theme.CENTER_X, int(y)))
-            if rect.bottom > chrome_top and rect.top < bottom:
-                surface.blit(photo, rect)
-            y = rect.bottom + theme.s(3)
+    clip_prev = common.begin_detail_body_clip(surface, chrome_top, bottom)
+    try:
+        y = chrome_top - scroll_offset
+        if has_map:
+            max_h = theme.s(108)
+            max_w = int(theme.VISIBLE_RADIUS * 1.45)
+            photo = aircraft_photos.load_photo_surface(
+                map_path, max_h, max_w=max_w, radius=theme.s(8)
+            )
+            if photo is not None:
+                rect = photo.get_rect(midtop=(theme.CENTER_X, int(y)))
+                if rect.bottom > chrome_top and rect.top < bottom:
+                    surface.blit(photo, rect)
+                y = rect.bottom + theme.s(3)
+            else:
+                y = _draw_fire_icon_header(surface, int(y))
         else:
             y = _draw_fire_icon_header(surface, int(y))
-    else:
-        y = _draw_fire_icon_header(surface, int(y))
 
-    for text, font, color in rows:
-        h = font.get_height()
-        if y >= chrome_top and y + h <= bottom:
-            common.draw_center_row(surface, text, int(y), font, color)
-        y += h + line_gap
+        y = common.draw_detail_rows(
+            surface,
+            rows,
+            y,
+            chrome_top=chrome_top,
+            bottom=bottom,
+            line_gap=line_gap,
+        )
+    finally:
+        max_scroll = common.finish_detail_scroll(
+            surface,
+            chrome_top=chrome_top,
+            bottom=bottom,
+            content_end=y,
+            scroll_offset=scroll_offset,
+            clip_prev=clip_prev,
+            curved=True,
+        )
 
-    nav.draw_footer_buttons(surface, list(FOOTER_BUTTONS))
+    nav.draw_curved_footer(surface, list(FOOTER_BUTTONS))
     return max_scroll
 
 

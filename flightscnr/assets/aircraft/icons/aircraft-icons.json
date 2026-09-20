@@ -15,8 +15,8 @@
     },
     "medium-jet": {
       "file": "medium-jet.png",
-      "description": "Narrow-body commercial jets (A320, B737)",
-      "examples": ["A320", "A321", "A319", "B737", "B738", "B739", "B757", "MD80"]
+      "description": "Narrow-body commercial jets (A320, B737, 737 MAX)",
+      "examples": ["A320", "A321", "A319", "B737", "B738", "B739", "B38M", "B757", "MD80"]
     },
     "regional-jet": {
       "file": "regional-jet.png",
@@ -26,7 +26,7 @@
     "business-jet": {
       "file": "business-jet.png",
       "description": "Business/Private jets",
-      "examples": ["G650", "GLEX", "GLF5", "C680", "CL60", "FA8X", "LJ75"]
+      "examples": ["G650", "GLEX", "GLF5", "C680", "CL60", "FA8X", "LJ75", "SF50"]
     },
     "turboprop": {
       "file": "turboprop.png",
@@ -129,13 +129,13 @@
                     "ARJ2", "C919", "BCS1", "BCS3", "E135", "E145"],
 
     "business-jet": ["C500", "C501", "C510", "C525", "C550", "C560", "C56X", "C680", "C68A", "C700", "C750",
-                    "C25A", "C25B", "C25C", "C25M", "J328",
-                    "CL30", "CL35", "CL60", "GL5T", "GL7T", "GLEX",
+                    "C25A", "C25B", "C25C", "C25M", "J328","GA7C","GA8C",
+                    "CL30", "CL35", "CL60", "GL5T", "GL7T", "GLEX","C650",
                     "G150", "G200", "G280", "GLF2", "GLF3", "GLF4", "GLF5", "GLF6", "G500", "G550", "G650",
                     "F900", "F2TH", "FA50", "FA7X", "FA8X", "ASTR", "GALX",
                     "E35L", "E50P", "E55P", "E545", "E550","GA5C",
                     "LJ23", "LJ24", "LJ25", "LJ31", "LJ35", "LJ40", "LJ45", "LJ55", "LJ60", "LJ70", "LJ75",
-                    "H25A", "H25B", "H25C", "HA4T", "HDJT",
+                    "H25A", "H25B", "H25C", "HA4T", "HDJT","c55b",
                     "BE40", "BE4W", "PRM1", "PC24", "EA50", "EVOT","GA6C","SF50"],
 
     "turboprop": ["AT43", "AT45", "AT72", "AT73", "AT75", "AT76",
@@ -149,19 +149,23 @@
                          "T182", "T206", "T207", "T210","CC19","BEA5","VL3","T34P","LXR","ST75","AA5","COL3","G115",
                          "PA18", "PA22", "PA24", "PA28", "PA32", "PA46","DHC2","M7","BT36","CH7B","EPIC","AC11",
                          "SR20", "SR22", "DA20", "DA40", "M20P", "M20T", "BE33", "BE35", "BE36","TEX2","SLG4","YK52",
-                         "YK50","P32R","C120","SLG2","D11","E200","CP10","BDOG","EFOX",
-                         "C42","SKRA","SKAR",
+                         "YK50","P32R","C120","SLG2","D11","E200","CP10","BDOG","EFOX","GX","R300",
+                         "C42","SKRA","SKAR","BE23","P32T","AP22","P28S","P208","HR20","DR40",
+                         "BREZ","BR23","C77R","BL8","BR23","M700","RELI","LGEZ","TB20","T18",
+                         "LAKR","HUSK","NG5","COZY","CJ6","M5","BE24","BL17","BE19","GA8",
+                         "AP32","EAGL","SREY","GLST",
                          "RV6", "RV7", "RV8", "RV9", "RV10", "RV12", "RV14","DA50","P28A","PC12","C180","COL4","P28B",
                          "ERCO","AT5T","TBM9","PA38","P28R","S22T","K100","CH7A","TB21","CC11"],
 
-    "small-prop-twin": ["PA30", "PA31", "PA34", "PA44", "PA60","BE50","C425","B350","PA27","PA23",
+    "small-prop-twin": ["PA30", "PA31", "PA34", "PA44", "PA60","BE50","C425","B350","PA27","PA23","C303",
                        "DA42", "DA62", "BE55", "BE58", "BE60", "BE76", "BE95","BE9L","E120",
                        "C310", "C320", "C340", "C401", "C402", "C411", "C414", "C421","C208",
-                       "P68","BE20","MU2","BE18","TRIM","B29","P06T"],
+                       "B58T","PAY2","P337","C441","D328","AC50","D228",
+                       "P68","BE20","MU2","BE18","TRIM","B29","P06T","PAT4","SH36","BE99","V10","S2T"],
 
     "helicopter": ["H125", "H130", "H135", "H145", "H155", "H160", "H175", "H215", "H225",
                   "EC20", "EC25", "EC30", "EC35", "EC45", "EC55", "EC75",
-                  "AS50", "AS55", "AS65","G2CA",
+                  "AS50", "AS55", "AS65","G2CA","H269",
                   "B06", "B06T", "B105", "B212", "B214", "B222", "B230", "B407", "B412", "B429", "B430", "B505",
                   "S55", "S58", "S61", "S64", "S76", "S92",
                   "R22", "R44", "R66",
@@ -173,8 +177,8 @@
                            "MI8", "MI17", "MI24", "MI26", "MI28", "KA27", "KA32", "KA50", "KA52"],
 
     "military-fighter": ["F14", "F15", "F16", "F18", "F22", "F35", "F100", "F104", "F111", "F117",
-                        "EUFI", "RFAL", "HAWK", "TORN", "HURR", "SPIT",
-                        "SU27", "SU30", "SU35", "MIG29", "MIG31",
+                        "EUFI", "RFAL", "HAWK", "TORN", "HURR", "SPIT","A4",
+                        "SU27", "SU30", "SU35", "MIG29", "MIG31","AJET",
                         "JAS39", "DRAV", "M2K", "M346","T38","M339","KFIR","MRF1","HUNT","F18S","L39"],
 
     "military-transport": ["C17", "C130", "C5", "C2", "C12", "C21", "C26", "C27", "C37", "C40",

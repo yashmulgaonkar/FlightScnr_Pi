@@ -103,6 +103,21 @@ def gesture_threshold_px() -> int:
     return _gesture_threshold_px()
 
 
+# Vertical travel that counts as "the user was scrolling, not tapping".
+# Below the swipe threshold the list already moves with the finger, so a
+# release must not also tap the row underneath.
+#
+# Sized against the swipe threshold, not a fixed pixel count. A fixed 6 px is
+# 8% of the 70 px a tap may travel at a 1080 framebuffer, so an ordinary
+# finger roll killed taps everywhere. A third of the threshold sits well
+# above finger noise and well below a deliberate drag.
+_DEADZONE_FRACTION = 0.35
+
+
+def scroll_tap_deadzone_px() -> int:
+    return max(10, int(_gesture_threshold_px() * _DEADZONE_FRACTION))
+
+
 def _logical_pos(pos) -> tuple[int, int]:
     from display.round_touch import rotation
 
@@ -123,6 +138,7 @@ class TouchInput:
         self._pending_swipe_end = None
         self._pending_tap = None
         self._pending_scroll_dy = 0
+        self._scrolled_px = 0.0
         self._suppress_finish = False
 
     def _clear_pending(self):
@@ -154,6 +170,9 @@ class TouchInput:
             dy = pos[1] - self._last_motion[1]
             if abs(dy) >= abs(dx):
                 self._pending_scroll_dy += dy
+                # Remember that this gesture moved a list, so the release
+                # does not also count as a tap on whatever is underneath.
+                self._scrolled_px += abs(dy)
         self._last_motion = pos
 
     def _register_swipe(self, dx: float, dy: float):
@@ -173,7 +192,9 @@ class TouchInput:
         total = math.hypot(ex - sx, ey - sy)
         travel = max(self._max_dist, total)
         suppress = self._suppress_finish
+        scrolled = self._scrolled_px
         self._suppress_finish = False
+        self._scrolled_px = 0.0
 
         self._start = None
         self._drag_end = None
@@ -187,6 +208,11 @@ class TouchInput:
 
         if travel < threshold:
             self._pending_swipe = SWIPE_NONE
+            if scrolled >= scroll_tap_deadzone_px():
+                # The list moved under the finger; releasing is the end of a
+                # scroll, not a tap on the row it happened to stop over.
+                self._pending_tap = None
+                return
             self._pending_tap = (int(ex), int(ey))
             return
 
@@ -230,6 +256,7 @@ class TouchInput:
         self._max_dist = 0.0
         self._active_fid = None
         self._suppress_finish = False
+        self._scrolled_px = 0.0
         self._clear_pending()
 
     def handle_event(self, event: pygame.event.Event):

@@ -35,7 +35,7 @@ BUNDLED_CSV = os.path.join(BASE_DIR, "assets", "data", "runways.csv")
 CSV_URL = (
     "https://raw.githubusercontent.com/davidmegginson/ourairports-data/main/runways.csv"
 )
-CACHE_VERSION = 1
+CACHE_VERSION = 2  # v2: persist runway surface for paved-only filtering
 
 _db: dict[str, list[dict]] = {}
 _loaded = False
@@ -86,6 +86,7 @@ def runway_from_csv_row(row: dict) -> tuple[str, dict] | None:
         "he_lon": he_lon,
         "le_ident": (row.get("le_ident") or "").strip().upper(),
         "he_ident": (row.get("he_ident") or "").strip().upper(),
+        "surface": (row.get("surface") or "").strip().lower(),
     }
     if length_ft is not None:
         seg["length_ft"] = int(round(length_ft))
@@ -131,7 +132,7 @@ def _build_from_csv_path(path: str, *, source: str) -> dict[str, list[dict]]:
         source,
     )
     print(
-        f"[Runways] Database built — {n_seg} segments / {len(db)} airports "
+        f"[Runways] Database built - {n_seg} segments / {len(db)} airports "
         f"(v{CACHE_VERSION}, {source})"
     )
     return db
@@ -189,17 +190,41 @@ def _load() -> None:
             version_found = raw.get("_version", "none") if isinstance(raw, dict) else "legacy"
             print(
                 f"[Runways] Cache version mismatch (found: {version_found}, "
-                f"need: {CACHE_VERSION}) — rebuilding"
+                f"need: {CACHE_VERSION}) - rebuilding"
             )
             if isinstance(raw, dict) and isinstance(raw.get("runways"), dict):
                 stale = raw["runways"]
         except Exception as exc:
-            print(f"[Runways] Cache load failed: {exc} — rebuilding")
+            print(f"[Runways] Cache load failed: {exc} - rebuilding")
     _db = _build_db()
     if not _db and stale:
         print("[Runways] Using previous cache (degraded)")
         _db = stale
     _loaded = True
+
+
+# OurAirports ``surface`` is free text; these prefixes cover the common paved
+# spellings (asphalt/concrete/bituminous/tarmac/macadam/PEM and plain "paved").
+_PAVED_PREFIXES = ("asp", "con", "pem", "pav", "bit", "tar", "mac")
+
+
+def is_paved_surface(surface) -> bool:
+    """True when an OurAirports surface string reads as a paved runway."""
+    text = str(surface or "").strip().lower()
+    return text.startswith(_PAVED_PREFIXES)
+
+
+def has_paved_runway(airport_ident: str) -> bool:
+    """True when any known runway at the airport has a paved surface.
+
+    Airports with no usable runway rows (helipads, missing coords) report
+    False — in paved-only mode that errs toward hiding marginal strips.
+    """
+    _load()
+    for seg in _db.get((airport_ident or "").strip().upper(), []):
+        if is_paved_surface(seg.get("surface")):
+            return True
+    return False
 
 
 def get_runways(airport_ident: str) -> list[dict]:

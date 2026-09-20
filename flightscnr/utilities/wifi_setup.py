@@ -27,9 +27,22 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Iterator, Literal
 
 logger = logging.getLogger("flightscnr.wifi_setup")
+
+# up = confirmed client/ethernet; down = confirmed offline; unknown = probe error
+# (timeout / nmcli failure / empty CONNECTION while STATE is still connected).
+LinkState = Literal["up", "down", "unknown"]
+
+# Link checks must finish well under offline_grace_s() (default 25s). Hotspot/join
+# keep the default 30s _nmcli timeout.
+_LINK_PROBE_TIMEOUT_S = float(
+    os.environ.get("FLIGHTSCNR_WIFI_LINK_PROBE_TIMEOUT_S", "3") or 3
+)
+_LINK_DOWN_STREAK_N = int(
+    os.environ.get("FLIGHTSCNR_WIFI_LINK_DOWN_STREAK", "3") or 3
+)
 
 DATA_DIR = os.environ.get("FLIGHTSCNR_DATA_DIR", "/var/lib/flightscnr")
 AP_STATE_PATH = os.path.join(DATA_DIR, "setup_ap.json")
@@ -38,10 +51,16 @@ CONNECTED_FLAG_PATH = os.path.join(DATA_DIR, "wifi_setup_connected")
 # Cross-process: portal/display is mid client-join — AP watchdog must stay out.
 JOIN_BUSY_PATH = os.path.join(DATA_DIR, "wifi_setup_joining")
 RADIO_LOCK_PATH = os.path.join(DATA_DIR, "wifi_setup_radio.lock")
+# Cross-process: portal/settings ask the display to enter Wi-Fi setup.
+ENTER_REQUEST_PATH = os.path.join(DATA_DIR, "wifi_setup_enter_request")
+# Portal preference file (same path as display.round_touch.settings.SETTINGS_PATH).
+_SETTINGS_JSON_PATH = os.path.join(DATA_DIR, "round_touch_settings.json")
 JOIN_BUSY_STALE_S = 180.0
 AP_CONNECTION_NAME = "flightscnr-setup-ap"
 AP_SSID_PREFIX = "FlightScnr-Setup"
 WLAN_IFACE = os.environ.get("FLIGHTSCNR_WLAN", "wlan0")
+# NetworkManager wifi.powersave: 2 = disable IEEE 802.11 PSM (kiosk / hotspot).
+WIFI_POWERSAVE_DISABLE = 2
 DNSMASQ_SHARED_DIR = "/etc/NetworkManager/dnsmasq-shared.d"
 DNSMASQ_CAPTIVE_CONF = os.path.join(DNSMASQ_SHARED_DIR, "flightscnr-captive.conf")
 
@@ -75,6 +94,11 @@ class ApCredentials:
     @property
     def portal_url(self) -> str:
         return f"http://{self.gateway}/wifi"
+
+
+def wifi_powersave_nmcli_args() -> list[str]:
+    """Disable IEEE 802.11 power save on client profiles (wall-powered kiosk)."""
+    return ["wifi.powersave", str(WIFI_POWERSAVE_DISABLE)]
 
 
 def _run(cmd: list[str], *, timeout: float = 30.0) -> subprocess.CompletedProcess:
@@ -112,6 +136,35 @@ def skip_requested() -> bool:
         "true",
         "yes",
     )
+
+
+def _portal_auto_wifi_setup_hotspot() -> bool:
+    """Read portal preference from round_touch_settings.json (default True).
+
+    Disk read avoids importing display.round_touch.settings (circular risk) and
+    works the same in the Flask child and the display process.
+    """
+    try:
+        with open(_SETTINGS_JSON_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, dict) and "auto_wifi_setup_hotspot" in data:
+            return bool(data.get("auto_wifi_setup_hotspot"))
+    except FileNotFoundError:
+        pass
+    except (OSError, json.JSONDecodeError, TypeError):
+        logger.debug("Could not read auto_wifi_setup_hotspot", exc_info=True)
+    return True
+
+
+def auto_hotspot_enabled() -> bool:
+    """False when env skip is set or the portal auto-hotspot preference is off.
+
+    When False, lost-link / offline grace must not open the setup AP. First-boot
+    with no saved client Wi-Fi still enters setup (see should_enter_setup_at_boot).
+    """
+    if skip_requested():
+        return False
+    return _portal_auto_wifi_setup_hotspot()
 
 
 def force_requested() -> bool:
@@ -178,11 +231,25 @@ def saved_client_wifi_names() -> list[str]:
     return names
 
 
-def active_client_wifi() -> bool:
-    """True when wlan0 (or FLIGHTSCNR_WLAN) is up as a client with an IPv4 address."""
-    proc = _nmcli("-t", "-f", "DEVICE,TYPE,STATE", "device", "status")
+def probe_client_wifi() -> LinkState:
+    """Classify wlan client state without treating probe errors as offline.
+
+    Returns:
+      up: connected infrastructure client (not our setup AP)
+      down: device missing, not connected, or AP profile
+      unknown: nmcli failure/timeout or empty CONNECTION while still connected
+    """
+    timeout = max(0.5, float(_LINK_PROBE_TIMEOUT_S))
+    proc = _nmcli(
+        "-t", "-f", "DEVICE,TYPE,STATE", "device", "status", timeout=timeout
+    )
     if proc.returncode != 0:
-        return False
+        logger.info(
+            "Wi-Fi link probe inconclusive: device status rc=%s",
+            proc.returncode,
+        )
+        return "unknown"
+    saw_iface = False
     for line in (proc.stdout or "").splitlines():
         parts = line.split(":")
         if len(parts) < 3:
@@ -190,18 +257,76 @@ def active_client_wifi() -> bool:
         device, dtype, state = parts[0], parts[1], parts[2]
         if device != WLAN_IFACE or dtype != "wifi":
             continue
+        saw_iface = True
         if not state.startswith("connected"):
-            return False
+            return "down"
         # Exclude AP mode: check connection mode of the active profile.
-        mode = _nmcli("-g", "GENERAL.CONNECTION", "device", "show", device)
+        mode = _nmcli(
+            "-g", "GENERAL.CONNECTION", "device", "show", device, timeout=timeout
+        )
+        if mode.returncode != 0:
+            logger.info(
+                "Wi-Fi link probe inconclusive: GENERAL.CONNECTION rc=%s "
+                "(state=%s)",
+                mode.returncode,
+                state,
+            )
+            return "unknown"
         con = (mode.stdout or "").strip()
-        if not con or con == AP_CONNECTION_NAME:
-            return False
-        mode2 = _nmcli("-g", "802-11-wireless.mode", "connection", "show", con)
+        if not con:
+            # NM can flash an empty connection name while still connected;
+            # empty stdout also appears on some probe failures.
+            logger.info(
+                "Wi-Fi link probe inconclusive: empty GENERAL.CONNECTION "
+                "(state=%s)",
+                state,
+            )
+            return "unknown"
+        if con == AP_CONNECTION_NAME:
+            return "down"
+        mode2 = _nmcli(
+            "-g",
+            "802-11-wireless.mode",
+            "connection",
+            "show",
+            con,
+            timeout=timeout,
+        )
+        if mode2.returncode != 0:
+            logger.info(
+                "Wi-Fi link probe inconclusive: mode lookup rc=%s con=%r",
+                mode2.returncode,
+                con,
+            )
+            return "unknown"
         if (mode2.stdout or "").strip().lower() == "ap":
-            return False
-        return True
-    return False
+            return "down"
+        return "up"
+    if not saw_iface:
+        return "down"
+    return "down"
+
+
+def active_client_wifi() -> bool:
+    """True when wlan0 (or FLIGHTSCNR_WLAN) is a confirmed client association."""
+    return probe_client_wifi() == "up"
+
+
+def probe_link() -> LinkState:
+    """Ethernet carrier or client Wi-Fi: up / down / unknown."""
+    if ethernet_up():
+        return "up"
+    return probe_client_wifi()
+
+
+def link_down_streak_needed() -> int:
+    """Consecutive confirmed downs before the UI starts offline grace."""
+    return max(1, int(_LINK_DOWN_STREAK_N))
+
+
+def last_link_probe_state() -> LinkState | str:
+    """Most recent probe_link() result from a blocking refresh ('' if none)."""
+    return _link_probe_state
 
 
 def needs_wifi_setup() -> bool:
@@ -253,16 +378,33 @@ def link_up() -> bool:
 
 
 def link_up_blocking() -> bool:
-    """Synchronous link check (Wi-Fi setup / join paths only)."""
-    global _link_up_cache, _link_up_cache_at
-    up = ethernet_up() or active_client_wifi()
-    _link_up_cache = up
-    _link_up_cache_at = time.time()
-    return up
+    """Synchronous link check (Wi-Fi setup / join paths only).
+
+    Confirmed down updates the cache to False. Probe errors (unknown) keep the
+    last good value so a flaky nmcli cannot start the offline countdown.
+    """
+    global _link_up_cache, _link_up_cache_at, _link_probe_state
+    state = probe_link()
+    _link_probe_state = state
+    now = time.time()
+    if state == "up":
+        _link_up_cache = True
+        _link_up_cache_at = now
+        return True
+    if state == "down":
+        _link_up_cache = False
+        _link_up_cache_at = now
+        return False
+    # unknown: keep last confirmed value. If never confirmed, leave cache_at at
+    # 0 so link_up() stays optimistic; blocking callers treat as not-up.
+    if _link_up_cache_at > 0.0:
+        return bool(_link_up_cache)
+    return False
 
 
 _link_up_cache = False
 _link_up_cache_at = 0.0
+_link_probe_state: LinkState | str = ""
 _LINK_CACHE_TTL_S = 2.0
 _link_refresh_lock = threading.Lock()
 _link_refresh_thread: threading.Thread | None = None
@@ -307,7 +449,9 @@ def should_enter_setup_at_boot() -> bool:
     """Boot-time decision, including fallback when a saved SSID is not found.
 
     If client Wi-Fi profiles exist but never associate (wrong place, AP off,
-    bad PSK), wait briefly for NetworkManager autoconnect, then enter setup.
+    bad PSK), wait briefly for NetworkManager autoconnect, then enter setup
+    unless the portal auto-hotspot preference (or env skip) disables that path.
+    No saved profiles still enters setup so first pairing always works.
     """
     if skip_requested():
         return False
@@ -317,6 +461,12 @@ def should_enter_setup_at_boot() -> bool:
         return False
     if not saved_client_wifi_names():
         return True
+    if not auto_hotspot_enabled():
+        logger.info(
+            "Saved Wi-Fi present but offline — auto setup hotspot disabled; "
+            "leaving NetworkManager to reconnect"
+        )
+        return False
     grace = offline_grace_s()
     logger.info(
         "Saved Wi-Fi present but not connected — waiting %.0fs before setup hotspot",
@@ -334,6 +484,8 @@ def should_enter_setup_after_offline(offline_s: float) -> bool:
         return False
     if force_requested():
         return True
+    if not _portal_auto_wifi_setup_hotspot():
+        return False
     if link_up():
         return False
     if setup_mode_active() and ap_radio_active():
@@ -373,6 +525,41 @@ def clear_wifi_connected_flag() -> None:
 
 def wifi_connect_signaled() -> bool:
     return os.path.isfile(CONNECTED_FLAG_PATH)
+
+
+def request_enter_wifi_setup() -> bool:
+    """Ask the display process to enter Wi-Fi setup (cross-process).
+
+    Returns False when env skip is set (admin override blocks manual entry too).
+    """
+    if skip_requested():
+        return False
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = ENTER_REQUEST_PATH + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"at": time.time(), "pid": os.getpid()}, fh)
+        os.replace(tmp, ENTER_REQUEST_PATH)
+        return True
+    except OSError as exc:
+        logger.warning("Could not write Wi-Fi enter-setup request: %s", exc)
+        return False
+
+
+def clear_enter_wifi_setup_request() -> None:
+    try:
+        if os.path.isfile(ENTER_REQUEST_PATH):
+            os.unlink(ENTER_REQUEST_PATH)
+    except OSError:
+        pass
+
+
+def consume_enter_wifi_setup_request() -> bool:
+    """True once if a pending enter-setup request existed (clears the flag)."""
+    if not os.path.isfile(ENTER_REQUEST_PATH):
+        return False
+    clear_enter_wifi_setup_request()
+    return True
 
 
 def _pid_alive(pid: int) -> bool:
@@ -884,6 +1071,7 @@ def connect_to_wifi(ssid: str, password: str = "") -> tuple[bool, str]:
             "auto",
             "connection.autoconnect",
             "no",
+            *wifi_powersave_nmcli_args(),
         ]
         if password:
             add_cmd.extend(
@@ -928,6 +1116,7 @@ def connect_to_wifi(ssid: str, password: str = "") -> tuple[bool, str]:
                 con_name,
                 "connection.autoconnect",
                 "yes",
+                *wifi_powersave_nmcli_args(),
                 timeout=15.0,
             )
             _set_status(f"Connected to “{ssid}”")

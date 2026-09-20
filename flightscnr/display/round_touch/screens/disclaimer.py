@@ -33,13 +33,14 @@ PARAGRAPHS = [
     "It depends on third-party APIs. Uptime, accuracy,"
     "and availability are not guaranteed.",
     "This is a hobby project for avgeeks like you for entertainment and curiosity only.",
-    "By tapping Accept you acknowledge these limits.",
+    "By continuing you acknowledge these limits.",
 ]
 
 # Shown under the body copy in a quieter style (edit or set to "" to hide).
 CREDIT = "- Yash Mulgaonkar"
 
 ACCEPT_LABEL = "ACCEPT"
+REMEMBER_LABEL = "Don't show again"
 # ---------------------------------------------------------------------------
 
 _RING = (36, 95, 55)
@@ -49,8 +50,13 @@ _CARD_EDGE = (40, 90, 55)
 _BTN = (36, 150, 70)
 _BTN_HI = (70, 210, 110)
 _BODY = (210, 220, 228)
+_CHECK_BOX = (28, 48, 38)
+_CHECK_EDGE = (70, 210, 110)
+_CHECK_MARK = (90, 230, 130)
 
 _accept_rect: pygame.Rect | None = None
+_remember_rect: pygame.Rect | None = None
+_countdown_rect: pygame.Rect | None = None
 _attention: pygame.Surface | None = None
 _attention_failed = False
 
@@ -77,6 +83,11 @@ def _load_attention(size: int) -> pygame.Surface | None:
     try:
         # Pillow is faster than per-pixel pygame loops on the Pi.
         from PIL import Image
+    except Exception:
+        logger.exception("Failed to load attention icon")
+        _attention_failed = True
+        return None
+    try:
         import io
 
         im = Image.open(path).convert("RGBA")
@@ -162,9 +173,53 @@ def accept_button_rect() -> pygame.Rect | None:
     return _accept_rect.copy() if _accept_rect is not None else None
 
 
-def draw_disclaimer(surface: pygame.Surface) -> None:
-    """Draw the editable disclaimer and register the Accept hit rect."""
-    global _accept_rect
+def remember_hit_rect() -> pygame.Rect | None:
+    """Hit target for Don't show again, in logical framebuffer coords."""
+    return _remember_rect.copy() if _remember_rect is not None else None
+
+
+def countdown_text_rect() -> pygame.Rect | None:
+    """Bounds of the drawn countdown line (None when no countdown is shown)."""
+    return _countdown_rect.copy() if _countdown_rect is not None else None
+
+
+def _point_in_visible_circle(x: int, y: int, margin: int = 0) -> bool:
+    dx = x - theme.CENTER_X
+    dy = y - theme.CENTER_Y
+    limit = max(0, theme.VISIBLE_RADIUS - margin)
+    return dx * dx + dy * dy <= limit * limit
+
+
+def rects_inside_visible_circle(*rects: pygame.Rect | None, margin: int = 2) -> bool:
+    """True when every non-None rect corner lies inside the round bezel."""
+    for rect in rects:
+        if rect is None:
+            continue
+        for x, y in (
+            (rect.left, rect.top),
+            (rect.right - 1, rect.top),
+            (rect.left, rect.bottom - 1),
+            (rect.right - 1, rect.bottom - 1),
+        ):
+            if not _point_in_visible_circle(x, y, margin=margin):
+                return False
+    return True
+
+
+def draw_disclaimer(
+    surface: pygame.Surface,
+    *,
+    remember_checked: bool = False,
+    countdown_s: int | None = None,
+) -> None:
+    """Draw the editable disclaimer and register Accept / remember hit rects.
+
+    Manual boot (``countdown_s is None``): checkbox + Accept.
+    Remembered countdown boot: checkbox under the card, countdown under that,
+    and no Accept button — auto-continue persists the checkbox state at expiry.
+    """
+    global _accept_rect, _remember_rect, _countdown_rect
+    _countdown_rect = None
     surface.fill(theme.BG)
     _draw_radar_plate(surface)
 
@@ -172,8 +227,11 @@ def draw_disclaimer(surface: pygame.Surface) -> None:
     title_font = draw.load_font(theme.s(15), bold=True)
     body_font = draw.load_font(theme.s(13))
     btn_font = draw.load_font(theme.s(13), bold=True)
+    status_font = draw.load_font(theme.s(12))
+    check_font = draw.load_font(theme.s(12))
+    auto_continue = countdown_s is not None
 
-    icon_size = theme.s(39)
+    icon_size = theme.s(36)
     icon = _load_attention(icon_size)
     # Keep the glyph near the top of the round visible area.
     icon_y = theme.s(4)
@@ -194,18 +252,38 @@ def draw_disclaimer(surface: pygame.Surface) -> None:
         border_radius=2,
     )
 
-    btn_w = theme.s(162)
-    btn_h = theme.s(37)
-    btn_y = theme.SIZE - theme.s(66)
-    # Keep Accept inside the round bezel.
-    btn_half = draw.circle_half_width_at_row(btn_y, btn_h)
-    btn_w = min(btn_w, max(theme.s(100), btn_half * 2 - theme.s(20)))
-    btn_x = cx - btn_w // 2
-    _accept_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+    check_size = theme.s(18)
+    check_gap = theme.s(8)
+    label_img = check_font.render(REMEMBER_LABEL, True, _BODY)
+    status_h = status_font.get_height()
+
+    if auto_continue:
+        # Bottom stack: countdown near the bezel, checkbox above it. No Accept.
+        # Sits lower than the Accept row so the card can use the freed height.
+        _accept_rect = None
+        status_y = theme.SIZE - theme.s(23) - status_h
+        check_y = status_y - theme.s(10) - check_size
+    else:
+        btn_w = theme.s(162)
+        btn_h = theme.s(34)
+        btn_y = theme.SIZE - theme.s(58)
+        btn_half = draw.circle_half_width_at_row(btn_y, btn_h)
+        btn_w = min(btn_w, max(theme.s(100), btn_half * 2 - theme.s(20)))
+        btn_x = cx - btn_w // 2
+        _accept_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+        # Reserve the countdown band so the card does not jump between modes.
+        status_y = btn_y - theme.s(3) - status_h
+        check_y = status_y - theme.s(2) - check_size
+
+    row_w = check_size + check_gap + label_img.get_width()
+    row_half = draw.circle_half_width_at_row(check_y, check_size)
+    row_w = min(row_w, max(theme.s(120), row_half * 2 - theme.s(16)))
+    check_x = cx - row_w // 2
+    _remember_rect = pygame.Rect(check_x, check_y, row_w, check_size)
 
     card_top = underline_y + theme.s(4)
-    card_bottom = btn_y - theme.s(8)
-    card_h = max(theme.s(80), card_bottom - card_top)
+    card_bottom = check_y - theme.s(4)
+    card_h = max(theme.s(70), card_bottom - card_top)
     # Card width limited by circle chord; widen ~50px vs prior inset.
     half_top = draw.circle_half_width_at_row(card_top, theme.s(16))
     half_bot = draw.circle_half_width_at_row(card_bottom - theme.s(16), theme.s(16))
@@ -235,12 +313,12 @@ def draw_disclaimer(surface: pygame.Surface) -> None:
     n_gaps = max(0, len(wrapped) - 1)
     usable = card_h - pad_y * 2 - credit_gap - credit_h
     # Prefer readable spacing; only shrink if the card would overflow.
-    line_h = body_font.get_height() + theme.s(2)
-    gap = theme.s(8)
+    line_h = body_font.get_height() + theme.s(3)
+    gap = theme.s(10)
     while n_lines * line_h + n_gaps * gap > usable and line_h > body_font.get_height():
         line_h -= 1
-        gap = max(theme.s(4), gap - 1)
-    while n_lines * line_h + n_gaps * gap > usable and gap > theme.s(3):
+        gap = max(theme.s(3), gap - 1)
+    while n_lines * line_h + n_gaps * gap > usable and gap > theme.s(2):
         gap -= 1
 
     text_h = n_lines * line_h + n_gaps * gap + credit_gap + credit_h
@@ -251,7 +329,9 @@ def draw_disclaimer(surface: pygame.Surface) -> None:
             surface.blit(img, img.get_rect(midtop=(cx, y)))
             y += line_h
         if i < len(wrapped) - 1:
-            dy = y + gap // 2 - line_h // 4
+            # ``y`` is the next line box top, so the gap's midpoint centers the
+            # dots between paragraphs instead of crowding the one above.
+            dy = y + gap // 2
             for dx in (-theme.s(4), 0, theme.s(4)):
                 pygame.draw.circle(surface, _RING, (cx + dx, dy), max(1, theme.s(1)))
             y += gap
@@ -261,17 +341,62 @@ def draw_disclaimer(surface: pygame.Surface) -> None:
         img = credit_font.render(credit, True, theme.HINT)
         surface.blit(img, img.get_rect(midtop=(cx, y)))
 
-    pygame.draw.rect(surface, _BTN, _accept_rect, border_radius=theme.s(11))
+    # Checkbox + label (Don't show again) — always shown.
+    box = pygame.Rect(check_x, check_y, check_size, check_size)
+    pygame.draw.rect(surface, _CHECK_BOX, box, border_radius=theme.s(3))
     pygame.draw.rect(
         surface,
-        _BTN_HI,
-        _accept_rect,
-        width=max(2, theme.s(2)),
-        border_radius=theme.s(11),
+        _CHECK_EDGE,
+        box,
+        width=max(1, theme.s(1)),
+        border_radius=theme.s(3),
     )
-    label = btn_font.render(ACCEPT_LABEL, True, theme.LABEL)
-    surface.blit(label, label.get_rect(center=_accept_rect.center))
+    if remember_checked:
+        inset = max(2, theme.s(4))
+        pygame.draw.line(
+            surface,
+            _CHECK_MARK,
+            (box.left + inset, box.centery),
+            (box.centerx - theme.s(1), box.bottom - inset),
+            max(2, theme.s(2)),
+        )
+        pygame.draw.line(
+            surface,
+            _CHECK_MARK,
+            (box.centerx - theme.s(1), box.bottom - inset),
+            (box.right - inset, box.top + inset),
+            max(2, theme.s(2)),
+        )
+    label_x = box.right + check_gap
+    label_max_w = max(theme.s(40), row_w - check_size - check_gap)
+    if label_img.get_width() > label_max_w:
+        clipped = pygame.Surface((label_max_w, label_img.get_height()), pygame.SRCALPHA)
+        clipped.blit(label_img, (0, 0))
+        label_img = clipped
+    surface.blit(label_img, label_img.get_rect(midleft=(label_x, box.centery)))
+
+    if auto_continue:
+        status_img = status_font.render(
+            f"Continuing in {max(0, int(countdown_s))}…", True, theme.SWEEP
+        )
+        _countdown_rect = status_img.get_rect(midtop=(cx, status_y))
+        surface.blit(status_img, _countdown_rect)
+    elif _accept_rect is not None:
+        pygame.draw.rect(surface, _BTN, _accept_rect, border_radius=theme.s(11))
+        pygame.draw.rect(
+            surface,
+            _BTN_HI,
+            _accept_rect,
+            width=max(2, theme.s(2)),
+            border_radius=theme.s(11),
+        )
+        label = btn_font.render(ACCEPT_LABEL, True, theme.LABEL)
+        surface.blit(label, label.get_rect(center=_accept_rect.center))
 
 
 def hit_accept(x: int, y: int) -> bool:
     return _accept_rect is not None and _accept_rect.collidepoint(x, y)
+
+
+def hit_remember(x: int, y: int) -> bool:
+    return _remember_rect is not None and _remember_rect.collidepoint(x, y)

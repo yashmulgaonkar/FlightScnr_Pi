@@ -20,12 +20,14 @@ from display.round_touch import (
     airport_overlay,
     draw,
     geo,
+    label_layout,
     map_bg,
     rainviewer_overlay,
     scale,
     settings,
     theme,
     wildfire_overlay,
+    earthquake_overlay,
 )
 from display.round_touch import alert_prefs, frame_debug
 from display.round_touch import vessel_declutter
@@ -82,12 +84,79 @@ def _init_sweep():
 
 _rebuild_counts = {"backdrop": 0, "layer": 0}
 
+# Short-lived name pill after switching Home / a favorite location.
+_LOCATION_TOAST_TTL_S = 2.0
+_location_toast_label = ""
+_location_toast_until = 0.0
+_location_toast_rect = pygame.Rect(0, 0, 0, 0)
+
 
 def _rebuild_stage(name: str, t0: float) -> float:
     now = time.perf_counter()
     if frame_debug.ENABLED:
         frame_debug.stage(name, now - t0)
     return now
+
+
+def show_location_toast(label: str) -> None:
+    """Show a brief Home / favorite name after the active center changes."""
+    global _location_toast_label, _location_toast_until
+    text = str(label or "").strip() or "Location"
+    _location_toast_label = text
+    _location_toast_until = time.time() + _LOCATION_TOAST_TTL_S
+
+
+def clear_location_toast() -> None:
+    global _location_toast_label, _location_toast_until, _location_toast_rect
+    _location_toast_label = ""
+    _location_toast_until = 0.0
+    _location_toast_rect = pygame.Rect(0, 0, 0, 0)
+
+
+def location_toast_visible() -> bool:
+    if not _location_toast_label:
+        return False
+    if time.time() >= _location_toast_until:
+        clear_location_toast()
+        return False
+    return True
+
+
+def draw_location_toast(surface: pygame.Surface) -> pygame.Rect | None:
+    """Draw the favorite-location pill; return dirty rect or None."""
+    global _location_toast_rect
+    if not location_toast_visible():
+        _location_toast_rect = pygame.Rect(0, 0, 0, 0)
+        return None
+    font = draw.load_font(max(12, theme.s(14)), bold=True)
+    caption = font.render(_location_toast_label, True, theme.LABEL)
+    pad_x = theme.s(14)
+    pad_y = theme.s(8)
+    width = caption.get_width() + pad_x * 2
+    height = caption.get_height() + pad_y * 2
+    bubble = pygame.Rect(0, 0, width, height)
+    bubble.centerx = theme.CENTER_X
+    bubble.top = theme.CENTER_Y + theme.s(18)
+    try:
+        from display.round_touch import radar_hud
+
+        _glyph, fill_rgba = radar_hud._hud_chrome()
+    except Exception:
+        fill_rgba = (255, 255, 255, 180)
+    panel = pygame.Surface((bubble.width, bubble.height), pygame.SRCALPHA)
+    pygame.draw.rect(
+        panel,
+        fill_rgba,
+        panel.get_rect(),
+        border_radius=max(8, theme.s(10)),
+    )
+    panel.blit(
+        caption,
+        ((bubble.width - caption.get_width()) // 2, pad_y),
+    )
+    surface.blit(panel, bubble.topleft)
+    _location_toast_rect = bubble.copy()
+    return _location_toast_rect
 
 
 def take_rebuild_counts() -> dict:
@@ -192,11 +261,20 @@ def _build_frame_layer(build: pygame.Surface, backdrop, flights, offset) -> bool
     build.blit(backdrop, (0, 0))
     _t = _rebuild_stage("2r_blit", _t)
     wildfire_overlay.draw_fires(build, pan_offset=offset)
+    earthquake_overlay.draw_quakes(build, pan_offset=offset)
     _t = _rebuild_stage("2r_fires", _t)
     _draw_flights(build, flights)
     _t = _rebuild_stage("2r_flights", _t)
     _draw_status(build, flights)
     _draw_map_attribution(build)
+    try:
+        from display.round_touch import zoom_buttons
+
+        zoom_buttons.draw(build)
+    except Exception:
+        pass
+    # lofi_controls pill is stamped per frame in rotation.present() — the
+    # marquee title animates, so it can't live in this cached layer.
     _t = _rebuild_stage("2r_status", _t)
     # HUD lives on a transparent overlay (rebuilt here) so the sweep can pass
     # under the curved frost without a rectangular clip from the bake layer.
@@ -308,6 +386,7 @@ def _backdrop_cache_key(*, pan_mode: bool, calibrate: bool):
         settings.theme_custom(),
         settings.theme_rgb(),
         settings.runway_darkmap_rgb(),
+        settings.runway_light_rgb(),
         settings.show_airport_icons(),
         settings.show_airport_centerlines(),
         settings.distance_units(),
@@ -418,6 +497,7 @@ def draw_radar(
     map_bg.request_background()
     rainviewer_overlay.request_overlay()
     wildfire_overlay.request_refresh()
+    earthquake_overlay.request_refresh()
 
     if pan_mode:
         _draw_map_pan_overlay(
@@ -454,6 +534,8 @@ def draw_radar(
             from display.round_touch import update_bubble
 
             update_bubble.draw_bubble(surface)
+            airport_overlay.draw_callout(surface, pan_offset=offset)
+            draw_location_toast(surface)
             bezel_applied = True
         elif layer is not None:
             # Fast present composites from this layer directly; skip the unused
@@ -463,9 +545,18 @@ def draw_radar(
         else:
             airport_overlay.draw_airports(surface, pan_offset=offset)
             wildfire_overlay.draw_fires(surface, pan_offset=offset)
+            earthquake_overlay.draw_quakes(surface, pan_offset=offset)
             _draw_flights(surface, flights)
             _draw_status(surface, flights)
             _draw_map_attribution(surface)
+            from display.round_touch import zoom_buttons
+
+            zoom_buttons.draw(surface)
+            if layer is None:
+                # Direct draws have no rotation.present() pass to stamp it.
+                from display.round_touch import lofi_controls
+
+                lofi_controls.draw(surface)
             # Sweep under the HUD pill.
             if settings.show_sweep_line() and layer is None:
                 draw.draw_sweep_line(
@@ -478,8 +569,15 @@ def draw_radar(
             from display.round_touch import update_bubble
 
             update_bubble.draw_bubble(surface)
+            airport_overlay.draw_callout(surface, pan_offset=offset)
+            draw_location_toast(surface)
             if aircraft_alert.rim_flash_active():
                 _draw_alert_rim_flash(surface)
+            if layer is None:
+                # Menu stays topmost — same order as the fast present path.
+                from display.round_touch import radial_menu
+
+                radial_menu.draw(surface)
         # Sweep is composited in present() on the fast path so we can skip a
         # full-frame rotate every tick. Fall back to in-buffer draw above when
         # the layer isn't available.
@@ -494,8 +592,11 @@ def _draw_grid(surface, *, calibrate: bool = False):
     line_w = max(1, theme.s(1))
     facing = settings.effective_facing_deg()
     if settings.show_range_rings():
-        for ring in range(1, theme.RING_COUNT + 1):
-            r = theme.GRID_OUTER_RADIUS * ring // theme.RING_COUNT
+        # Rings sit at round distances (scale.ring_values), not exact thirds.
+        ring_vals = scale.ring_values(scale.active_index())
+        outer_val = float(ring_vals[-1])
+        for d in ring_vals:
+            r = int(round(theme.GRID_OUTER_RADIUS * float(d) / outer_val))
             draw.draw_dashed_circle(surface, center, r, theme.GRID, width=line_w)
 
         cx, cy = theme.CENTER_X, theme.CENTER_Y
@@ -520,38 +621,62 @@ def _draw_grid(surface, *, calibrate: bool = False):
 
     cx, cy = theme.CENTER_X, theme.CENTER_Y
     if settings.show_compass_rose():
+        # Targets page: custom rose color / opacity / label mode.
+        rose_rgb = settings.compass_color() or theme.GRID
+        rose_alpha = int(255 * settings.compass_opacity() / 100)
+        mode = settings.compass_labels()
+
+        def _blit_rose(rendered, center):
+            if rose_alpha < 255:
+                rendered = rendered.copy()
+                rendered.set_alpha(rose_alpha)
+            surface.blit(rendered, rendered.get_rect(center=center))
+
         font = draw.load_font(theme.FONT_CARDINAL, bold=True)
         # Place cardinals on the visible rim so they track true north.
         card_r = theme.VISIBLE_RADIUS - theme.CARDINAL_NORTH_OFFSET_Y
-        for text, bearing in (("N", 0), ("E", 90), ("S", 180), ("W", 270)):
-            rad = math.radians(bearing - facing - 90)
-            x = cx + int(card_r * math.cos(rad))
-            y = cy + int(card_r * math.sin(rad))
-            rendered = font.render(text, True, theme.GRID)
-            surface.blit(rendered, rendered.get_rect(center=(x, y)))
+        if mode in ("letters", "both"):
+            for text, bearing in (("N", 0), ("E", 90), ("S", 180), ("W", 270)):
+                rad = math.radians(bearing - facing - 90)
+                x = cx + int(card_r * math.cos(rad))
+                y = cy + int(card_r * math.sin(rad))
+                _blit_rose(font.render(text, True, rose_rgb), (x, y))
 
         diag_r = theme.GRID_OUTER_RADIUS - theme.CARDINAL_DIAGONAL_INSET
         diag_font = draw.load_font(theme.FONT_CARDINAL_DIAG, bold=True)
-        for label, angle in (("NE", 45), ("SE", 135), ("SW", 225), ("NW", 315)):
-            rad = math.radians(angle - facing - 90)
-            x = theme.CENTER_X + int(diag_r * math.cos(rad))
-            y = theme.CENTER_Y + int(diag_r * math.sin(rad))
-            rendered = diag_font.render(label, True, theme.GRID)
-            rect = rendered.get_rect(center=(x, y))
-            surface.blit(rendered, rect)
+        if mode == "letters":
+            for label, angle in (("NE", 45), ("SE", 135), ("SW", 225), ("NW", 315)):
+                rad = math.radians(angle - facing - 90)
+                x = theme.CENTER_X + int(diag_r * math.cos(rad))
+                y = theme.CENTER_Y + int(diag_r * math.sin(rad))
+                _blit_rose(diag_font.render(label, True, rose_rgb), (x, y))
+        if mode in ("degrees", "both"):
+            # Three-digit headings at 30° ticks; in "both" the cardinals
+            # keep their letters and degrees fill the gaps.
+            for bearing in range(0, 360, 30):
+                if mode == "both" and bearing % 90 == 0:
+                    continue
+                rad = math.radians(bearing - facing - 90)
+                r_lab = card_r if (mode == "degrees" or bearing % 90 != 0) else diag_r
+                x = cx + int(r_lab * math.cos(rad))
+                y = cy + int(r_lab * math.sin(rad))
+                _blit_rose(
+                    diag_font.render(f"{bearing:03d}", True, rose_rgb), (x, y)
+                )
 
     # Range tags collide with calibrate help text — omit them in that mode.
     if calibrate or not settings.show_range_rings():
         return
 
     use_units = settings.distance_units()
-    scale_font = draw.load_font(theme.FONT_TAG, bold=True)
-    outer_km = scale.active_band()["label_km"]
-    for ring in range(1, theme.RING_COUNT + 1):
-        ring_km = outer_km * ring / theme.RING_COUNT
-        label = scale.format_scale_tag(ring_km, use_units)
-        r = theme.GRID_OUTER_RADIUS * ring // theme.RING_COUNT
-        gap = theme.SCALE_GAP_OUTER_RING_KM if ring == theme.RING_COUNT and use_units == "km" else theme.SCALE_GAP_FROM_OUTER_RING
+    scale_font = draw.load_font(theme.FONT_SCALE_LABEL, bold=True)
+    ring_vals = scale.ring_values(scale.active_index(), use_units)
+    outer_val = float(ring_vals[-1])
+    for i, ring_d in enumerate(ring_vals):
+        is_outer = i == len(ring_vals) - 1
+        label = f"{ring_d:g}{use_units}"
+        r = int(round(theme.GRID_OUTER_RADIUS * float(ring_d) / outer_val))
+        gap = theme.SCALE_GAP_OUTER_RING_KM if is_outer and use_units == "km" else theme.SCALE_GAP_FROM_OUTER_RING
         label_r = r - gap
         rad = math.radians(theme.SCALE_LABEL_BEARING_DEG - facing - 90)
         x = theme.CENTER_X + int(label_r * math.cos(rad))
@@ -568,12 +693,177 @@ def _tag_block_metrics():
     sub_h = sub_font.get_height()
     # Font height includes generous leading. Apply the same tuck to every row so
     # tags stay compact without the old callsign/type overlap (tuck_main was 6).
-    tuck = theme.s(4)
-    step_main = max(theme.s(9), main_h - tuck)
-    step_sub = max(theme.s(8), sub_h - tuck)
+    tuck = theme.TAG_ROW_TUCK
+    step_main = max(theme.TAG_ROW_STEP_MAIN_MIN, main_h - tuck)
+    step_sub = max(theme.TAG_ROW_STEP_SUB_MIN, sub_h - tuck)
     offsets = [0, step_main, step_main + step_sub]
     block_h = offsets[-1] + step_sub
     return block_h, offsets, main_font, sub_font
+
+
+# Slot geometry lives in label_layout so the solver and the renderer can never
+# disagree about where a slot actually is.
+_TAG_V_CENTER = label_layout.V_CENTER
+_TAG_V_ABOVE = label_layout.V_ABOVE
+_TAG_V_BELOW = label_layout.V_BELOW
+
+_preferred_tag_on_right = label_layout.preferred_on_right
+_tag_anchor = label_layout.tag_anchor
+_tag_rect = label_layout.tag_rect
+_tag_clearance = label_layout.clearance
+_tag_overlap_area = label_layout.overlap_area
+
+
+def _tag_leader_color(text_rgb: tuple[int, int, int]) -> tuple[int, int, int]:
+    """Use the blip color at full strength — dimmed grid-green disappears on the map."""
+    return (int(text_rgb[0]), int(text_rgb[1]), int(text_rgb[2]))
+
+
+def _icon_rim_toward(x: int, y: int, tx: int, ty: int) -> tuple[int, int]:
+    """Point on the icon circle facing ``(tx, ty)``."""
+    icon_r = theme.AIRCRAFT_ICON_RADIUS
+    dx = tx - x
+    dy = ty - y
+    dist = math.hypot(dx, dy)
+    if dist <= 1:
+        return (x + icon_r, y)
+    return (
+        int(round(x + icon_r * dx / dist)),
+        int(round(y + icon_r * dy / dist)),
+    )
+
+
+def _tag_leader_geometry(
+    x: int,
+    y: int,
+    rect: pygame.Rect,
+    on_right: bool,
+    underline_w: int | None = None,
+) -> dict:
+    """Hockey-stick: underline under the altitude line, diagonal to the blip."""
+    gap = max(2, theme.s(3))
+    if rect.bottom <= y:
+        # Block sits above the blip: a bottom underline would land on the icon
+        # and squash the diagonal to nothing. Run it along the far edge instead.
+        underline_y = rect.top - gap
+    else:
+        underline_y = rect.bottom + gap
+    width = rect.width if underline_w is None else max(1, min(int(underline_w), rect.width))
+    if on_right:
+        left = rect.left
+        right = rect.left + width
+        elbow = (left, underline_y)
+    else:
+        right = rect.right
+        left = rect.right - width
+        elbow = (right, underline_y)
+    underline = ((left, underline_y), (right, underline_y))
+    rim = _icon_rim_toward(x, y, elbow[0], elbow[1])
+    # Always drawn: the diagonal is the only thing tying a tag to its target.
+    stem = (rim, elbow)
+    return {
+        "stem": stem,
+        "underline": underline,
+        "elbow": elbow,
+    }
+
+
+def _seg_dist2(
+    px: int, py: int, ax: int, ay: int, bx: int, by: int
+) -> float:
+    """Squared distance from point ``(px, py)`` to segment ``(ax,ay)–(bx,by)``."""
+    dx = bx - ax
+    dy = by - ay
+    length2 = dx * dx + dy * dy
+    if length2 <= 0:
+        ox, oy = px - ax, py - ay
+        return float(ox * ox + oy * oy)
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length2))
+    ox = px - (ax + t * dx)
+    oy = py - (ay + t * dy)
+    return float(ox * ox + oy * oy)
+
+
+def _tag_leader_hits_blip(
+    x: int,
+    y: int,
+    rect: pygame.Rect,
+    on_right: bool,
+    blips: list[tuple[int, int]] | None,
+) -> bool:
+    """True when another aircraft sits on the bracket or in the icon–tag gap."""
+    if not blips:
+        return False
+    geo_pts = _tag_leader_geometry(x, y, rect, on_right)
+    keepout = theme.AIRCRAFT_ICON_RADIUS + theme.AIRCRAFT_LABEL_GAP + theme.s(10)
+    r2 = keepout * keepout
+    cluster_r2 = (theme.AIRCRAFT_ICON_RADIUS * 2) ** 2
+    segs = [geo_pts["underline"]]
+    if geo_pts["stem"] is not None:
+        segs.append(geo_pts["stem"])
+    inner = rect.left if on_right else rect.right
+    for bx, by in blips:
+        if abs(bx - x) <= 1 and abs(by - y) <= 1:
+            continue
+        if (bx - x) * (bx - x) + (by - y) * (by - y) <= cluster_r2:
+            return True
+        for (x0, y0), (x1, y1) in segs:
+            if _seg_dist2(bx, by, x0, y0, x1, y1) <= r2:
+                return True
+        if on_right and x <= bx <= inner and abs(by - y) <= keepout:
+            return True
+        if not on_right and inner <= bx <= x and abs(by - y) <= keepout:
+            return True
+    return False
+
+
+def _tag_leader_crowded(
+    x: int,
+    y: int,
+    rect: pygame.Rect,
+    on_right: bool,
+    blips: list[tuple[int, int]] | None = None,
+    placed: list[pygame.Rect] | None = None,
+) -> bool:
+    """True when the bracket would cut through another icon or a stacked tag."""
+    if _tag_leader_hits_blip(x, y, rect, on_right, blips):
+        return True
+    pad = _tag_clearance()
+    near = rect.inflate(pad * 2, pad * 2)
+    for other in placed or ():
+        if near.colliderect(other):
+            return True
+    return False
+
+
+def _tag_stem_segment(
+    x: int, y: int, rect: pygame.Rect, on_right: bool
+) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Icon rim → underline elbow."""
+    return _tag_leader_geometry(x, y, rect, on_right)["stem"]
+
+
+def _draw_tag_leader(
+    surface,
+    x: int,
+    y: int,
+    rect: pygame.Rect,
+    on_right: bool,
+    text_rgb: tuple[int, int, int],
+    blips: list[tuple[int, int]] | None = None,
+    placed: list[pygame.Rect] | None = None,
+    underline_w: int | None = None,
+) -> None:
+    """2px hockey-stick: underline the altitude line, diagonal to the blip."""
+    if not settings.show_tag_leaders():
+        return
+    color = _tag_leader_color(text_rgb)
+    geo_pts = _tag_leader_geometry(x, y, rect, on_right, underline_w)
+    if geo_pts["stem"] is not None:
+        pygame.draw.line(surface, color, geo_pts["stem"][0], geo_pts["stem"][1], 2)
+    pygame.draw.line(
+        surface, color, geo_pts["underline"][0], geo_pts["underline"][1], 2
+    )
 
 
 def _above_min_height(flight) -> bool:
@@ -604,33 +894,75 @@ def _above_min_height(flight) -> bool:
         return True
 
 
-def _draw_vessel_tag(surface, x, y, flight):
-    """One-line vessel name (no MMSI, no type/speed when short tags are on)."""
+def _blit_tag_block(
+    surface,
+    x,
+    y,
+    lines,
+    block_h,
+    placed: list[pygame.Rect],
+    blips: list[tuple[int, int]] | None = None,
+    leader_rgb: tuple[int, int, int] | None = None,
+):
+    """Deprecated single-tag path — kept only so callers outside the layout
+    pipeline (none in-tree) keep working. Draws at the block's centred slot."""
+    rows, max_w = _measure_tag_rows(lines)
+    if not rows:
+        return None
+    rect = _tag_rect(x, y, max_w, block_h, _preferred_tag_on_right(x))
+    _blit_tag_at(
+        surface, x, y, rows, rect, _preferred_tag_on_right(x), leader_rgb, blips, placed
+    )
+    placed.append(rect)
+    return rect
+
+
+def _measure_tag_rows(lines):
+    """Render (cached) each non-empty row; return the rows and the widest one."""
+    rows: list[tuple[pygame.Surface, int]] = []
+    max_w = 0
+    for text, color, font, row_y in lines:
+        if not text:
+            continue
+        rendered = draw.render_text_cached(font, text, color)
+        rows.append((rendered, row_y))
+        max_w = max(max_w, rendered.get_width())
+    return rows, max_w
+
+
+def _blit_tag_at(surface, x, y, rows, rect, on_right, leader_rgb, blips, placed):
+    """Draw a tag block into a box the layout solver already chose."""
+    if leader_rgb is None:
+        leader_rgb = _overlay_color_for_basemap(theme.AIRCRAFT)
+    underline_w = rows[-1][0].get_width()
+    _draw_tag_leader(
+        surface, x, y, rect, on_right, leader_rgb, blips, placed, underline_w
+    )
+    top = rect.top
+    for rendered, row_y in rows:
+        if on_right:
+            surface.blit(rendered, (rect.left, top + row_y))
+        else:
+            surface.blit(rendered, rendered.get_rect(topright=(rect.right, top + row_y)))
+    return rect
+
+
+def _vessel_tag_lines(flight):
+    """(lines, block_h) for a vessel, or None when it should not be labelled."""
+    if not settings.show_marine_labels():
+        return None
+    if not vessel_declutter.should_label(flight):
+        return None
     name = vessel_declutter.display_name(flight)
     if not name:
-        return
+        return None
     if vessel_declutter.short_tags_enabled():
         name = vessel_declutter.truncate_name(name, 14)
         font = draw.load_font(theme.FONT_TAG, bold=True)
         color = _overlay_color_for_basemap(theme.GRID)
         if vessel_declutter.hierarchy_enabled() and vessel_declutter.is_parked(flight):
             color = _overlay_color_for_basemap(theme.HINT)
-        rendered = draw.render_text_cached(font, name, color)
-        tag_on_right = x < theme.CENTER_X
-        symbol_half = theme.AIRCRAFT_ICON_RADIUS
-        if tag_on_right:
-            anchor_x = min(
-                x + symbol_half + theme.AIRCRAFT_LABEL_GAP,
-                theme.CENTER_X + theme.VISIBLE_RADIUS - theme.s(20),
-            )
-            surface.blit(rendered, (anchor_x, y - rendered.get_height() // 2))
-        else:
-            anchor_x = max(
-                x - symbol_half - theme.AIRCRAFT_LABEL_GAP,
-                theme.CENTER_X - theme.VISIBLE_RADIUS + theme.s(20),
-            )
-            surface.blit(rendered, rendered.get_rect(midright=(anchor_x, y)))
-        return
+        return [(name, color, font, 0)], font.get_height()
 
     # Legacy multi-line vessel tag (still never uses MMSI).
     block_h, offsets, main_font, sub_font = _tag_block_metrics()
@@ -640,81 +972,169 @@ def _draw_vessel_tag(surface, x, y, flight):
         alt = f"{float(sog):.0f} kt" if sog is not None else (flight.get("nav_status_name") or "")
     except (TypeError, ValueError):
         alt = flight.get("nav_status_name") or ""
-    ly = y - block_h // 2
-    tag_on_right = x < theme.CENTER_X
-    symbol_half = theme.AIRCRAFT_ICON_RADIUS
-    if tag_on_right:
-        anchor_x = min(
-            x + symbol_half + theme.AIRCRAFT_LABEL_GAP,
-            theme.CENTER_X + theme.VISIBLE_RADIUS - theme.s(20),
-        )
-        align = "left"
-    else:
-        anchor_x = max(
-            x - symbol_half - theme.AIRCRAFT_LABEL_GAP,
-            theme.CENTER_X - theme.VISIBLE_RADIUS + theme.s(20),
-        )
-        align = "right"
-    lines = [
+    return [
         (name, _overlay_color_for_basemap(theme.GRID), main_font, offsets[0]),
         (plane_type, _overlay_color_for_basemap(theme.TAG_TYPE), sub_font, offsets[1]),
         (alt, _overlay_color_for_basemap(theme.TAG_ALT_ASCEND), sub_font, offsets[2]),
-    ]
-    for text, color, font, row_y in lines:
-        if not text:
-            continue
-        rendered = font.render(text, True, color)
-        if align == "left":
-            surface.blit(rendered, (anchor_x, ly + row_y))
-        else:
-            surface.blit(rendered, rendered.get_rect(topright=(anchor_x, ly + row_y)))
+    ], block_h
 
 
-def _draw_aircraft_tag(surface, x, y, flight):
-    if flight.get("kind") == "vessel":
-        if not settings.show_marine_labels():
-            return
-        if not vessel_declutter.should_label(flight):
-            return
-        _draw_vessel_tag(surface, x, y, flight)
-        return
+def _flight_number_tag_color() -> tuple[int, int, int]:
+    """User-tunable color for the aircraft blip identity (flight number) row."""
+    if _pale_basemap():
+        return tuple(theme.TAG_TEXT_LIGHT[:3])
+    return tuple(theme.TAG_TEXT_DARK[:3])
+
+
+def _aircraft_tag_lines(flight):
+    """(lines, block_h) for an aircraft, or None when it should not be labelled."""
     if not settings.show_aircraft_labels():
-        return
+        return None
 
     block_h, offsets, main_font, sub_font = _tag_block_metrics()
     try:
-        from utilities.airline_branding import display_flight_id_for_flight
-        callsign = display_flight_id_for_flight(flight)
+        from utilities.airline_branding import aircraft_tag_identity
+
+        callsign = aircraft_tag_identity(
+            flight,
+            mode=settings.aircraft_tag_id(),
+            alternate_s=settings.AIRCRAFT_TAG_ID_ALTERNATE_S,
+        )
     except ImportError:
         callsign = flight.get("callsign") or "—"
     plane_type = flight.get("plane") or ""
     alt = aircraft.format_altitude(flight.get("altitude"))
     alt_color = aircraft.altitude_tag_color(flight.get("vertical_speed"))
 
-    ly = y - block_h // 2
-    tag_on_right = x < theme.CENTER_X
-    symbol_half = theme.AIRCRAFT_ICON_RADIUS
-
-    if tag_on_right:
-        anchor_x = min(x + symbol_half + theme.AIRCRAFT_LABEL_GAP, theme.CENTER_X + theme.VISIBLE_RADIUS - theme.s(20))
-        align = "left"
-    else:
-        anchor_x = max(x - symbol_half - theme.AIRCRAFT_LABEL_GAP, theme.CENTER_X - theme.VISIBLE_RADIUS + theme.s(20))
-        align = "right"
-
-    lines = [
-        (callsign, _overlay_color_for_basemap(theme.GRID), main_font, offsets[0]),
+    lines = []
+    # Local ADS-B marker: * before callsign when dump1090 refreshed this track.
+    if flight.get("local_adsb") and callsign and callsign != "—":
+        if not str(callsign).startswith("*"):
+            callsign = f"* {callsign}"
+    raw_lines = [
+        (callsign, _flight_number_tag_color(), main_font, offsets[0]),
         (plane_type, _overlay_color_for_basemap(theme.TAG_TYPE), sub_font, offsets[1]),
         (alt, _overlay_color_for_basemap(alt_color), sub_font, offsets[2]),
     ]
-    for i, (text, color, font, row_y) in enumerate(lines):
+    for i, (text, color, font, row_y) in enumerate(raw_lines):
         if not text or text == "—" and i == 1:
             continue
-        rendered = draw.render_text_cached(font, text, color)
-        if align == "left":
-            surface.blit(rendered, (anchor_x, ly + row_y))
-        else:
-            surface.blit(rendered, rendered.get_rect(topright=(anchor_x, ly + row_y)))
+        lines.append((text, color, font, row_y))
+    return (lines, block_h) if lines else None
+
+
+def _tag_lines_for(flight):
+    if flight.get("kind") == "vessel":
+        return _vessel_tag_lines(flight)
+    return _aircraft_tag_lines(flight)
+
+
+def _draw_aircraft_tag(
+    surface,
+    x,
+    y,
+    flight,
+    placed: list[pygame.Rect] | None = None,
+    blips: list[tuple[int, int]] | None = None,
+):
+    """Single-tag convenience path (tests / one-off draws)."""
+    built = _tag_lines_for(flight)
+    if not built:
+        return None
+    lines, block_h = built
+    return _blit_tag_block(
+        surface,
+        x,
+        y,
+        lines,
+        block_h,
+        [] if placed is None else placed,
+        blips,
+        leader_rgb=_flight_icon_color(flight, compact=False),
+    )
+
+
+def _label_key(flight) -> str:
+    """Identity that survives the flight list being rebuilt every poll."""
+    hexid = str(flight.get("icao_hex") or "").strip().upper()
+    if hexid:
+        return f"hex:{hexid}"
+    callsign = str(flight.get("callsign") or "").strip().upper()
+    if callsign:
+        return f"cs:{callsign}"
+    return f"pos:{flight.get('plane_latitude')},{flight.get('plane_longitude')}"
+
+
+def _label_priority(flight, x: int, y: int) -> tuple:
+    """Lower sorts first: alerts, then the tracked flight, then closest to centre."""
+    dx = x - theme.CENTER_X
+    dy = y - theme.CENTER_Y
+    return (
+        0 if aircraft_alert.is_highlighted(flight) else 1,
+        0 if _is_tracked(flight) else 1,
+        dx * dx + dy * dy,
+        _label_key(flight),
+    )
+
+
+def _draw_labels(surface, inner_items, blips):
+    """Measure every tag, solve slots once, then draw at the assigned boxes."""
+    targets = []
+    prepared = {}
+    for _dist, flight, (x, y) in inner_items:
+        built = _tag_lines_for(flight)
+        if not built:
+            continue
+        lines, block_h = built
+        rows, max_w = _measure_tag_rows(lines)
+        if not rows:
+            continue
+        head = rows[0][0]
+        key = _label_key(flight)
+        prepared[key] = (flight, x, y, rows)
+        targets.append(
+            label_layout.Target(
+                key=key,
+                x=x,
+                y=y,
+                full_size=(max_w, block_h),
+                short_size=(head.get_width(), head.get_height()),
+                priority=_label_priority(flight, x, y),
+            )
+        )
+    if not targets:
+        return
+
+    icon_r = theme.AIRCRAFT_ICON_RADIUS
+    obstacles = [
+        pygame.Rect(bx - icon_r, by - icon_r, icon_r * 2, icon_r * 2)
+        for bx, by in (blips or ())
+    ]
+    placements = label_layout.resolve(targets, obstacles)
+
+    # Draw least-important first so the tags that matter land on top of any
+    # overlap the solver could not remove.
+    drawn: list[pygame.Rect] = []
+    for target in sorted(targets, key=lambda t: t.priority, reverse=True):
+        place = placements.get(target.key)
+        if place is None or place.rect is None:
+            continue
+        flight, x, y, rows = prepared[target.key]
+        if place.tier == label_layout.TIER_SHORT:
+            rows = rows[:1]
+        on_right = label_layout.SLOTS[place.slot][0]
+        _blit_tag_at(
+            surface,
+            x,
+            y,
+            rows,
+            place.rect,
+            on_right,
+            _flight_icon_color(flight, compact=False),
+            blips,
+            drawn,
+        )
+        drawn.append(place.rect)
 
 
 def _visible_flights(flights):
@@ -743,39 +1163,96 @@ def _is_tracked(flight) -> bool:
     return bool(tracked_keys & flight_identity_keys(flight))
 
 
-def _light_basemap() -> bool:
-    """Pale street / VFR charts need a dedicated high-contrast overlay palette."""
+def _pale_basemap() -> bool:
+    """Pale street / VFR charts — near-black tags stay readable on light ink."""
     try:
-        return settings.map_style() in ("light", "voyager", "vfr")
+        return settings.map_style() in ("light", "voyager", "vfr", "streets")
+    except Exception:
+        return False
+
+
+def _imagery_basemap() -> bool:
+    """Dark / busy imagery — neon-dark remaps disappear on water and terrain."""
+    try:
+        return settings.map_style() in ("satellite", "toner")
+    except Exception:
+        return False
+
+
+def _light_basemap() -> bool:
+    """Basemaps that remapping radar neon accents (pale charts or imagery)."""
+    return _pale_basemap() or _imagery_basemap()
+
+
+def _amber_icon_basemap() -> bool:
+    """Basemaps that use dark-amber aircraft icons instead of radar yellow."""
+    try:
+        return settings.map_style() in ("light", "vfr")
     except Exception:
         return False
 
 
 # High-contrast overlay for busy pale charts (VFR / light / Voyager CARTO).
-# Near-black silhouettes drown in sectional ink (airspace, labels); amber
-# matches dark-radar traffic and stays off the chart's blue/green palette.
-_LIGHT_MAP_ICON = (234, 88, 12)         # vivid amber-orange
+# Near-black tags stay readable on sectional ink and pale street maps.
+# Aircraft icons: yellow on most basemaps; dark amber only on Light: Carto / VFR.
+_LIGHT_MAP_ICON = (234, 88, 12)         # dark amber (Light: Carto / VFR)
 _LIGHT_MAP_ICON_UNKNOWN = (146, 64, 14)  # darker amber for unmapped types
 _LIGHT_MAP_TRACKED = (22, 163, 74)      # vivid green (tracked)
-_LIGHT_MAP_CALLSIGN = (15, 23, 42)      # near-black tags
+_LIGHT_MAP_CALLSIGN = (15, 23, 42)      # near-black tags (default for pale maps)
 _LIGHT_MAP_TYPE = (30, 64, 175)         # indigo
 _LIGHT_MAP_ALT_UP = (14, 116, 144)      # deep teal
 _LIGHT_MAP_ALT_DOWN = (126, 34, 206)    # deep purple
 _LIGHT_MAP_VESSEL_PARKED = (100, 116, 139)
 _LIGHT_MAP_ALERT_MIL = (220, 38, 38)    # keep alerts punchy
-_LIGHT_MAP_ALERT_OTHER = (37, 99, 235)
+_LIGHT_MAP_ALERT_WATCH = (8, 145, 178)  # deep aqua — not LIVE / climb teal
+_LIGHT_MAP_ALERT_OTHER = _LIGHT_MAP_ALERT_WATCH
+_LIGHT_MAP_ALERT_EMERGENCY = _LIGHT_MAP_ALERT_MIL  # solid red, same as military
+
+# Satellite / toner: bright glyphs that survive water, forests, and city texture.
+_IMAGERY_CALLSIGN = (248, 250, 252)     # near-white
+_IMAGERY_TYPE = (250, 204, 21)          # bright amber
+_IMAGERY_ALT_UP = (34, 211, 238)        # bright cyan
+_IMAGERY_ALT_DOWN = (244, 114, 182)     # bright pink
+_IMAGERY_TRACKED = (74, 222, 128)       # bright green
+_IMAGERY_VESSEL_PARKED = (148, 163, 184)
 
 
 def _overlay_color_for_basemap(color: tuple) -> tuple:
-    """Map dark-radar accents to legible colors on light/VFR basemaps."""
+    """Map dark-radar accents to legible colors on light/VFR/imagery basemaps."""
     r, g, b = int(color[0]), int(color[1]), int(color[2])
-    if not _light_basemap():
-        return (r, g, b)
     key = (r, g, b)
+    icon_keys = (
+        tuple(theme.AIRCRAFT[:3]),
+        tuple(theme.AIRCRAFT_UNKNOWN[:3]),
+        tuple(theme.VESSEL_MOVING[:3]),
+    )
+    # Icon color is per basemap: amber only on Light: Carto / VFR; else yellow.
+    if key in icon_keys:
+        if _amber_icon_basemap():
+            if key == tuple(theme.AIRCRAFT_UNKNOWN[:3]):
+                return _LIGHT_MAP_ICON_UNKNOWN
+            return _LIGHT_MAP_ICON
+        return (r, g, b)
+    if _imagery_basemap():
+        mapping = {
+            tuple(theme.SWEEP[:3]): _IMAGERY_TRACKED,
+            tuple(theme.GRID[:3]): _IMAGERY_CALLSIGN,
+            tuple(theme.TAG_TYPE[:3]): _IMAGERY_TYPE,
+            tuple(theme.TAG_ALT_ASCEND[:3]): _IMAGERY_ALT_UP,
+            tuple(theme.TAG_ALT_DESCEND[:3]): _IMAGERY_ALT_DOWN,
+            tuple(theme.VESSEL_PARKED[:3]): _IMAGERY_VESSEL_PARKED,
+            tuple(theme.ALERT_MILITARY[:3]): _LIGHT_MAP_ALERT_MIL,
+            tuple(theme.ALERT_WATCH[:3]): _LIGHT_MAP_ALERT_WATCH,
+            tuple(theme.ALERT_OTHER[:3]): _LIGHT_MAP_ALERT_WATCH,
+            tuple(theme.ALERT_EMERGENCY[:3]): _LIGHT_MAP_ALERT_EMERGENCY,
+            tuple(theme.ALERT_FLASH[:3]): _LIGHT_MAP_ALERT_MIL,
+            tuple(theme.ALERT_FLASH_OTHER[:3]): _LIGHT_MAP_ALERT_WATCH,
+            tuple(theme.HINT[:3]): _IMAGERY_VESSEL_PARKED,
+        }
+        return mapping.get(key, (min(255, r + 40), min(255, g + 40), min(255, b + 40)))
+    if not _pale_basemap():
+        return (r, g, b)
     mapping = {
-        tuple(theme.AIRCRAFT[:3]): _LIGHT_MAP_ICON,
-        tuple(theme.AIRCRAFT_UNKNOWN[:3]): _LIGHT_MAP_ICON_UNKNOWN,
-        tuple(theme.VESSEL_MOVING[:3]): _LIGHT_MAP_ICON,
         tuple(theme.SWEEP[:3]): _LIGHT_MAP_TRACKED,
         tuple(theme.GRID[:3]): _LIGHT_MAP_CALLSIGN,
         tuple(theme.TAG_TYPE[:3]): _LIGHT_MAP_TYPE,
@@ -783,9 +1260,11 @@ def _overlay_color_for_basemap(color: tuple) -> tuple:
         tuple(theme.TAG_ALT_DESCEND[:3]): _LIGHT_MAP_ALT_DOWN,
         tuple(theme.VESSEL_PARKED[:3]): _LIGHT_MAP_VESSEL_PARKED,
         tuple(theme.ALERT_MILITARY[:3]): _LIGHT_MAP_ALERT_MIL,
-        tuple(theme.ALERT_OTHER[:3]): _LIGHT_MAP_ALERT_OTHER,
+        tuple(theme.ALERT_WATCH[:3]): _LIGHT_MAP_ALERT_WATCH,
+        tuple(theme.ALERT_OTHER[:3]): _LIGHT_MAP_ALERT_WATCH,
+        tuple(theme.ALERT_EMERGENCY[:3]): _LIGHT_MAP_ALERT_EMERGENCY,
         tuple(theme.ALERT_FLASH[:3]): _LIGHT_MAP_ALERT_MIL,
-        tuple(theme.ALERT_FLASH_OTHER[:3]): _LIGHT_MAP_ALERT_OTHER,
+        tuple(theme.ALERT_FLASH_OTHER[:3]): _LIGHT_MAP_ALERT_WATCH,
         tuple(theme.HINT[:3]): _LIGHT_MAP_VESSEL_PARKED,
     }
     if key in mapping:
@@ -802,14 +1281,15 @@ def _flight_icon_color(flight, *, compact: bool):
     if _is_tracked(flight) and not compact:
         return _overlay_color_for_basemap(theme.SWEEP)
     if aircraft_alert.is_highlighted(flight):
-        # Pulse between alert color (red/blue) and normal aircraft yellow.
+        # Pulse between alert color and aircraft yellow; emergency stays solid red.
         if aircraft_alert.pulse_phase():
             return _overlay_color_for_basemap(aircraft_alert.alert_pulse_color(flight))
         return _overlay_color_for_basemap(aircraft_alert.alert_color(flight))
     if vessel_declutter.is_vessel(flight) and vessel_declutter.hierarchy_enabled():
         if vessel_declutter.is_parked(flight):
             return _overlay_color_for_basemap(theme.VESSEL_PARKED)
-        return _overlay_color_for_basemap(theme.VESSEL_MOVING)
+        custom_vessel = settings.target_color("vessel")
+        return _overlay_color_for_basemap(custom_vessel or theme.VESSEL_MOVING)
     try:
         from display.round_touch import aircraft_type_icons
 
@@ -817,7 +1297,14 @@ def _flight_icon_color(flight, *, compact: bool):
             return _overlay_color_for_basemap(theme.AIRCRAFT_UNKNOWN)
     except Exception:
         pass
-    return _overlay_color_for_basemap(theme.AIRCRAFT)
+    if settings.color_by_altitude():
+        from display.round_touch import altitude_color
+
+        return altitude_color.color_for_altitude(flight.get("altitude"))
+    # Targets page: per-category accent replaces only the single default
+    # color — altitude coloring and alert pulses keep priority above.
+    custom = settings.target_color(aircraft.target_category(flight))
+    return _overlay_color_for_basemap(custom or theme.AIRCRAFT)
 
 
 def _draw_flights(surface, flights):
@@ -870,13 +1357,35 @@ def _draw_flights(surface, flights):
         inner_items.sort(key=_draw_order)
         _t = frame_debug.end("2r_f_sort", _t)
 
+        # Hoisted: one config read per pass, not one per rim target.
+        rim_style = settings.rim_target_style()
         for _, flight, (x, y) in rim_items:
+            color = _flight_icon_color(flight, compact=True)
+            if rim_style == "dot":
+                # Whole dot centred inside the rim; apply_round_bezel() crops
+                # the overhang, leaving a D flat against the display edge.
+                blip_rgb = settings.blip_color() or color
+                r_blip = max(
+                    2,
+                    int(round(theme.RIM_BLIP_RADIUS * settings.blip_size_pct() / 100.0)),
+                )
+                alpha = settings.blip_opacity()
+                if alpha >= 100:
+                    pygame.draw.circle(surface, blip_rgb, (x, y), r_blip)
+                else:
+                    dot = pygame.Surface((r_blip * 2, r_blip * 2), pygame.SRCALPHA)
+                    pygame.draw.circle(
+                        dot, (*blip_rgb[:3], int(255 * alpha / 100)),
+                        (r_blip, r_blip), r_blip,
+                    )
+                    surface.blit(dot, (x - r_blip, y - r_blip))
+                continue
             aircraft.draw_plane_icon(
                 surface,
                 x,
                 y,
                 geo.screen_heading(flight.get("heading") or 0),
-                _flight_icon_color(flight, compact=True),
+                color,
                 compact=True,
                 flight=flight,
             )
@@ -887,8 +1396,8 @@ def _draw_flights(surface, flights):
             aircraft.draw_plane_icon(surface, x, y, heading, color, flight=flight)
         _t = frame_debug.end("2r_f_icons", _t)
 
-        for _, flight, (x, y) in inner_items:
-            _draw_aircraft_tag(surface, x, y, flight)
+        blips = [(x, y) for _, _, (x, y) in inner_items]
+        _draw_labels(surface, inner_items, blips)
         frame_debug.end("2r_f_tags", _t)
         frame_debug.count("targets_drawn", len(rim_items) + len(inner_items))
         frame_debug.count("targets_inner", len(inner_items))
@@ -1169,6 +1678,9 @@ def _draw_map_attribution(surface):
     firms_text = wildfire_overlay.attribution_text()
     if firms_text:
         parts.append(firms_text)
+    quake_text = earthquake_overlay.attribution_text()
+    if quake_text:
+        parts.append(quake_text)
     if not parts:
         return
     text = " · ".join(parts)
@@ -1226,6 +1738,24 @@ def pick_flight_at(flights, tap_x, tap_y, alt_x=None, alt_y=None):
                 best_d2 = d2
                 best_score = score
     return best, best_d2
+
+
+def flights_near(flights, tap_x, tap_y, radius_px):
+    """All tappable aircraft/vessels within ``radius_px`` — [(flight, d2)]
+    sorted nearest-first. Same visibility rules as pick_flight_at."""
+    r2 = float(radius_px) ** 2
+    out = []
+    for flight in _visible_flights(flights):
+        if not aircraft_alert.is_shown_on_radar(flight):
+            continue
+        pos = _flight_screen_xy(flight)
+        if not pos:
+            continue
+        d2 = (pos[0] - tap_x) ** 2 + (pos[1] - tap_y) ** 2
+        if d2 <= r2:
+            out.append((flight, d2))
+    out.sort(key=lambda item: item[1])
+    return out
 
 
 def flights_by_distance(flights):
