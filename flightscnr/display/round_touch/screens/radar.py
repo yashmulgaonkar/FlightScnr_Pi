@@ -46,6 +46,20 @@ _frame_layer_at = 0.0
 _frame_layer_gen = 0
 # True when the published layer includes an alert rim stroke (rebuild to clear).
 _rim_baked_in_layer = False
+# True when the last aircraft pass drew a tracked or alert halo. The colour
+# pulse is ~2Hz; rebuild as soon as pulse_phase flips so the glow stays in step.
+_alert_glow_in_layer = False
+_layer_pulse_phase = False
+# True when the last pass drew a helicopter PNG — keep rotors ticking ~5Hz.
+_heli_rotor_in_layer = False
+_layer_rotor_tick = -1
+# Halo around the tracked flight and alert icons. Stronger (and slightly
+# larger) on the blink-on phase.
+_ALERT_GLOW_ALPHA_ON = 175
+_ALERT_GLOW_ALPHA_OFF = 58
+_ALERT_GLOW_RADIUS_SCALE = 1.32
+_ALERT_GLOW_BLOOM_SCALE = 1.08
+_ALERT_GLOW_RIM_DOT_SCALE = 1.55
 # How often the fire/aircraft layer is rebuilt. The beam wants ~60fps, but
 # redrawing every icon and tag costs ~6–20ms, so aircraft refresh at ~5Hz —
 # still smooth for traffic, and halves worker SDL/GIL contention vs the
@@ -207,6 +221,15 @@ def frame_layer_due() -> bool:
     """True when the ~10Hz aircraft layer wants a rebuild before the next frame."""
     if _rim_baked_in_layer and not aircraft_alert.rim_flash_active():
         return True
+    # Tracked / alert icons blink ~2Hz; rebuild on the phase flip so the
+    # halo stays in lockstep with the pulse (TTL alone can skip a beat).
+    if _alert_glow_in_layer and aircraft_alert.pulse_phase() != _layer_pulse_phase:
+        return True
+    if _heli_rotor_in_layer:
+        from display.round_touch import aircraft_type_icons
+
+        if aircraft_type_icons.rotor_anim_tick() != _layer_rotor_tick:
+            return True
     return _frame_layer is None or (
         time.time() - _frame_layer_at
     ) >= _layer_ttl_s() - theme.SWEEP_FRAME_MS / 1000.0
@@ -1270,6 +1293,107 @@ def _overlay_color_for_basemap(color: tuple) -> tuple:
     )
 
 
+def _alert_glow_peak_alpha(blinking: bool) -> int:
+    return _ALERT_GLOW_ALPHA_ON if blinking else _ALERT_GLOW_ALPHA_OFF
+
+
+def _alert_glow_radius(
+    flight,
+    *,
+    compact: bool,
+    rim_dot_r: int | None = None,
+    blooming: bool = False,
+) -> int:
+    """Outer radius of the alert halo, scaled with the drawn glyph."""
+    if rim_dot_r is not None:
+        base_r = max(5, int(round(int(rim_dot_r) * _ALERT_GLOW_RIM_DOT_SCALE)))
+    else:
+        cat = aircraft.target_category(flight)
+        pct = settings.target_size_pct(cat) / 100.0
+        base = theme.s(11) if compact else theme.AIRCRAFT_ICON_RADIUS
+        base_r = max(6, int(round(base * _ALERT_GLOW_RADIUS_SCALE * pct)))
+    if blooming:
+        return max(base_r + 2, int(round(base_r * _ALERT_GLOW_BLOOM_SCALE)))
+    return base_r
+
+
+def _halo_style(flight, icon_color, pulse_on: bool):
+    """Halo colour and strength for this frame, or None to skip.
+
+    Military icons blink red↔yellow. The bright halo used to follow the yellow
+    half; keep it red, and only while the icon itself is red.
+    """
+    if aircraft_alert.is_highlighted(flight):
+        alert = tuple(aircraft_alert.alert_color(flight)[:3])
+        alternate = tuple(aircraft_alert.alert_pulse_color(flight)[:3])
+        if alert == tuple(theme.ALERT_MILITARY[:3]) and alternate != alert:
+            red = _overlay_color_for_basemap(aircraft_alert.alert_color(flight))
+            if tuple(icon_color[:3]) != tuple(red[:3]):
+                return None
+            return red, _ALERT_GLOW_ALPHA_ON, True
+    return icon_color, _alert_glow_peak_alpha(pulse_on), pulse_on
+
+
+def _paint_blip_glow(
+    surface,
+    x,
+    y,
+    flight,
+    icon_color,
+    *,
+    compact: bool,
+    pulse_on: bool,
+    rim_dot_r: int | None = None,
+) -> bool:
+    """Draw the halo. True when this blip should keep the pulse rebuild armed."""
+    if not _blip_wants_glow(flight):
+        return False
+    style = _halo_style(flight, icon_color, pulse_on)
+    if style is None:
+        return True
+    color, alpha, blooming = style
+    _draw_alert_glow(
+        surface, x, y, flight, color,
+        compact=compact, glow_alpha=alpha, blooming=blooming,
+        rim_dot_r=rim_dot_r,
+    )
+    return True
+
+
+def _blip_wants_glow(flight) -> bool:
+    """Tracked flight, or watch / military / emergency alert."""
+    if aircraft_alert.is_highlighted(flight):
+        return True
+    return _is_tracked(flight)
+
+
+def _draw_alert_glow(
+    surface,
+    x,
+    y,
+    flight,
+    color,
+    *,
+    compact: bool,
+    glow_alpha: int,
+    blooming: bool,
+    rim_dot_r: int | None = None,
+) -> None:
+    """Soft halo under a tracked or alert blip; brighter while the pulse is on."""
+    if glow_alpha <= 0 or not _blip_wants_glow(flight):
+        return
+    draw.blit_soft_glow(
+        surface,
+        x,
+        y,
+        _alert_glow_radius(
+            flight, compact=compact, rim_dot_r=rim_dot_r, blooming=blooming
+        ),
+        color,
+        glow_alpha,
+    )
+
+
 def _flight_icon_color(flight, *, compact: bool):
     if _is_tracked(flight) and not compact:
         return _overlay_color_for_basemap(theme.SWEEP)
@@ -1303,10 +1427,17 @@ def _flight_icon_color(flight, *, compact: bool):
 def _draw_flights(surface, flights):
     from display.round_touch import alert_prefs, frame_debug, map_bg
 
+    global _alert_glow_in_layer, _layer_pulse_phase
+    global _heli_rotor_in_layer, _layer_rotor_tick
+
     _t = frame_debug.mark("2r_f_vis")
     # One prefs stat() for the whole pass — is_shown_on_radar used to do this
     # per target and dominated visibility time with ~100 aircraft.
     alert_prefs.reload()
+    blinking = aircraft_alert.pulse_phase()
+    highlighted_any = False
+    heli_any = False
+    heli_icon_form = settings.target_form("heli") == "icon"
     map_bg.begin_projection_batch()
     try:
         rim_items: list[tuple[float, dict, tuple[int, int]]] = []
@@ -1362,6 +1493,11 @@ def _draw_flights(surface, flights):
                     2,
                     int(round(theme.RIM_BLIP_RADIUS * settings.blip_size_pct() / 100.0)),
                 )
+                if _paint_blip_glow(
+                    surface, x, y, flight, color,
+                    compact=True, pulse_on=blinking, rim_dot_r=r_blip,
+                ):
+                    highlighted_any = True
                 alpha = settings.blip_opacity()
                 if alpha >= 100:
                     pygame.draw.circle(surface, blip_rgb, (x, y), r_blip)
@@ -1373,6 +1509,13 @@ def _draw_flights(surface, flights):
                     )
                     surface.blit(dot, (x - r_blip, y - r_blip))
                 continue
+            if _paint_blip_glow(
+                surface, x, y, flight, color,
+                compact=True, pulse_on=blinking,
+            ):
+                highlighted_any = True
+            if heli_icon_form and aircraft.target_category(flight) == "heli":
+                heli_any = True
             aircraft.draw_plane_icon(
                 surface,
                 x,
@@ -1386,6 +1529,13 @@ def _draw_flights(surface, flights):
         for _, flight, (x, y) in inner_items:
             heading = geo.screen_heading(flight.get("heading") or 0)
             color = _flight_icon_color(flight, compact=False)
+            if _paint_blip_glow(
+                surface, x, y, flight, color,
+                compact=False, pulse_on=blinking,
+            ):
+                highlighted_any = True
+            if heli_icon_form and aircraft.target_category(flight) == "heli":
+                heli_any = True
             aircraft.draw_plane_icon(surface, x, y, heading, color, flight=flight)
         _t = frame_debug.end("2r_f_icons", _t)
 
@@ -1396,6 +1546,13 @@ def _draw_flights(surface, flights):
         frame_debug.count("targets_inner", len(inner_items))
         frame_debug.count("targets_rim", len(rim_items))
     finally:
+        _alert_glow_in_layer = highlighted_any
+        _layer_pulse_phase = blinking
+        _heli_rotor_in_layer = heli_any
+        if heli_any:
+            from display.round_touch import aircraft_type_icons
+
+            _layer_rotor_tick = aircraft_type_icons.rotor_anim_tick()
         map_bg.end_projection_batch()
 
 

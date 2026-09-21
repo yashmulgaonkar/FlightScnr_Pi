@@ -129,5 +129,118 @@ class TestAircraftTypeIcons(unittest.TestCase):
             self.assertFalse(is_unknown_type({"plane": code}), code)
 
 
+class TestHelicopterRotor(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        import pygame
+
+        pygame.init()
+        try:
+            pygame.display.set_mode((1, 1))
+        except pygame.error:
+            pass
+
+    def setUp(self):
+        from display.round_touch import aircraft_type_icons
+
+        aircraft_type_icons.clear_rotor_cache()
+
+    def tearDown(self):
+        from display.round_touch import aircraft_type_icons
+
+        aircraft_type_icons.clear_rotor_cache()
+
+    def test_r44_is_a_helicopter_icon(self):
+        from display.round_touch.aircraft_type_icons import is_helicopter_icon, icon_category
+
+        self.assertTrue(is_helicopter_icon({"plane": "R44"}))
+        self.assertEqual(icon_category({"plane": "R44"}), "helicopter")
+        self.assertFalse(is_helicopter_icon({"plane": "B738"}))
+
+    def test_static_rotor_x_is_removed(self):
+        import pygame
+        from display.round_touch import aircraft_type_icons
+
+        if not aircraft_type_icons.assets_available():
+            self.skipTest("helicopter PNG not installed")
+
+        path = aircraft_type_icons._icon_path("helicopter")
+        raw = aircraft_type_icons._crop_to_alpha(pygame.image.load(path).convert_alpha())
+        w, h = raw.get_size()
+        self.assertGreater(raw.get_at((8, 12)).a, 20)
+        body = aircraft_type_icons._strip_static_rotor(raw)
+        self.assertEqual(body.get_at((8, 12)).a, 0)
+        self.assertGreater(body.get_at((w // 2, h // 2)).a, 20)
+        self.assertGreater(body.get_at((w // 2, int(h * 0.75))).a, 20)
+        self.assertGreater(body.get_at((w // 2 + 40, int(h * 0.86))).a, 20)
+        recrop = aircraft_type_icons._crop_to_alpha(body)
+        self.assertLess(recrop.get_width(), int(raw.get_width() * 0.6))
+
+    def test_rotor_sits_forward_and_is_larger(self):
+        import math
+        from display.round_touch import aircraft_type_icons
+
+        self.assertAlmostEqual(aircraft_type_icons._ROTOR_RADIUS_SCALE, 0.4125, places=3)
+        self.assertGreater(aircraft_type_icons._ROTOR_FORWARD_SCALE, 0)
+        side = 40
+        radius = max(3, int(round(side * aircraft_type_icons._ROTOR_RADIUS_SCALE)))
+        self.assertEqual(radius, 16)  # 40 * 0.4125
+        self.assertGreater(radius, max(3, int(round(side * 0.33))))
+        forward = side * aircraft_type_icons._ROTOR_FORWARD_SCALE
+        hub_y = 40 - forward * math.cos(0.0)
+        self.assertLess(hub_y, 40)
+
+    def test_rotor_overlay_changes_with_phase(self):
+        import pygame
+        from unittest import mock
+        from display.round_touch import aircraft_type_icons
+
+        if not aircraft_type_icons.assets_available():
+            self.skipTest("helicopter PNG not installed")
+
+        flight = {"plane": "R44"}
+        color = (0, 220, 80)
+        a = pygame.Surface((80, 80), pygame.SRCALPHA)
+        b = pygame.Surface((80, 80), pygame.SRCALPHA)
+        with mock.patch.object(aircraft_type_icons, "rotor_phase", return_value=0):
+            self.assertTrue(
+                aircraft_type_icons.draw_icon(a, flight, (40, 40), 0, color, size=48)
+            )
+        with mock.patch.object(aircraft_type_icons, "rotor_phase", return_value=3):
+            self.assertTrue(
+                aircraft_type_icons.draw_icon(b, flight, (40, 40), 0, color, size=48)
+            )
+        self.assertNotEqual(
+            pygame.image.tostring(a, "RGBA"),
+            pygame.image.tostring(b, "RGBA"),
+        )
+
+    def test_fixed_wing_ignores_rotor_phase(self):
+        import pygame
+        from unittest import mock
+        from display.round_touch import aircraft_type_icons
+
+        if not aircraft_type_icons.assets_available():
+            self.skipTest("aircraft PNGs not installed")
+
+        flight = {"plane": "B738"}
+        color = (0, 220, 80)
+        a = pygame.Surface((80, 80), pygame.SRCALPHA)
+        b = pygame.Surface((80, 80), pygame.SRCALPHA)
+        with mock.patch.object(aircraft_type_icons, "rotor_phase", return_value=0):
+            self.assertTrue(
+                aircraft_type_icons.draw_icon(a, flight, (40, 40), 0, color, size=48)
+            )
+        with mock.patch.object(aircraft_type_icons, "rotor_phase", return_value=3):
+            self.assertTrue(
+                aircraft_type_icons.draw_icon(b, flight, (40, 40), 0, color, size=48)
+            )
+        self.assertEqual(
+            pygame.image.tostring(a, "RGBA"),
+            pygame.image.tostring(b, "RGBA"),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

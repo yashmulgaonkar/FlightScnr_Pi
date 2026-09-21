@@ -387,6 +387,52 @@ def draw_sweep_line(
     return pygame.Rect(x0, y0, box_w, box_h)
 
 
+_glow_cache: dict[tuple, pygame.Surface] = {}
+_GLOW_CACHE_MAX = 48
+
+
+def clear_soft_glow_cache() -> None:
+    """Drop cached glow discs (tests / framebuffer resize)."""
+    _glow_cache.clear()
+
+
+def soft_glow_surface(radius: int, color, peak_alpha: int) -> pygame.Surface:
+    """Cached SRCALPHA disc: bright core, soft falloff. Cheap to blit on the Pi."""
+    radius = max(2, int(radius))
+    rgb = tuple(max(0, min(255, int(c))) for c in color[:3])
+    peak_alpha = max(0, min(220, int(peak_alpha)))
+    key = (radius, rgb, peak_alpha)
+    cached = _glow_cache.get(key)
+    if cached is not None:
+        return cached
+    if len(_glow_cache) >= _GLOW_CACHE_MAX:
+        _glow_cache.clear()
+    side = radius * 2 + 2
+    surf = pygame.Surface((side, side), pygame.SRCALPHA)
+    cx = cy = radius + 1
+    # Outside-in filled circles: each inner fill replaces the core, leaving
+    # an annular halo. Enough rings to read as a bloom, not a stepped bullseye.
+    rings = max(6, min(14, radius // 2 + 2))
+    for i in range(rings, 0, -1):
+        t = i / rings  # 1 = outer edge, ~0 = core
+        r = max(1, int(round(radius * t)))
+        fade = (1.0 - t) ** 1.25
+        alpha = int(round(peak_alpha * (0.10 + 0.90 * fade)))
+        if alpha < 4:
+            continue
+        pygame.draw.circle(surf, (*rgb, alpha), (cx, cy), r)
+    _glow_cache[key] = surf
+    return surf
+
+
+def blit_soft_glow(surface, x, y, radius: int, color, peak_alpha: int) -> None:
+    """Blit a soft coloured halo centred on ``(x, y)``."""
+    if peak_alpha <= 0 or radius <= 0:
+        return
+    glow = soft_glow_surface(radius, color, peak_alpha)
+    surface.blit(glow, glow.get_rect(center=(int(x), int(y))))
+
+
 def draw_error(surface: pygame.Surface, message: str):
     """Show a persistent error screen instead of closing the display."""
     fill_background(surface)

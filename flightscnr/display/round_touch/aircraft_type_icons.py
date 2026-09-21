@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
+import time
 
 import pygame
 
@@ -71,6 +73,17 @@ _CATEGORY_SIZE_SCALE = {
 _type_to_category: dict[str, str] | None = None
 _icon_files: dict[str, str] | None = None
 _surface_cache: dict[tuple[str, int, tuple], pygame.Surface] = {}
+_rotor_cache: dict[tuple, pygame.Surface] = {}
+_heli_body_cache: dict[str, pygame.Surface] = {}
+_HELI_CATEGORIES = frozenset({"helicopter", "military-helicopter"})
+# Two-blade overlay; 8 steps × motion-blur trails read as a spinning disc
+# even when the radar layer only rebuilds at ~5Hz.
+_ROTOR_STEPS = 8
+_ROTOR_RPS = 1.6
+_ROTOR_CACHE_MAX = 64
+# Disc radius relative to the fitted icon side; hub sits forward of the glyph centre.
+_ROTOR_RADIUS_SCALE = 0.4125  # was 0.33; +25%
+_ROTOR_FORWARD_SCALE = 0.14
 # Memoized type-code → category (includes None for unmapped codes). The
 # prefix/startswith fallbacks in _category_for_type are O(n) over the whole
 # mapping — too slow to repeat per flight per layer rebuild on a Pi 3.
@@ -327,6 +340,51 @@ def _crop_to_alpha(image: pygame.Surface, *, pad: int = 2) -> pygame.Surface:
     return image.subsurface((left, top, right - left, bottom - top)).copy()
 
 
+def _row_opaque_spans(alpha) -> list[int]:
+    """Per-row opaque width (0 if the row is empty). ``alpha`` is [x, y]."""
+    w, h = alpha.shape
+    spans = [0] * h
+    for y in range(h):
+        xs = [x for x in range(w) if alpha[x, y] > 20]
+        if xs:
+            spans[y] = xs[-1] - xs[0] + 1
+    return spans
+
+
+def _strip_static_rotor(image: pygame.Surface) -> pygame.Surface:
+    """Erase the baked-in four-blade X; keep fuselage, boom, and tail rotor."""
+    w, h = image.get_size()
+    if w < 8 or h < 8:
+        return image
+    out = image.copy()
+    alpha = pygame.surfarray.pixels_alpha(out)
+    spans = _row_opaque_spans(alpha)
+    # Tail rotor is the wide bar in the lower third; boom/tip above and below
+    # it stay narrower. Don't use min(span) — the pointed tail is only ~8px.
+    wide = int(w * 0.30)
+    tail_rows = [y for y in range(int(h * 0.70), h) if spans[y] >= wide]
+    tail_top = min(tail_rows) if tail_rows else h
+    xs = [x for x in range(w) if any(alpha[x, y] > 20 for y in range(h))]
+    cx = (xs[0] + xs[-1]) / 2.0 if xs else w / 2.0
+    cabin_half = max(6, int(round(w * 0.14)))
+    for y in range(min(tail_top, h)):
+        for x in range(w):
+            if abs(x - cx) > cabin_half:
+                alpha[x, y] = 0
+    del alpha
+    return out
+
+
+def _heli_fuselage_surface(category: str, cropped: pygame.Surface) -> pygame.Surface:
+    """Cached helicopter body with the static main-rotor X removed."""
+    cached = _heli_body_cache.get(category)
+    if cached is not None:
+        return cached
+    body = _crop_to_alpha(_strip_static_rotor(cropped))
+    _heli_body_cache[category] = body
+    return body
+
+
 def _fit_to_side(image: pygame.Surface, side: int) -> pygame.Surface:
     """Scale preserving aspect ratio; center on a transparent side×side canvas."""
     w, h = image.get_size()
@@ -377,6 +435,8 @@ def get_icon_surface(category: str, size: int, color: tuple) -> pygame.Surface |
         return None
 
     image = _crop_to_alpha(image)
+    if category in _HELI_CATEGORIES:
+        image = _heli_fuselage_surface(category, image)
     image = _fit_to_side(image, side)
     tinted = _colorize(image, color)
     # The theme RGB slider mints a new color tuple per drag step, so this key
@@ -385,6 +445,81 @@ def get_icon_surface(category: str, size: int, color: tuple) -> pygame.Surface |
         _surface_cache.clear()
     _surface_cache[key] = tinted
     return tinted
+
+
+def rotor_phase() -> int:
+    """Current main-rotor overlay step (0 … _ROTOR_STEPS-1)."""
+    return int(time.monotonic() * _ROTOR_RPS * _ROTOR_STEPS) % _ROTOR_STEPS
+
+
+def rotor_anim_tick() -> int:
+    """Coarse ~5Hz tick so the radar layer keeps rotors turning."""
+    return int(time.monotonic() * 5)
+
+
+def is_helicopter_icon(flight: dict | None) -> bool:
+    return icon_category(flight) in _HELI_CATEGORIES
+
+
+def clear_rotor_cache() -> None:
+    _rotor_cache.clear()
+    _heli_body_cache.clear()
+
+
+def _spinning_rotor_surface(radius: int, color, phase: int) -> pygame.Surface:
+    """Nose-up two-blade disc with faint trails; caller rotates to heading."""
+    radius = max(3, int(radius))
+    rgb = tuple(max(0, min(255, int(c))) for c in color[:3])
+    phase = int(phase) % _ROTOR_STEPS
+    key = (radius, rgb, phase)
+    cached = _rotor_cache.get(key)
+    if cached is not None:
+        return cached
+    if len(_rotor_cache) >= _ROTOR_CACHE_MAX:
+        _rotor_cache.clear()
+    side = radius * 2 + 3
+    surf = pygame.Surface((side, side), pygame.SRCALPHA)
+    oc = side // 2
+    hub = max(1, int(round(radius * 0.20)))
+    pygame.draw.circle(surf, (*rgb, 62), (oc, oc), radius)
+    pygame.draw.circle(surf, (0, 0, 0, 0), (oc, oc), hub)
+    blade_w = max(1, radius // 6)
+    step = 180.0 / _ROTOR_STEPS
+    for lag, alpha in ((0, 215), (1, 100), (2, 42)):
+        deg = ((phase - lag) % _ROTOR_STEPS) * step
+        for extra in (0.0, 180.0):
+            rad = math.radians(deg + extra)
+            dx = math.sin(rad) * radius
+            dy = -math.cos(rad) * radius
+            pygame.draw.line(
+                surf, (*rgb, alpha),
+                (oc, oc), (oc + dx, oc + dy), blade_w,
+            )
+    pygame.draw.circle(surf, (*rgb, 230), (oc, oc), max(1, hub - 1))
+    _rotor_cache[key] = surf
+    return surf
+
+
+def _blit_spinning_rotor(
+    surface: pygame.Surface,
+    center: tuple[int, int],
+    heading_deg: float,
+    color: tuple,
+    icon_side: int,
+) -> None:
+    radius = max(3, int(round(icon_side * _ROTOR_RADIUS_SCALE)))
+    overlay = _spinning_rotor_surface(radius, color, rotor_phase())
+    heading = float(heading_deg)
+    # Nose-up local (0, -forward) → screen after heading rotation.
+    forward = icon_side * _ROTOR_FORWARD_SCALE
+    rad = math.radians(heading)
+    hub = (
+        int(round(center[0] + forward * math.sin(rad))),
+        int(round(center[1] - forward * math.cos(rad))),
+    )
+    if abs(heading) > 0.05:
+        overlay = pygame.transform.rotate(overlay, -heading)
+    surface.blit(overlay, overlay.get_rect(center=hub))
 
 
 def draw_icon(
@@ -414,4 +549,6 @@ def draw_icon(
     rotated = pygame.transform.rotate(icon, -float(heading_deg))
     rect = rotated.get_rect(center=center)
     surface.blit(rotated, rect)
+    if category in _HELI_CATEGORIES:
+        _blit_spinning_rotor(surface, center, heading_deg, color, icon.get_width())
     return True
