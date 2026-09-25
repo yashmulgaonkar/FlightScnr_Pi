@@ -130,6 +130,7 @@ MAP_STYLES = (
     "light",
     "toner",
     "vfr",
+    "seamap",
     "streets",
     "voyager",
     "satellite",
@@ -142,6 +143,7 @@ MAP_STYLE_LABELS = {
     "light": "Light: Carto",
     "toner": "Light: Toner (needs STADIA_MAPS_API_KEY)",
     "vfr": "Light: VFR",
+    "seamap": "Nautical: Seamap",
     "streets": "Street: Esri",
     "voyager": "Street: Voyager",
     "satellite": "Satellite: Esri",
@@ -153,6 +155,9 @@ BRIGHTNESS_MAX_PERCENT = 100
 # VFR chart opacity on the radar (lower = more washed / pale).
 VFR_OPACITY_MIN_PERCENT = 15
 VFR_OPACITY_MAX_PERCENT = 100
+# Seamap chart opacity (lower = paler, same parchment wash as VFR).
+SEAMAP_OPACITY_MIN_PERCENT = 15
+SEAMAP_OPACITY_MAX_PERCENT = 100
 # ATC UI volume is 0–100%. Quiet LiveATC / bone-conduction headphones get a
 # hidden softvol gain in mpv (see utilities.atc_audio.SOFTVOL_GAIN).
 ATC_VOLUME_MAX = 100
@@ -186,6 +191,10 @@ def clamp_brightness_percent(value: int) -> int:
 
 def clamp_vfr_opacity_percent(value: int) -> int:
     return max(VFR_OPACITY_MIN_PERCENT, min(VFR_OPACITY_MAX_PERCENT, int(value)))
+
+
+def clamp_seamap_opacity_percent(value: int) -> int:
+    return max(SEAMAP_OPACITY_MIN_PERCENT, min(SEAMAP_OPACITY_MAX_PERCENT, int(value)))
 
 
 def clamp_radar_hud_opacity(value: int) -> int:
@@ -397,6 +406,8 @@ _defaults = {
     # dark | osm | stadia_dark | toner | satellite | streets | black | light | voyager | vfr
     "map_style": "dark",
     "vfr_map_opacity": 45,
+    # 100 keeps the chart as painted; lower fades it toward parchment, like VFR.
+    "seamap_opacity": 100,
     # Clockwise UI + touch mapping: 0, 90, 180, 270 (physical panel mount).
     "display_rotation": 90,
     # ATC audio (LiveATC via mpv) — non-secret prefs.
@@ -911,6 +922,17 @@ def _load():
     except (TypeError, ValueError):
         state["vfr_map_opacity"] = 45
         migrated = True
+    try:
+        if "seamap_opacity" not in data:
+            state["seamap_opacity"] = 100
+            migrated = True
+        else:
+            state["seamap_opacity"] = clamp_seamap_opacity_percent(
+                int(state.get("seamap_opacity", 100))
+            )
+    except (TypeError, ValueError):
+        state["seamap_opacity"] = 100
+        migrated = True
     if "display_rotation" not in data:
         state["display_rotation"] = _env_display_rotation()
         migrated = True
@@ -1297,6 +1319,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("ais_enabled"),
         state.get("map_style"),
         state.get("vfr_map_opacity"),
+        state.get("seamap_opacity"),
         _normalize_display_rotation(state.get("display_rotation", 90)),
         # ATC is edited from the web portal in a separate process — include it
         # so disk changes retune the device UI without an explicit reload flag.
@@ -2177,8 +2200,20 @@ def map_style() -> str:
     return raw if raw in MAP_STYLES else "dark"
 
 
+def map_style_option_label(style: str) -> str:
+    """Picker / row label. New styles go through the catalog; older ones stay literal."""
+    if style == "seamap":
+        try:
+            from i18n.catalog import tr
+
+            return tr("settings.opt.map.seamap")
+        except Exception:
+            return MAP_STYLE_LABELS.get(style, style)
+    return MAP_STYLE_LABELS.get(style, style)
+
+
 def map_style_label() -> str:
-    return MAP_STYLE_LABELS.get(map_style(), "Dark: Carto")
+    return map_style_option_label(map_style())
 
 
 def set_map_style(value: str) -> str:
@@ -2235,6 +2270,31 @@ def set_vfr_map_opacity(value: int, *, persist: bool = True) -> int:
         from display.round_touch import map_bg
 
         map_bg.clear_vfr_opacity_blit_cache()
+    except Exception:
+        pass
+    return pct
+
+
+def seamap_opacity() -> int:
+    try:
+        return clamp_seamap_opacity_percent(int(_state.get("seamap_opacity", 100)))
+    except (TypeError, ValueError):
+        return 100
+
+
+def set_seamap_opacity(value: int, *, persist: bool = True) -> int:
+    """Set Seamap chart opacity (draw-time blend — does not rebuild map tiles)."""
+    global _disk_synced
+    pct = clamp_seamap_opacity_percent(value)
+    _state["seamap_opacity"] = pct
+    if persist:
+        _save(_state)
+    else:
+        _disk_synced = False
+    try:
+        from display.round_touch import map_bg
+
+        map_bg.clear_seamap_opacity_blit_cache()
     except Exception:
         pass
     return pct

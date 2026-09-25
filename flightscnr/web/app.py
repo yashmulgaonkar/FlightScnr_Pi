@@ -1581,6 +1581,7 @@ def radar_json():
             "map_style": settings.map_style(),
             "map_style_options": list(settings.MAP_STYLES),
             "vfr_map_opacity": settings.vfr_map_opacity(),
+            "seamap_opacity": settings.seamap_opacity(),
             "dump1090": dump1090_portal_status(),
             "live_map_heading_up": settings.live_map_heading_up(),
             "live_tracking_preview_minutes": settings.live_tracking_preview_minutes(),
@@ -1813,6 +1814,11 @@ def radar_save():
             settings.set_vfr_map_opacity(int(data.get("vfr_map_opacity")))
         except (TypeError, ValueError):
             return jsonify({"ok": False, "message": "vfr_map_opacity must be a number"}), 400
+    if "seamap_opacity" in data:
+        try:
+            settings.set_seamap_opacity(int(data.get("seamap_opacity")))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "message": "seamap_opacity must be a number"}), 400
     if "traffic_mode" in data:
         settings.set_traffic_mode(str(data.get("traffic_mode") or ""))
     elif "ais_enabled" in data:

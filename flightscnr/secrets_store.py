@@ -38,6 +38,7 @@ MANAGED_KEYS = (
     "TOMORROW_API_KEY",
     "AIRLABS_API_KEY",
     "AISSTREAM_API_KEY",
+    "OPENWATERS_AIS_API_KEY",
     "FLIGHTAWARE_API_KEY",
     "OPENSKY_API_CLIENT_ID",
     "OPENSKY_API_CLIENT_SECRET",
@@ -61,6 +62,7 @@ CONFIG_H_SETTINGS = MANAGED_KEYS + (
     "DUMP1090_ENABLED",
     "DUMP1090_URL",
     "POSITION_SOURCE_ORDER",
+    "AIS_SOURCE_ORDER",
     "ROUTE_SOURCE_ORDER",
 )
 
@@ -69,6 +71,7 @@ TOGGLE_KEYS = (
     "USE_TOMORROW_WEATHER",
     "USE_AIRLABS_API",
     "USE_AISSTREAM_API",
+    "USE_OPENWATERS_API",
     "USE_FLIGHTAWARE_API",
     "USE_OPENSKY_API",
     "USE_ADSBEXCHANGE_API",
@@ -82,6 +85,7 @@ SOURCE_SETTING_KEYS = (
     "DUMP1090_URL",
     "ROUTE_SOURCE_ORDER",
     "POSITION_SOURCE_ORDER",
+    "AIS_SOURCE_ORDER",
 )
 
 
@@ -175,6 +179,7 @@ def load_toggles() -> dict[str, bool]:
         "USE_TOMORROW_WEATHER": True,
         "USE_AIRLABS_API": True,
         "USE_AISSTREAM_API": True,
+        "USE_OPENWATERS_API": True,
         "USE_FLIGHTAWARE_API": False,
         # Free route fallback — on by default when credentials exist.
         "USE_OPENSKY_API": True,
@@ -202,6 +207,7 @@ def api_enabled(key_name: str) -> bool:
         "TOMORROW_API_KEY": "USE_TOMORROW_WEATHER",
         "AIRLABS_API_KEY": "USE_AIRLABS_API",
         "AISSTREAM_API_KEY": "USE_AISSTREAM_API",
+        "OPENWATERS_AIS_API_KEY": "USE_OPENWATERS_API",
         "FLIGHTAWARE_API_KEY": "USE_FLIGHTAWARE_API",
         "OPENSKY_API_CLIENT_ID": "USE_OPENSKY_API",
         "OPENSKY_API_CLIENT_SECRET": "USE_OPENSKY_API",
@@ -352,6 +358,38 @@ def _parse_position_source_order(raw) -> tuple:
     return tuple(seen) if seen else _POSITION_SOURCE_DEFAULT_ORDER
 
 
+_AIS_SOURCE_DEFAULT_ORDER = ("aisstream", "openwaters")
+_AIS_SOURCE_VALID = frozenset(_AIS_SOURCE_DEFAULT_ORDER)
+
+
+def _parse_ais_source_order(raw) -> tuple:
+    """aisstream / openwaters, first connectable source wins."""
+    raw = "" if raw is None else str(raw)
+    seen = []
+    if raw.strip():
+        for name in raw.split(","):
+            name = name.strip().lower()
+            if name and name in _AIS_SOURCE_VALID and name not in seen:
+                seen.append(name)
+    else:
+        seen = list(_AIS_SOURCE_DEFAULT_ORDER)
+    for name in _AIS_SOURCE_DEFAULT_ORDER:
+        if name not in seen:
+            seen.append(name)
+    return tuple(seen)
+
+
+def ais_source_order_settings() -> tuple:
+    """Marine stream order. Re-read from secrets.json so the display picks up
+    a portal change without a restart."""
+    file_vals = load_secrets_json()
+    if "AIS_SOURCE_ORDER" in file_vals:
+        raw = file_vals.get("AIS_SOURCE_ORDER")
+    else:
+        raw = os.environ.get("AIS_SOURCE_ORDER", "")
+    return _parse_ais_source_order(raw)
+
+
 def position_source_order_settings() -> tuple:
     """Current live-position fallback order for the extended tracking map
     (Radar > Track > Live).
@@ -425,6 +463,7 @@ def secrets_status() -> dict:
     status["dump1090"] = dump1090_settings()
     status["route_source_order"] = route_source_order_setting()
     status["position_source_order"] = list(position_source_order_settings())
+    status["ais_source_order"] = list(ais_source_order_settings())
     try:
         from utilities.flightaware_client import usage_status
 
@@ -466,6 +505,7 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         "tomorrow_api_key": "TOMORROW_API_KEY",
         "airlabs_api_key": "AIRLABS_API_KEY",
         "aisstream_api_key": "AISSTREAM_API_KEY",
+        "openwaters_ais_api_key": "OPENWATERS_AIS_API_KEY",
         "flightaware_api_key": "FLIGHTAWARE_API_KEY",
         "opensky_api_client_id": "OPENSKY_API_CLIENT_ID",
         "opensky_api_client_secret": "OPENSKY_API_CLIENT_SECRET",
@@ -490,6 +530,7 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         "use_tomorrow_weather": "USE_TOMORROW_WEATHER",
         "use_airlabs_api": "USE_AIRLABS_API",
         "use_aisstream_api": "USE_AISSTREAM_API",
+        "use_openwaters_api": "USE_OPENWATERS_API",
         "use_flightaware_api": "USE_FLIGHTAWARE_API",
         "use_opensky_api": "USE_OPENSKY_API",
         "use_adsbexchange_api": "USE_ADSBEXCHANGE_API",
@@ -531,6 +572,14 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
         updated["POSITION_SOURCE_ORDER"] = ",".join(order)
         apply_position_source_order_to_runtime(order)
 
+    if "ais_source_order" in payload:
+        raw = payload.get("ais_source_order")
+        if isinstance(raw, (list, tuple)):
+            raw = ",".join(str(x) for x in raw)
+        order = _parse_ais_source_order(raw)
+        updated["AIS_SOURCE_ORDER"] = ",".join(order)
+        os.environ["AIS_SOURCE_ORDER"] = ",".join(order)
+
     if "route_source_order" in payload:
         raw = str(payload.get("route_source_order") or "").strip()
         if raw:
@@ -570,6 +619,13 @@ def save_secrets_from_portal(payload: dict) -> dict[str, str]:
     except Exception:
         pass
     # Keep config.FLIGHTAWARE_API_KEY in sync for already-imported modules.
+    if "OPENWATERS_AIS_API_KEY" in updated:
+        try:
+            import config as cfg
+
+            cfg.OPENWATERS_AIS_API_KEY = updated["OPENWATERS_AIS_API_KEY"]
+        except Exception:
+            pass
     if "FLIGHTAWARE_API_KEY" in updated:
         try:
             import config as cfg

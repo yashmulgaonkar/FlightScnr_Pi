@@ -127,6 +127,7 @@ class CatalogTests(unittest.TestCase):
             "tar1090",
             "RapidAPI",
             "aisstream.io",
+            "openwaters.io",
             "NASA FIRMS",
             "CARTO",
             "Stadia",

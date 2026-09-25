@@ -20,6 +20,7 @@ Styles (settings map_style, fallback RADAR_MAP_PROVIDER):
   light — CARTO Positron light, no labels (needs CARTO_BASEMAPS_API_KEY)
   voyager — CARTO Voyager (color street map), no labels (needs CARTO_BASEMAPS_API_KEY)
   vfr  — FAA VFR sectional charts (US coverage, public domain)
+  seamap — Open Waters Seamap nautical chart (not for navigation)
 """
 
 from __future__ import annotations
@@ -71,6 +72,7 @@ MAP_STYLES = (
     "light",
     "toner",
     "vfr",
+    "seamap",
     "streets",
     "voyager",
     "satellite",
@@ -83,6 +85,7 @@ MAP_STYLE_LABELS = {
     "light": "Light: Carto",
     "toner": "Light: Toner (needs STADIA_MAPS_API_KEY)",
     "vfr": "Light: VFR",
+    "seamap": "Nautical: Seamap",
     "streets": "Street: Esri",
     "voyager": "Street: Voyager",
     "satellite": "Satellite: Esri",
@@ -181,6 +184,8 @@ def normalize_map_style(raw: str | None) -> str:
         return "voyager"
     if provider in ("vfr", "sectional", "faa", "faa_vfr"):
         return "vfr"
+    if provider in ("seamap", "nautical", "openwaters", "open_waters", "chart"):
+        return "seamap"
     if provider in ("osm", "openstreetmap"):
         return "osm"
     logger.warning("Unknown map style %r — using dark", raw)
@@ -300,6 +305,10 @@ def _tile_url(z: int, x: int, y: int, style: str | None = None) -> str:
     if style == "vfr":
         # FAA ArcGIS: level / row / col
         return VFR_TILE_URL.format(z=z, y=y, x=x)
+    if style == "seamap":
+        from display.round_touch.seamap_tiles import SEAMAP_PBF_URL
+
+        return SEAMAP_PBF_URL.format(z=z, x=x, y=y)
     return OSM_TILE_URL.format(z=z, x=x, y=y)
 
 
@@ -309,6 +318,10 @@ def _tile_workers(style: str | None = None) -> int:
         return OSM_TILE_WORKERS
     if style == "vfr":
         return VFR_TILE_WORKERS
+    if style == "seamap":
+        # One chart tile is several downloads plus a vector draw. Two workers
+        # leave a core for the pygame loop; four of them starved it.
+        return 2
     return CARTO_TILE_WORKERS
 
 
@@ -357,6 +370,10 @@ def _zoom_for_scale(home_lat: float, px_per_km: float, style: str | None = None)
     style = normalize_map_style(style) if style else _resolved_style()
     if style == "vfr":
         z_min, z_max = VFR_ZOOM_MIN, VFR_ZOOM_MAX
+    elif style == "seamap":
+        from display.round_touch.seamap_tiles import SEAMAP_ZOOM_MAX, SEAMAP_ZOOM_MIN
+
+        z_min, z_max = SEAMAP_ZOOM_MIN, SEAMAP_ZOOM_MAX
     elif style in ("satellite", "streets"):
         z_min, z_max = 9, SAT_ZOOM_MAX
     else:
@@ -441,6 +458,10 @@ def _fetch_tile(
     session: requests.Session,
     style: str,
 ) -> pygame.Surface | None:
+    if normalize_map_style(style) == "seamap":
+        from display.round_touch.seamap_tiles import fetch_tile as fetch_seamap_tile
+
+        return fetch_seamap_tile(z, x, y, session)
     url = _tile_url(z, x, y, style)
     if style in ("stadia_dark", "toner") and not _stadia_api_key():
         global _stadia_key_warned
@@ -710,6 +731,33 @@ def _style_vfr(surface: pygame.Surface) -> pygame.Surface:
 
 
 _vfr_opacity_blit_cache: tuple | None = None  # (id(bg), pct, surface)
+_seamap_opacity_blit_cache: tuple | None = None  # (id(bg), pct, surface)
+
+
+def _blend_chart_opacity(
+    bg: pygame.Surface,
+    pct: int,
+    wash: tuple[int, int, int],
+    cache: tuple | None,
+) -> tuple[pygame.Surface, tuple | None]:
+    """Fade chart RGB toward ``wash``. Circle-mask alpha is left alone.
+
+    Applied at draw time so the slider never clears the tile cache.
+    """
+    pct = max(0, min(100, int(pct)))
+    if pct >= 100:
+        return bg, cache
+    if cache is not None and cache[0] == id(bg) and cache[1] == pct:
+        return cache[2], cache
+    t = pct / 100.0
+    inv = 1.0 - t
+    out = bg.copy()
+    rgb = pygame.surfarray.pixels3d(out)
+    rgb[:, :, 0] = (rgb[:, :, 0].astype("float32") * t + wash[0] * inv).astype("uint8")
+    rgb[:, :, 1] = (rgb[:, :, 1].astype("float32") * t + wash[1] * inv).astype("uint8")
+    rgb[:, :, 2] = (rgb[:, :, 2].astype("float32") * t + wash[2] * inv).astype("uint8")
+    del rgb
+    return out, (id(bg), pct, out)
 
 
 def _vfr_with_draw_opacity(bg: pygame.Surface) -> pygame.Surface:
@@ -725,24 +773,24 @@ def _vfr_with_draw_opacity(bg: pygame.Surface) -> pygame.Surface:
         pct = int(settings.vfr_map_opacity())
     except Exception:
         pct = 45
-    pct = max(0, min(100, pct))
-    if pct >= 100:
-        return bg
+    out, _vfr_opacity_blit_cache = _blend_chart_opacity(
+        bg, pct, (242, 244, 238), _vfr_opacity_blit_cache
+    )
+    return out
 
-    cached = _vfr_opacity_blit_cache
-    if cached is not None and cached[0] == id(bg) and cached[1] == pct:
-        return cached[2]
 
-    t = pct / 100.0
-    inv = 1.0 - t
-    out = bg.copy()
-    # Blend RGB toward parchment; leave the circle mask alpha untouched.
-    rgb = pygame.surfarray.pixels3d(out)
-    rgb[:, :, 0] = (rgb[:, :, 0].astype("float32") * t + 242.0 * inv).astype("uint8")
-    rgb[:, :, 1] = (rgb[:, :, 1].astype("float32") * t + 244.0 * inv).astype("uint8")
-    rgb[:, :, 2] = (rgb[:, :, 2].astype("float32") * t + 238.0 * inv).astype("uint8")
-    del rgb
-    _vfr_opacity_blit_cache = (id(bg), pct, out)
+def _seamap_with_draw_opacity(bg: pygame.Surface) -> pygame.Surface:
+    """Fade Seamap toward the same parchment as VFR. 100% leaves the chart as painted."""
+    global _seamap_opacity_blit_cache
+    try:
+        from display.round_touch import settings
+
+        pct = int(settings.seamap_opacity())
+    except Exception:
+        pct = 100
+    out, _seamap_opacity_blit_cache = _blend_chart_opacity(
+        bg, pct, (242, 244, 238), _seamap_opacity_blit_cache
+    )
     return out
 
 
@@ -807,6 +855,8 @@ def _style_for_radar(surface: pygame.Surface, style: str | None = None) -> pygam
         return _style_voyager(surface)
     if style == "vfr":
         return _style_vfr(surface)
+    if style == "seamap":
+        return _as_display_surface(surface)
     return _style_osm(surface)
 
 
@@ -1118,6 +1168,12 @@ def clear_vfr_opacity_blit_cache():
     _vfr_opacity_blit_cache = None
 
 
+def clear_seamap_opacity_blit_cache():
+    """Drop draw-time Seamap opacity surface (call when the slider changes)."""
+    global _seamap_opacity_blit_cache
+    _seamap_opacity_blit_cache = None
+
+
 def invalidate():
     """Drop in-memory backgrounds so the next request rebuilds or reloads."""
     with _lock:
@@ -1125,6 +1181,7 @@ def invalidate():
         _fetch_threads.clear()
         _display_converted.clear()
     clear_vfr_opacity_blit_cache()
+    clear_seamap_opacity_blit_cache()
 
 
 def cache_token() -> object:
@@ -1168,8 +1225,11 @@ def draw_background(surface: pygame.Surface, pan_offset: tuple[int, int] | None 
     bg = get_background()
     if bg is None:
         return
-    if _resolved_style() == "vfr":
+    style = _resolved_style()
+    if style == "vfr":
         bg = _vfr_with_draw_opacity(bg)
+    elif style == "seamap":
+        bg = _seamap_with_draw_opacity(bg)
     facing = 0.0
     try:
         from display.round_touch import settings
@@ -1385,6 +1445,8 @@ def attribution_text() -> str | None:
         return None
     if style == "vfr":
         return "© FAA"
+    if style == "seamap":
+        return "© Open Waters: Seamap"
     if style == "satellite":
         return "© Esri © Earthstar"
     if style == "streets":

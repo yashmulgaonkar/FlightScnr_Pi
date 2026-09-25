@@ -307,13 +307,19 @@
                 <option value="light">Light: Carto</option>
                 <option value="toner">Light: Toner (needs STADIA_MAPS_API_KEY)</option>
                 <option value="vfr">Light: VFR (FAA)</option>
+                <option value="seamap" data-i18n="portal.radar.map_style.nautical_seamap">Nautical: Seamap</option>
                 <option value="streets">Street: Esri</option>
                 <option value="voyager">Street: Voyager (CARTO)</option>
                 <option value="satellite">Satellite: Esri</option>
             </select>
-            <p class="hint">Dark/Light/Voyager Carto need a free CARTO_BASEMAPS_API_KEY. Dark: Stadia and Light: Toner need a free STADIA_MAPS_API_KEY. OSM, Esri, Flat, and VFR need no key. VFR sectionals are public-domain FAA charts (US coverage).</p>
+            <p class="hint" data-i18n="portal.radar.map_style.hint">Dark/Light/Voyager Carto need a free CARTO_BASEMAPS_API_KEY. Dark: Stadia and Light: Toner need a free STADIA_MAPS_API_KEY. OSM, Esri, Flat, and VFR need no key. VFR sectionals are public-domain FAA charts (US coverage). Nautical: Seamap is an Open Waters chart with depths and seamarks (no key). Not for navigation.</p>
             <label for="vfr_opacity">VFR map opacity <span id="vfr_opacity_label">45%</span></label>
             <input id="vfr_opacity" type="range" min="15" max="100" step="1" value="45">
+            <div id="seamap-opacity-row" hidden>
+                <label for="seamap_opacity"><span data-i18n="portal.radar.seamap_opacity.label">Seamap opacity</span> <span id="seamap_opacity_label">100%</span></label>
+                <input id="seamap_opacity" type="range" min="15" max="100" step="1" value="100">
+                <p class="hint" data-i18n="portal.radar.seamap_opacity.hint">How strong the nautical chart appears under traffic (lower = paler, like the VFR chart). Applies when the map style is Nautical: Seamap. Not for navigation.</p>
+            </div>
             <p class="hint">How strong the VFR chart appears under traffic (lower = paler). Applies when map style is VFR.</p>
             <div class="chk">
                 <label for="show_compass">Show compass rose</label>
@@ -419,7 +425,7 @@
                 <option value="marine">Marine (AIS) only</option>
                 <option value="both">Aircraft + marine</option>
             </select>
-            <p class="hint">Marine needs an aisstream.io API key below. Free for non-commercial use.</p>
+            <p class="hint" data-i18n="portal.radar.traffic_mode.hint">Marine uses aisstream.io when a key is set, and falls back to Open Waters AIS if that stream is missing or down. No key is required for the fallback. aisstream.io is free for non-commercial use.</p>
             <label for="vessel_min_speed" id="vessel_min_speed_label">Marine min speed</label>
             <select id="vessel_min_speed">
                 <option value="0">Any (no floor)</option>
@@ -511,6 +517,9 @@
             <ul id="position-source-list" class="drag-list">
                 <!-- populated by loadPositionSourceOrder() -->
             </ul>
+            <label data-i18n="portal.position_sources.marine.title" style="margin-top:1rem">Marine traffic</label>
+            <p class="hint" data-i18n="portal.position_sources.marine.hint">Stream order for vessel traffic. The first source that can connect is used; the other is the fallback if that stream fails. aisstream.io needs an API key. Open Waters works without one. Drag to reorder.</p>
+            <ul id="marine-source-list" class="drag-list"></ul>
             <div class="chk" style="margin-top:.75rem">
                 <label for="live_map_heading_up">Rotate map to heading (default: north-up)</label>
                 <span class="switch"><input id="live_map_heading_up" type="checkbox"><span class="track"></span></span>
@@ -945,6 +954,14 @@
             <input type="password" id="aisstream-key" placeholder="API key" autocomplete="off">
             <p class="hint" id="aisstream-hint"></p>
             <p class="hint">Get a free key at <a href="https://aisstream.io" target="_blank" rel="noopener">aisstream.io</a> (non-commercial).</p>
+            <div class="chk">
+                <label for="use-openwaters-api" data-i18n="portal.api_keys.openwaters.enabled">Use Open Waters API key</label>
+                <span class="switch"><input id="use-openwaters-api" type="checkbox" checked><span class="track"></span></span>
+            </div>
+            <label for="openwaters-key" data-i18n="portal.api_keys.openwaters.key">Open Waters key</label>
+            <input type="password" id="openwaters-key" placeholder="API key" autocomplete="off">
+            <p class="hint" id="openwaters-hint"></p>
+            <p class="hint"><span data-i18n="portal.api_keys.openwaters.hint_before_link">Optional. Anonymous Open Waters AIS works without a key (smaller area). A key from</span> <a href="https://openwaters.io" target="_blank" rel="noopener">openwaters.io</a> <span data-i18n="portal.api_keys.openwaters.hint_after_link">raises the coverage cap.</span></p>
             <label for="firms-key">NASA FIRMS MAP_KEY (wildfires outside USA/Canada)</label>
             <input type="password" id="firms-key" placeholder="MAP_KEY" autocomplete="off">
             <p class="hint" id="firms-hint"></p>
@@ -1342,6 +1359,7 @@ function applyKeyHints(keys) {
         TOMORROW_API_KEY: "tomorrow-hint",
         AIRLABS_API_KEY: "airlabs-hint",
         AISSTREAM_API_KEY: "aisstream-hint",
+        OPENWATERS_AIS_API_KEY: "openwaters-hint",
         FLIGHTAWARE_API_KEY: "flightaware-hint",
         OPENSKY_API_CLIENT_ID: "opensky-client-id-hint",
         OPENSKY_API_CLIENT_SECRET: "opensky-client-secret-hint",
@@ -1712,6 +1730,11 @@ async function loadAll() {
             $("vfr_opacity").value = String(r.vfr_map_opacity ?? 45);
             syncVfrOpacityLabel();
         }
+        if ($("seamap_opacity")) {
+            $("seamap_opacity").value = String(r.seamap_opacity ?? 100);
+            syncSeamapOpacityLabel();
+        }
+        syncSeamapOpacityRow();
         if ($("live_map_heading_up")) {
             $("live_map_heading_up").checked = !!r.live_map_heading_up;
         }
@@ -1881,6 +1904,9 @@ async function loadAll() {
         $("use-tomorrow-weather").checked = toggles.USE_TOMORROW_WEATHER !== false;
         $("use-airlabs-api").checked = toggles.USE_AIRLABS_API !== false;
         $("use-aisstream-api").checked = toggles.USE_AISSTREAM_API !== false;
+        if ($("use-openwaters-api")) {
+            $("use-openwaters-api").checked = toggles.USE_OPENWATERS_API !== false;
+        }
         if ($("use-flightaware-api")) {
             $("use-flightaware-api").checked = !!toggles.USE_FLIGHTAWARE_API;
         }
@@ -1901,6 +1927,7 @@ async function loadAll() {
             $("route_source_order").value = rso.ROUTE_SOURCE_ORDER || "";
         }
         renderPositionSourceList(keys.position_source_order || DEFAULT_POSITION_SOURCE_ORDER);
+        renderMarineSourceList(keys.ais_source_order || DEFAULT_MARINE_SOURCE_ORDER);
         const faUsage = keys.flightaware_usage;
         if ($("flightaware-usage") && faUsage) {
             $("flightaware-usage").textContent = i18nFormat(
@@ -1955,6 +1982,18 @@ function syncChimeVolumeLabel() {
 function syncVfrOpacityLabel() {
     const el = $("vfr_opacity_label");
     if (el && $("vfr_opacity")) el.textContent = `${$("vfr_opacity").value}%`;
+}
+
+function syncSeamapOpacityLabel() {
+    const el = $("seamap_opacity_label");
+    if (el && $("seamap_opacity")) el.textContent = `${$("seamap_opacity").value}%`;
+}
+
+function syncSeamapOpacityRow() {
+    const row = $("seamap-opacity-row");
+    if (!row) return;
+    const style = $("map_style") ? $("map_style").value : "";
+    row.hidden = style !== "seamap";
 }
 
 function syncTagLeadersControl() {
@@ -2194,6 +2233,7 @@ async function saveRadar() {
                 show_ground_vehicles: $("show_ground_vehicles") ? $("show_ground_vehicles").checked : true,
                 map_style: $("map_style").value,
                 vfr_map_opacity: Number($("vfr_opacity") ? $("vfr_opacity").value : 45),
+                seamap_opacity: Number($("seamap_opacity") ? $("seamap_opacity").value : 100),
                 traffic_mode: $("traffic_mode").value,
                 vessel_min_speed_kt: Number($("vessel_min_speed") ? $("vessel_min_speed").value : 0),
                 aircraft_min_speed_kt: Number($("aircraft_min_speed") ? $("aircraft_min_speed").value : 0),
@@ -2324,6 +2364,11 @@ async function saveRouteSourceOrder() {
     }
 }
 const DEFAULT_POSITION_SOURCE_ORDER = ["dump1090", "adsbfi", "opensky", "adsbexchange", "fr24"];
+const DEFAULT_MARINE_SOURCE_ORDER = ["aisstream", "openwaters"];
+const MARINE_SOURCE_LABELS = {
+    aisstream: "aisstream.io",
+    openwaters: "Open Waters",
+};
 const POSITION_SOURCE_LABELS = {
     dump1090: "Local (dump1090 / readsb)",
     adsbfi: "adsb.fi",
@@ -2331,6 +2376,26 @@ const POSITION_SOURCE_LABELS = {
     adsbexchange: "ADS-B Exchange",
     fr24: "FlightRadar24",
 };
+
+function renderMarineSourceList(order) {
+    const list = $("marine-source-list");
+    if (!list) return;
+    const known = (order && order.length ? order : DEFAULT_MARINE_SOURCE_ORDER)
+        .filter((s) => MARINE_SOURCE_LABELS[s]);
+    for (const s of DEFAULT_MARINE_SOURCE_ORDER) {
+        if (!known.includes(s)) known.push(s);
+    }
+    list.innerHTML = "";
+    for (const source of known) {
+        const li = document.createElement("li");
+        li.draggable = true;
+        li.dataset.source = source;
+        li.className = "drag-item";
+        li.innerHTML = `<span class="drag-handle">&#9776;</span> <span>${MARINE_SOURCE_LABELS[source]}</span>`;
+        list.appendChild(li);
+    }
+    attachDragReorder(list);
+}
 
 function renderPositionSourceList(order) {
     const list = $("position-source-list");
@@ -2384,6 +2449,8 @@ async function savePositionSources() {
     try {
         const order = [...document.querySelectorAll("#position-source-list .drag-item")]
             .map((li) => li.dataset.source);
+        const marine = [...document.querySelectorAll("#marine-source-list .drag-item")]
+            .map((li) => li.dataset.source);
         const headingUp = $("live_map_heading_up") ? $("live_map_heading_up").checked : false;
         const previewMin = $("live_tracking_preview_minutes")
             ? Number($("live_tracking_preview_minutes").value)
@@ -2392,7 +2459,10 @@ async function savePositionSources() {
         await jsonFetch("/api-keys", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ position_source_order: order }),
+            body: JSON.stringify({
+                position_source_order: order,
+                ais_source_order: marine.length ? marine : DEFAULT_MARINE_SOURCE_ORDER,
+            }),
         });
         await jsonFetch("/radar", {
             method: "POST",
@@ -2409,10 +2479,11 @@ async function savePositionSources() {
         // in case any dragged-in entry was somehow invalid).
         const keys = await jsonFetch("/api-keys/json");
         const effective = keys.position_source_order || order;
+        const marineEffective = keys.ais_source_order || marine;
         showStatus("position-sources-status", i18nFormat(
             "portal.position_sources.saved",
             "Saved: {order}",
-            { order: effective.join(" \u2192 ") }
+            { order: effective.join(" \u2192 ") + " · " + marineEffective.join(" \u2192 ") }
         ));
     } catch (e) {
         showStatus("position-sources-status", e.message, true);
@@ -2421,6 +2492,7 @@ async function savePositionSources() {
 
 async function resetPositionSources() {
     renderPositionSourceList(DEFAULT_POSITION_SOURCE_ORDER);
+    renderMarineSourceList(DEFAULT_MARINE_SOURCE_ORDER);
     await savePositionSources();
 }
 
@@ -2463,6 +2535,7 @@ async function saveAndReloadSettings(statusId) {
                 show_ground_vehicles: $("show_ground_vehicles") ? $("show_ground_vehicles").checked : true,
                 map_style: $("map_style").value,
                 vfr_map_opacity: Number($("vfr_opacity") ? $("vfr_opacity").value : 45),
+                seamap_opacity: Number($("seamap_opacity") ? $("seamap_opacity").value : 100),
                 traffic_mode: $("traffic_mode").value,
                 vessel_min_speed_kt: Number($("vessel_min_speed") ? $("vessel_min_speed").value : 0),
                 aircraft_min_speed_kt: Number($("aircraft_min_speed") ? $("aircraft_min_speed").value : 0),
@@ -2746,6 +2819,7 @@ async function saveApiKeys(restart) {
                 tomorrow_api_key: $("tomorrow-key").value,
                 airlabs_api_key: $("airlabs-key").value,
                 aisstream_api_key: $("aisstream-key").value,
+                openwaters_ais_api_key: $("openwaters-key") ? $("openwaters-key").value : "",
                 flightaware_api_key: $("flightaware-key") ? $("flightaware-key").value : "",
                 opensky_api_client_id: $("opensky-client-id") ? $("opensky-client-id").value : "",
                 opensky_api_client_secret: $("opensky-client-secret") ? $("opensky-client-secret").value : "",
@@ -2757,6 +2831,7 @@ async function saveApiKeys(restart) {
                 use_tomorrow_weather: $("use-tomorrow-weather").checked,
                 use_airlabs_api: $("use-airlabs-api").checked,
                 use_aisstream_api: $("use-aisstream-api").checked,
+                use_openwaters_api: $("use-openwaters-api") ? $("use-openwaters-api").checked : true,
                 use_flightaware_api: $("use-flightaware-api") ? $("use-flightaware-api").checked : false,
                 use_opensky_api: $("use-opensky-api") ? $("use-opensky-api").checked : true,
                 use_adsbexchange_api: $("use-adsbexchange-api") ? $("use-adsbexchange-api").checked : false,
@@ -2769,6 +2844,7 @@ async function saveApiKeys(restart) {
         $("tomorrow-key").value = "";
         $("airlabs-key").value = "";
         $("aisstream-key").value = "";
+        if ($("openwaters-key")) $("openwaters-key").value = "";
         if ($("flightaware-key")) $("flightaware-key").value = "";
         if ($("opensky-client-id")) $("opensky-client-id").value = "";
         if ($("opensky-client-secret")) $("opensky-client-secret").value = "";
@@ -3732,6 +3808,8 @@ if ($("btn-earthquake-voice-preview")) {
     });
 }
 if ($("vfr_opacity")) $("vfr_opacity").addEventListener("input", syncVfrOpacityLabel);
+if ($("seamap_opacity")) $("seamap_opacity").addEventListener("input", syncSeamapOpacityLabel);
+if ($("map_style")) $("map_style").addEventListener("change", syncSeamapOpacityRow);
 if ($("dist_units")) $("dist_units").addEventListener("change", onDistanceUnitsChanged);
 if ($("live_tracking_min_radius")) {
     $("live_tracking_min_radius").addEventListener("change", readFollowRadiusKmFromInputs);

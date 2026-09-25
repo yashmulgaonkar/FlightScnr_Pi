@@ -105,6 +105,9 @@ FR24_API_KEY = _require("FR24_API_KEY")
 TOMORROW_API_KEY = _require("TOMORROW_API_KEY")
 AIRLABS_API_KEY = os.environ.get("AIRLABS_API_KEY", "")
 AISSTREAM_API_KEY = os.environ.get("AISSTREAM_API_KEY", "")
+# Optional. Open Waters AIS is the fallback (and the only feed when the
+# aisstream key is unset) and works anonymously without this token.
+OPENWATERS_AIS_API_KEY = os.environ.get("OPENWATERS_AIS_API_KEY", "")
 
 # --- Location (zone + home) ---
 LOCATION_HOME, ZONE_HOME, LOCATION_SOURCE = _resolve_location()

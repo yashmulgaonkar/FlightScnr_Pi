@@ -60,6 +60,11 @@ HIDE_COVERAGE = 0.35
 UNHIDE_COVERAGE = 0.15
 # Relaxation sweeps after the greedy pass.
 SWEEPS = 3
+# A round dial cannot usefully show more names than this. Scoring every AIS
+# target in a harbour (a few hundred) held the GIL long enough to freeze the
+# sweep; the closest and highest-priority tags are placed, and the rest stay
+# icons.
+SOLVE_LIMIT = 40
 # Solves are skipped until some target moves at least this far.
 def move_epsilon() -> int:
     return max(2, theme.s(3))
@@ -155,13 +160,88 @@ def clearance() -> int:
 
 
 def overlap_area(a: pygame.Rect, b: pygame.Rect, pad: int = 0) -> int:
+    """Intersection area. ``pad`` inflates both boxes without allocating rects."""
     if pad:
-        a = a.inflate(pad * 2, pad * 2)
-        b = b.inflate(pad * 2, pad * 2)
-    inter = a.clip(b)
-    if inter.width <= 0 or inter.height <= 0:
+        ax0, ay0 = a.left - pad, a.top - pad
+        ax1, ay1 = a.right + pad, a.bottom + pad
+        bx0, by0 = b.left - pad, b.top - pad
+        bx1, by1 = b.right + pad, b.bottom + pad
+    else:
+        ax0, ay0, ax1, ay1 = a.left, a.top, a.right, a.bottom
+        bx0, by0, bx1, by1 = b.left, b.top, b.right, b.bottom
+    iw = min(ax1, bx1) - max(ax0, bx0)
+    ih = min(ay1, by1) - max(ay0, by0)
+    if iw <= 0 or ih <= 0:
         return 0
-    return inter.width * inter.height
+    return iw * ih
+
+
+class _RectIndex:
+    """Grid of rectangles so a label only tests tags and icons near itself.
+
+    A full scan is fine for a few dozen aircraft. A harbour chart can put a
+    few hundred AIS targets on the dial, and scoring every slot against every
+    other box holds the GIL long enough to freeze the sweep.
+    """
+
+    def __init__(self, cell: int = 64):
+        self.cell = cell
+        self.buckets: dict[tuple[int, int], list[tuple[object, pygame.Rect]]] = {}
+
+    def add(self, ident: object, rect: pygame.Rect) -> None:
+        cell = self.cell
+        item = (ident, rect)
+        buckets = self.buckets
+        for cy in range(rect.top // cell, rect.bottom // cell + 1):
+            for cx in range(rect.left // cell, rect.right // cell + 1):
+                bucket = buckets.get((cx, cy))
+                if bucket is None:
+                    buckets[(cx, cy)] = [item]
+                else:
+                    bucket.append(item)
+
+    def remove(self, ident: object, rect: pygame.Rect) -> None:
+        cell = self.cell
+        buckets = self.buckets
+        for cy in range(rect.top // cell, rect.bottom // cell + 1):
+            for cx in range(rect.left // cell, rect.right // cell + 1):
+                bucket = buckets.get((cx, cy))
+                if not bucket:
+                    continue
+                kept = [item for item in bucket if item[0] != ident]
+                if kept:
+                    buckets[(cx, cy)] = kept
+                else:
+                    del buckets[(cx, cy)]
+
+    def overlap_sum(
+        self,
+        rect: pygame.Rect,
+        pad: int = 0,
+        skip: object = None,
+        ceiling: float | None = None,
+    ) -> int:
+        """Sum of overlap with nearby boxes, stopping once ``ceiling`` is passed.
+
+        A crowded slot is already unreadable; measuring the rest of a harbour
+        full of AIS targets is what froze the sweep.
+        """
+        cell = self.cell
+        left, right = rect.left - pad, rect.right + pad
+        top, bottom = rect.top - pad, rect.bottom + pad
+        seen: set[object] = set()
+        total = 0
+        buckets = self.buckets
+        for cy in range(top // cell, bottom // cell + 1):
+            for cx in range(left // cell, right // cell + 1):
+                for ident, other in buckets.get((cx, cy), ()):
+                    if ident == skip or ident in seen:
+                        continue
+                    seen.add(ident)
+                    total += overlap_area(rect, other, pad)
+                    if ceiling is not None and total > ceiling:
+                        return total
+        return total
 
 
 def _size_for(target: Target, tier: int) -> tuple[int, int]:
@@ -174,36 +254,57 @@ def _rect_for(target: Target, slot: int, tier: int) -> pygame.Rect:
     return tag_rect(target.x, target.y, w, h, on_right, valign)
 
 
-def _cost(rect: pygame.Rect, others: Sequence[pygame.Rect], obstacles) -> int:
+def _cost(
+    rect: pygame.Rect,
+    others: _RectIndex,
+    obstacles: _RectIndex,
+    skip: object = None,
+    ceiling: float | None = None,
+) -> int:
     """Ranking score: padded, so slots that merely touch are still penalised."""
     pad = clearance()
-    total = sum(overlap_area(rect, o, pad) for o in others)
+    total = others.overlap_sum(rect, pad, skip, ceiling)
+    if ceiling is not None and total > ceiling:
+        return total
+    remain = None if ceiling is None else ceiling - total
     # Covering another target's icon reads as missing traffic, so it costs too.
-    total += sum(overlap_area(rect, o) for o in obstacles)
+    total += obstacles.overlap_sum(rect, 0, None, remain)
     return total
 
 
-def _coverage(rect: pygame.Rect, others: Sequence[pygame.Rect], obstacles) -> float:
+def _coverage(
+    rect: pygame.Rect,
+    others: _RectIndex,
+    obstacles: _RectIndex,
+    skip: object = None,
+    *,
+    limit: float,
+) -> float:
     """Fraction of the block actually hidden — drives degrade/hide only.
 
     Deliberately unpadded: clearance() inflates a callsign-only box by more than
     its own height, so scoring readability with padding would make a small box
     look worse than the full one it replaced and the degrade tier would never
-    be reachable.
+    be reachable. Stops once the fraction passes ``limit``.
     """
     area = rect.width * rect.height
     if area <= 0:
         return 1.0
-    raw = sum(overlap_area(rect, o) for o in others)
-    raw += sum(overlap_area(rect, o) for o in obstacles)
+    ceiling = area * limit
+    raw = others.overlap_sum(rect, 0, skip, ceiling)
+    if raw > ceiling:
+        return 1.0
+    raw += obstacles.overlap_sum(rect, 0, None, ceiling - raw)
+    if raw > ceiling:
+        return 1.0
     return raw / area
 
 
 def _best_slot(
     target: Target,
     tier: int,
-    others: Sequence[pygame.Rect],
-    obstacles,
+    others: _RectIndex,
+    obstacles: _RectIndex,
     remembered: int | None,
 ) -> tuple[int, int, pygame.Rect]:
     """(slot, cost, rect) for the cheapest slot, biased toward the remembered one."""
@@ -212,7 +313,10 @@ def _best_slot(
     best_rect = None
     for slot in candidate_order(preferred_on_right(target.x)):
         rect = _rect_for(target, slot, tier)
-        cost = _cost(rect, others, obstacles)
+        # A slot already covered by its own area cannot win, and cannot be shown.
+        hopeless = rect.width * rect.height
+        ceiling = hopeless if best_cost is None else min(best_cost, hopeless)
+        cost = _cost(rect, others, obstacles, target.key, ceiling)
         if best_cost is None or cost < best_cost:
             best_slot, best_cost, best_rect = slot, cost, rect
         if cost == 0:
@@ -221,14 +325,16 @@ def _best_slot(
         w, h = _size_for(target, tier)
         margin = int(w * h * SWITCH_MARGIN_FRAC)
         keep = _rect_for(target, remembered, tier)
-        keep_cost = _cost(keep, others, obstacles)
+        keep_cost = _cost(
+            keep, others, obstacles, target.key, (best_cost or 0) + margin
+        )
         if keep_cost <= best_cost + margin:
             return remembered, keep_cost, keep
     return best_slot, best_cost or 0, best_rect  # type: ignore[return-value]
 
 
 def _choose(
-    target: Target, others: Sequence[pygame.Rect], obstacles
+    target: Target, others: _RectIndex, obstacles: _RectIndex
 ) -> tuple[int, int, pygame.Rect | None]:
     """Pick (slot, tier, rect): full if it fits, else callsign-only, else hidden."""
     prev_slot, prev_tier = _memory.get(target.key, (None, TIER_FULL))
@@ -237,7 +343,7 @@ def _choose(
 
     slot, _cost_full, rect = _best_slot(target, TIER_FULL, others, obstacles, prev_slot)
     fw, fh = target.full_size
-    if fw * fh <= 0 or _coverage(rect, others, obstacles) <= limit:
+    if fw * fh <= 0 or _coverage(rect, others, obstacles, target.key, limit=limit) <= limit:
         return slot, TIER_FULL, rect
 
     sw, sh = target.short_size
@@ -245,39 +351,56 @@ def _choose(
         s_slot, _s_cost, s_rect = _best_slot(
             target, TIER_SHORT, others, obstacles, prev_slot
         )
-        if _coverage(s_rect, others, obstacles) <= limit:
+        if _coverage(s_rect, others, obstacles, target.key, limit=limit) <= limit:
             return s_slot, TIER_SHORT, s_rect
 
     return slot, TIER_HIDDEN, None
 
 
+def _obstacle_index(obstacles) -> _RectIndex:
+    index = _RectIndex()
+    for i, rect in enumerate(obstacles):
+        index.add(("obs", i), rect)
+    return index
+
+
 def _solve(targets: Sequence[Target], obstacles) -> None:
     ordered = sorted(targets, key=lambda t: t.priority)
     chosen: dict[str, tuple[int, int, pygame.Rect | None]] = {}
+    obstacle_index = _obstacle_index(obstacles)
 
     # Pass 0: greedy in priority order — a label only ever yields to one that
-    # matters more than it does.
-    placed: list[pygame.Rect] = []
-    for target in ordered:
-        slot, tier, rect = _choose(target, placed, obstacles)
+    # matters more than it does. Targets past SOLVE_LIMIT stay icons.
+    solve_set = ordered[:SOLVE_LIMIT]
+    placed = _RectIndex()
+    for target in solve_set:
+        slot, tier, rect = _choose(target, placed, obstacle_index)
         chosen[target.key] = (slot, tier, rect)
         if rect is not None:
-            placed.append(rect)
+            placed.add(target.key, rect)
+    for target in ordered[SOLVE_LIMIT:]:
+        chosen[target.key] = (0, TIER_HIDDEN, None)
 
     # Relaxation: re-pick each label against everything else's final position,
-    # so early greedy choices are not locked in by later arrivals.
+    # so early greedy choices are not locked in by later arrivals. A harbour
+    # chart hides most tags in the greedy pass; re-proving those hides is what
+    # made the sweep hitch, and a hidden tag only gets another look when the
+    # field is small enough that the extra pass is cheap.
+    relax = solve_set
+    if len(ordered) > 36:
+        relax = [t for t in solve_set if chosen[t.key][1] != TIER_HIDDEN]
     for _ in range(SWEEPS):
         moved = False
-        for target in ordered:
-            others = [
-                r
-                for key, (_s, _t, r) in chosen.items()
-                if r is not None and key != target.key
-            ]
-            slot, tier, rect = _choose(target, others, obstacles)
-            if (slot, tier) != chosen[target.key][:2]:
+        for target in relax:
+            prev = chosen[target.key]
+            slot, tier, rect = _choose(target, placed, obstacle_index)
+            if (slot, tier) != prev[:2]:
                 moved = True
-            chosen[target.key] = (slot, tier, rect)
+                if prev[2] is not None:
+                    placed.remove(target.key, prev[2])
+                if rect is not None:
+                    placed.add(target.key, rect)
+                chosen[target.key] = (slot, tier, rect)
         if not moved:
             break
 

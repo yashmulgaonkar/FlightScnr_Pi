@@ -315,7 +315,7 @@ def test_static_portal_copy_is_catalogued_or_a_technical_identifier(portal):
         "mi, kts", "km, kts", "LibreWXR", "RainViewer", "CAL FIRE",
         "NIFC WFIGS", "AirNow", "NASA FIRMS", "MAP_KEY", "USGS", "AM",
         "PM", "opensky-network.org", "ADS-B Exchange on RapidAPI",
-        "aisstream.io", "FIRMS map key", "CARTO basemaps", "Stadia Maps",
+            "aisstream.io", "openwaters.io", "FIRMS map key", "CARTO basemaps", "Stadia Maps",
         "Counter JSON",
     }
 

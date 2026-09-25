@@ -126,6 +126,10 @@ def hit_right_icon(x: int, y: int) -> str | None:
 # beam passes under the frost without a rectangular clip.
 _overlay: pygame.Surface | None = None
 _overlay_gen = 0
+# The curved pill is a full-frame alpha raster. Rebuilding it on every aircraft
+# layer (a few times a second) held the GIL and stepped the sweep. The stamp
+# only changes with the clock minute, weather, or a HUD toggle.
+_overlay_sig: tuple | None = None
 # Layout arrange: hit rects + base centers (before top offsets) for drag math.
 _layout_hit: dict[str, pygame.Rect] = {}
 _layout_base: dict[str, tuple[int, int]] = {}
@@ -1445,13 +1449,64 @@ def hud_bounds() -> pygame.Rect:
     return _hud_bounds.copy()
 
 
+def _overlay_signature() -> tuple:
+    """Inputs that change the painted pill. Cheap enough to check every layer."""
+    wx_key = None
+    try:
+        from display.round_touch import weather_data
+
+        wx = weather_data.snapshot()
+    except Exception:
+        wx = None
+    if wx:
+        wx_key = (
+            wx.get("temp"),
+            wx.get("unit"),
+            wx.get("weather_code"),
+            wx.get("wind_speed"),
+            wx.get("wind_direction"),
+            wx.get("wind_unit"),
+            wx.get("aqi"),
+        )
+    playing = False
+    try:
+        from utilities import atc_audio
+
+        playing = bool(atc_audio.is_playing())
+    except Exception:
+        playing = False
+    return (
+        theme.SIZE,
+        minute_key(),
+        settings.display_language(),
+        settings.radar_hud_enabled(),
+        settings.radar_hud_dark(),
+        settings.radar_hud_arrange(),
+        settings.radar_hud_opacity(),
+        settings.use_12hr_clock(),
+        settings.master_sound_enabled(),
+        settings.hourly_chime_enabled(),
+        settings.alert_sfx_enabled(),
+        settings.atc_enabled(),
+        settings.atc_volume(),
+        settings.lofi_enabled(),
+        playing,
+        wx_key,
+    )
+
+
 def rebuild_overlay() -> int:
     """Rasterize the curved pill HUD onto a transparent overlay.
 
     Returns a generation counter so the present path can rotate/cache the stamp.
     The overlay is blitted *after* the sweep so only frosted pixels occlude it.
+    Unchanged inputs keep the previous stamp — the pill does not depend on traffic.
     """
-    global _overlay, _overlay_gen
+    global _overlay, _overlay_gen, _overlay_sig
+    sig = _overlay_signature()
+    if sig == _overlay_sig and (not settings.radar_hud_enabled() or _overlay is not None):
+        return _overlay_gen
+    _overlay_sig = sig
     if not settings.radar_hud_enabled():
         _overlay = None
         _overlay_gen += 1

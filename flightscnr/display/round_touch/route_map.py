@@ -570,13 +570,13 @@ def render_route_map(data: dict, width: int, height: int) -> pygame.Surface | No
         if style != "black":
             # Mild darken so path/labels pop (lighter styles need less).
             dim = pygame.Surface((map_w, map_h), pygame.SRCALPHA)
-            dim_alpha = 40 if style in ("light", "voyager", "vfr", "toner", "satellite", "streets") else 70
+            dim_alpha = 40 if style in ("light", "voyager", "vfr", "toner", "satellite", "streets", "seamap") else 70
             dim.fill((0, 0, 0, dim_alpha))
             surf.blit(dim, (map_left, map_top))
     # Border: darker on light maps for contrast.
     border = (
         (40, 60, 80)
-        if style in ("light", "voyager", "toner", "satellite", "streets")
+        if style in ("light", "voyager", "toner", "satellite", "streets", "seamap")
         else _PANEL_BORDER
     )
     pygame.draw.rect(

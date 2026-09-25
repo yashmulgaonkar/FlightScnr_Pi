@@ -159,6 +159,19 @@ class TestOverflow(LayoutTestCase):
         out = ll.resolve(self._crowd(8, spacing=40))
         self.assertTrue(all(p.tier == ll.TIER_FULL for p in out.values()))
 
+    def test_busy_field_labels_the_closest_and_skips_the_tail(self):
+        # Far targets sort last. Past SOLVE_LIMIT they stay icons so a harbour
+        # full of AIS contacts does not stall the sweep proving each hide.
+        n = ll.SOLVE_LIMIT + 15
+        targets = [
+            target(f"T{i}", self.cx - 200, self.cy, priority=(i,))
+            for i in range(n)
+        ]
+        out = ll.resolve(targets)
+        self.assertEqual(out["T0"].tier, ll.TIER_FULL)
+        self.assertEqual(out[f"T{ll.SOLVE_LIMIT}"].tier, ll.TIER_HIDDEN)
+        self.assertIsNone(out[f"T{n - 1}"].rect)
+
 
 class TestObstacles(LayoutTestCase):
     def test_icon_boxes_push_labels_away(self):

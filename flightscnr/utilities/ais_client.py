@@ -8,10 +8,13 @@
 # 3. Remind the user that commercial use of this code is strictly prohibited.
 
 """
-Live vessel positions from aisstream.io (free WebSocket AIS feed).
+Live vessel positions from aisstream.io, with an Open Waters fallback.
 
 Opens one persistent WSS connection, sends a bounding-box subscription, then
 merges Class A/B position + static AIS messages by MMSI into a shared table.
+aisstream.io is used when an API key is set. If that key is missing, the
+socket fails, or the feed stays silent, the client switches to the anonymous
+Open Waters stream (https://openwaters.io/api/ais/).
 
 Protocol and merge strategy adapted from capsule-radar-ais (MIT):
   https://github.com/socquique/capsule-radar-ais
@@ -29,10 +32,21 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
 AIS_WSS_URL = "wss://stream.aisstream.io/v0/stream"
+OPENWATERS_WSS_URL = "wss://ais.openwaters.io/v1/stream"
+PROVIDER_AISSTREAM = "aisstream"
+PROVIDER_OPENWATERS = "openwaters"
+# After aisstream fails or stays silent, stay on Open Waters this long.
+AISSTREAM_COOLDOWN_S = float(os.environ.get("AIS_AISSTREAM_COOLDOWN_S", "180"))
+# aisstream sockets sometimes stay open and send nothing. 0 disables the check.
+AIS_STALL_FAILOVER_S = float(os.environ.get("AIS_STALL_FAILOVER_S", "45"))
+# Anonymous Open Waters subscriptions are capped at 100 square degrees.
+OPENWATERS_ANON_AREA_SQ_DEG = 90.0
+OPENWATERS_KEYED_AREA_SQ_DEG = 360.0
 AIS_BOX_MARGIN = 1.25  # slightly larger than display range so edge vessels stay in feed
 SHIP_STALE_S = 12 * 60  # ships report less often than aircraft
 AIS_MAX_SHIPS = 500
@@ -80,6 +94,7 @@ class Ship:
     beam_m: int = 0
     draught_m: float = float("nan")
     last_seen: float = 0.0  # time.time()
+    data_source: str = "aisstream"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -97,7 +112,7 @@ class Ship:
             "beam_m": self.beam_m,
             "draught_m": None if math.isnan(self.draught_m) else self.draught_m,
             "last_seen": self.last_seen,
-            "data_source": "aisstream",
+            "data_source": self.data_source or "aisstream",
         }
 
 
@@ -154,6 +169,101 @@ def _api_key() -> str:
         return os.environ.get("AISSTREAM_API_KEY", "").strip()
 
 
+def _openwaters_api_key() -> str:
+    """Optional token. Anonymous Open Waters access works without one."""
+    try:
+        from secrets_store import api_enabled
+
+        if not api_enabled("OPENWATERS_AIS_API_KEY"):
+            return ""
+    except Exception:
+        pass
+    try:
+        from config import OPENWATERS_AIS_API_KEY
+
+        return (OPENWATERS_AIS_API_KEY or "").strip()
+    except ImportError:
+        return os.environ.get("OPENWATERS_AIS_API_KEY", "").strip()
+
+
+def openwaters_ws_url() -> str:
+    key = _openwaters_api_key()
+    if not key:
+        return OPENWATERS_WSS_URL
+    return f"{OPENWATERS_WSS_URL}?key={quote(key, safe='')}"
+
+
+def clamp_bounding_box(box: list[list[float]], max_sq_deg: float) -> list[list[float]]:
+    """Shrink a box toward its center so latitude×longitude stays under the cap."""
+    (sw_lat, sw_lon), (ne_lat, ne_lon) = box
+    d_lat = ne_lat - sw_lat
+    d_lon = ne_lon - sw_lon
+    area = abs(d_lat * d_lon)
+    if area <= max_sq_deg or area <= 0 or max_sq_deg <= 0:
+        return box
+    scale = math.sqrt(max_sq_deg / area)
+    c_lat = (sw_lat + ne_lat) / 2.0
+    c_lon = (sw_lon + ne_lon) / 2.0
+    h_lat = abs(d_lat) * scale / 2.0
+    h_lon = abs(d_lon) * scale / 2.0
+    return [
+        [c_lat - h_lat, c_lon - h_lon],
+        [c_lat + h_lat, c_lon + h_lon],
+    ]
+
+
+def openwaters_bbox(lat: float, lon: float, range_nm: float, *, keyed: bool = False) -> list[float]:
+    """[minLat, minLon, maxLat, maxLon] inside the Open Waters area cap."""
+    cap = OPENWATERS_KEYED_AREA_SQ_DEG if keyed else OPENWATERS_ANON_AREA_SQ_DEG
+    (sw_lat, sw_lon), (ne_lat, ne_lon) = clamp_bounding_box(
+        bounding_box(lat, lon, range_nm),
+        cap,
+    )
+    return [sw_lat, sw_lon, ne_lat, ne_lon]
+
+
+def _stall_failover_s() -> float:
+    try:
+        return max(0.0, float(AIS_STALL_FAILOVER_S))
+    except (TypeError, ValueError):
+        return 45.0
+
+
+def openwaters_event_to_aisstream(doc: dict) -> dict | None:
+    """v1 event → the aisstream envelope ``_ingest`` already merges."""
+    if doc.get("type") != "event":
+        return None
+    mtype = str(doc.get("msg_type") or "")
+    if not mtype:
+        return None
+    message = doc.get("message") if isinstance(doc.get("message"), dict) else {}
+    mmsi = doc.get("mmsi", message.get("UserID"))
+    name = message.get("Name") or message.get("ShipName") or ""
+    return {
+        "MessageType": mtype,
+        "MetaData": {
+            "MMSI": mmsi,
+            "ShipName": name,
+            "latitude": doc.get("lat"),
+            "longitude": doc.get("lon"),
+        },
+        "Message": {mtype: message},
+    }
+
+
+def ais_source_order() -> tuple[str, ...]:
+    """Portal marine-stream order. Default is aisstream, then Open Waters."""
+    try:
+        from secrets_store import ais_source_order_settings
+
+        order = tuple(ais_source_order_settings())
+    except Exception:
+        order = ("aisstream", "openwaters")
+    if not order:
+        return ("aisstream", "openwaters")
+    return order
+
+
 def ais_data_enabled() -> bool:
     """True when the on-device / portal AIS data toggle is on."""
     try:
@@ -187,6 +297,10 @@ class AisClient:
         self._ws = None
         self._config_epoch = 0
         self._started = False
+        self._provider = PROVIDER_AISSTREAM
+        self._aisstream_retry_at = 0.0
+        self._openwaters_retry_at = 0.0
+        self._session_error = ""
 
     @property
     def connected(self) -> bool:
@@ -215,6 +329,9 @@ class AisClient:
                 or abs(new_lon - self._lon) > 1e-4
                 or abs(new_range - self._range_nm) / max(self._range_nm, 0.5) > 0.05
             )
+            if new_key != self._api_key:
+                # A new key should be tried immediately, not after cooldown.
+                self._aisstream_retry_at = 0.0
             self._api_key = new_key
             self._lat = new_lat
             self._lon = new_lon
@@ -275,6 +392,7 @@ class AisClient:
                         beam_m=ship.beam_m,
                         draught_m=ship.draught_m,
                         last_seen=ship.last_seen,
+                        data_source=ship.data_source,
                     )
                 )
             for mmsi in dead:
@@ -330,35 +448,95 @@ class AisClient:
             self._loop = None
             self._connected = False
 
+    def _provider_ready(self, name: str) -> bool:
+        now = time.time()
+        if name == PROVIDER_AISSTREAM:
+            return bool(self._api_key) and now >= self._aisstream_retry_at
+        if name == PROVIDER_OPENWATERS:
+            return now >= self._openwaters_retry_at
+        return False
+
+    def _select_provider(self) -> str:
+        """First ready source in the portal order. A missing aisstream key is skipped."""
+        order = ais_source_order()
+        for name in order:
+            if self._provider_ready(name):
+                return name
+        for name in order:
+            if name == PROVIDER_AISSTREAM and not self._api_key:
+                continue
+            return name
+        return PROVIDER_OPENWATERS
+
+    def _mark_provider_down(self, provider: str) -> None:
+        try:
+            cooldown = max(1.0, float(AISSTREAM_COOLDOWN_S))
+        except (TypeError, ValueError):
+            cooldown = 180.0
+        until = time.time() + cooldown
+        if provider == PROVIDER_AISSTREAM:
+            self._aisstream_retry_at = until
+        elif provider == PROVIDER_OPENWATERS:
+            self._openwaters_retry_at = until
+        logger.warning(
+            "[ais] %s unavailable — next marine source for %.0fs",
+            provider,
+            cooldown,
+        )
+
+    def _mark_aisstream_down(self) -> None:
+        self._mark_provider_down(PROVIDER_AISSTREAM)
+
     async def _run(self) -> None:
         backoff = RECONNECT_MIN_S
         while not self._stop.is_set():
-            key = self._api_key
-            if not key:
-                self._connected = False
-                await asyncio.sleep(1.0)
-                continue
+            provider = self._select_provider()
             try:
                 import websockets
 
+                url = AIS_WSS_URL if provider == PROVIDER_AISSTREAM else openwaters_ws_url()
+                order_at_connect = ais_source_order()
                 async with websockets.connect(
-                    AIS_WSS_URL,
+                    url,
                     ping_interval=20,
                     ping_timeout=20,
                     close_timeout=5,
                     max_size=2**20,
                 ) as ws:
                     self._ws = ws
+                    self._provider = provider
                     self._connected = True
+                    self._session_error = ""
                     self._last_connect_ts = time.time()
+                    msgs_at_connect = self._last_msg_ts
                     backoff = RECONNECT_MIN_S
-                    logger.info("[ais] WebSocket connected → %s", AIS_WSS_URL)
+                    logger.info("[ais] WebSocket connected → %s", provider)
                     # Capture epoch *after* the first send so a configure() that
                     # raced the connect does not immediately double-subscribe
                     # (aisstream closes the socket on back-to-back sub messages).
                     await self._send_subscription()
                     epoch = self._config_epoch
+                    stall_s = _stall_failover_s()
+                    stall_deadline = (time.time() + stall_s) if stall_s > 0 else None
                     while not self._stop.is_set():
+                        # A saved marine-source order takes effect on this socket.
+                        # Cooldown expiry does not drop a healthy stream; the
+                        # next reconnect tries the preferred source again.
+                        if ais_source_order() != order_at_connect:
+                            logger.info(
+                                "[ais] marine source order changed → %s",
+                                self._select_provider(),
+                            )
+                            break
+                        # Switch hosts only when settings change (new key, key
+                        # removed). A healthy fallback socket stays up until
+                        # it fails; the next reconnect retries the preferred source.
+                        if self._config_epoch != epoch and self._select_provider() != provider:
+                            logger.info(
+                                "[ais] switching stream → %s",
+                                self._select_provider(),
+                            )
+                            break
                         if self._config_epoch != epoch:
                             try:
                                 debounce = max(0.0, float(AIS_RESUBSCRIBE_DEBOUNCE_S))
@@ -374,10 +552,27 @@ class AisClient:
                         try:
                             raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
                         except asyncio.TimeoutError:
+                            if (
+                                stall_deadline is not None
+                                and time.time() >= stall_deadline
+                                and self._last_msg_ts == msgs_at_connect
+                            ):
+                                logger.warning(
+                                    "[ais] %s silent for %.0fs — trying the next marine source",
+                                    provider,
+                                    stall_s,
+                                )
+                                self._mark_provider_down(provider)
+                                break
                             continue
                         if isinstance(raw, bytes):
                             raw = raw.decode("utf-8", errors="replace")
                         self._ingest(raw)
+                        if self._session_error:
+                            self._mark_provider_down(provider)
+                            break
+                        if self._last_msg_ts != msgs_at_connect:
+                            stall_deadline = None
             except ImportError:
                 logger.error("[ais] websockets package not installed — pip install websockets")
                 await asyncio.sleep(30.0)
@@ -386,7 +581,13 @@ class AisClient:
                 self._ws = None
                 if self._stop.is_set():
                     break
-                logger.warning("[ais] WebSocket error: %s — reconnect in %.0fs", exc, backoff)
+                self._mark_provider_down(provider)
+                logger.warning(
+                    "[ais] %s WebSocket error: %s — reconnect in %.0fs",
+                    provider,
+                    exc,
+                    backoff,
+                )
                 await asyncio.sleep(backoff)
                 backoff = min(RECONNECT_MAX_S, backoff * 1.8)
             finally:
@@ -400,6 +601,19 @@ class AisClient:
         with self._lock:
             key = self._api_key
             lat, lon, range_nm = self._lat, self._lon, self._range_nm
+            provider = self._provider
+        if provider == PROVIDER_OPENWATERS:
+            bbox = openwaters_bbox(lat, lon, range_nm, keyed=bool(_openwaters_api_key()))
+            msg = {"type": "subscribe", "bbox": [bbox], "snapshot": True}
+            await ws.send(json.dumps(msg))
+            logger.info(
+                "[ais] openwaters subscribed [%.4f,%.4f]..[%.4f,%.4f]",
+                bbox[0],
+                bbox[1],
+                bbox[2],
+                bbox[3],
+            )
+            return
         if not key:
             return
         box = bounding_box(lat, lon, range_nm)
@@ -424,11 +638,38 @@ class AisClient:
             logger.debug("AIS JSON parse error: %s", exc)
             return
 
+        kind = doc.get("type")
+        if kind == "welcome":
+            limits = doc.get("limits") or {}
+            logger.info(
+                "[ais] openwaters welcome role=%s area=%s",
+                doc.get("role"),
+                limits.get("area"),
+            )
+            return
+        if kind == "event":
+            converted = openwaters_event_to_aisstream(doc)
+            if not converted:
+                return
+            doc = converted
+        elif kind in ("ack", "key"):
+            return
+        elif kind == "error" or (
+            (doc.get("error") or doc.get("Error")) and not doc.get("MessageType")
+        ):
+            err = doc.get("error") or doc.get("Error")
+            self._session_error = str(err)
+            logger.warning("[ais] server error: %s", err)
+            return
+
         mtype = doc.get("MessageType")
         if not mtype:
             err = doc.get("error") or doc.get("Error")
             if err:
+                self._session_error = str(err)
                 logger.warning("[ais] server error: %s", err)
+            return
+        if mtype not in FILTER_MESSAGE_TYPES:
             return
 
         meta = doc.get("MetaData") or {}
@@ -452,6 +693,7 @@ class AisClient:
                 self._ships[mmsi] = ship
             ship.mmsi = mmsi
             ship.last_seen = now
+            ship.data_source = self._provider or PROVIDER_AISSTREAM
 
             if not ship.name:
                 ship.name = _trim_ais(str(meta.get("ShipName") or ""))
@@ -599,8 +841,9 @@ def fetch_ais_vessels(
     """
     Ensure the AIS stream is configured for the given area and return vessels.
 
-    Starts the background client when AIS data is enabled and an API key is set.
-    Returns [] when disabled, unconfigured, or not yet connected.
+    Starts the background client when AIS data is enabled. An aisstream.io key
+    is optional: without one, or when that stream fails, vessels come from
+    Open Waters. Returns [] when disabled or not yet connected.
     """
     if not ais_data_enabled():
         client = get_client()
@@ -609,8 +852,6 @@ def fetch_ais_vessels(
         return []
 
     key = _api_key()
-    if not key:
-        return []
 
     if lat is None or lon is None:
         try:
@@ -644,9 +885,9 @@ def fetch_ais_vessels(
 def sync_ais_client() -> None:
     """Start or stop the background client to match current settings / key."""
     client = get_client()
-    if not ais_data_enabled() or not _api_key():
+    if not ais_data_enabled():
         if client._started:
-            logger.info("[ais] stopping client (disabled or no API key)")
+            logger.info("[ais] stopping client (disabled)")
             client.stop()
         return
     try:
@@ -795,7 +1036,7 @@ def vessel_to_radar_entry(vessel: dict[str, Any]) -> dict[str, Any] | None:
         "flag_iso2": flag_iso2,
         "flag_country": flag_country,
         "stationary": ship_is_stationary(nav, sog),
-        "data_source": "aisstream",
+        "data_source": vessel.get("data_source") or "aisstream",
         "sog_kt": sog,
         "cog_deg": cog,
     }

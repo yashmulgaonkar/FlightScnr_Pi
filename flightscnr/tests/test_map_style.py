@@ -38,6 +38,16 @@ class TestMapStyle(unittest.TestCase):
         self.assertEqual(map_bg.normalize_map_style("usgs_imagery"), "satellite")
         self.assertEqual(map_bg.normalize_map_style("roadmap"), "streets")
         self.assertEqual(map_bg.normalize_map_style("google"), "streets")
+        self.assertEqual(map_bg.normalize_map_style("seamap"), "seamap")
+        self.assertEqual(map_bg.normalize_map_style("nautical"), "seamap")
+        self.assertEqual(map_bg.normalize_map_style("openwaters"), "seamap")
+
+    def test_seamap_opacity_clamps(self):
+        from display.round_touch import settings
+
+        self.assertEqual(settings.clamp_seamap_opacity_percent(0), 15)
+        self.assertEqual(settings.clamp_seamap_opacity_percent(70), 70)
+        self.assertEqual(settings.clamp_seamap_opacity_percent(140), 100)
 
     def test_ui_styles_include_candidates(self):
         from display.round_touch import map_bg, settings
@@ -56,6 +66,7 @@ class TestMapStyle(unittest.TestCase):
             "light",
             "voyager",
             "vfr",
+            "seamap",
         ):
             self.assertIn(style, settings.MAP_STYLES)
             self.assertIn(style, settings.MAP_STYLE_LABELS)
@@ -68,6 +79,7 @@ class TestMapStyle(unittest.TestCase):
         self.assertEqual(settings.MAP_STYLE_LABELS["dark"], "Dark: Carto")
         self.assertEqual(settings.MAP_STYLE_LABELS["light"], "Light: Carto")
         self.assertEqual(settings.MAP_STYLE_LABELS["voyager"], "Street: Voyager")
+        self.assertEqual(settings.MAP_STYLE_LABELS["seamap"], "Nautical: Seamap")
         for label in settings.MAP_STYLE_LABELS.values():
             self.assertNotIn("CARTO_BASEMAPS_API_KEY", label)
 
@@ -138,6 +150,12 @@ class TestMapStyle(unittest.TestCase):
 
         osm = map_bg._tile_url(9, 81, 197, "osm")
         self.assertEqual(osm, "https://tile.openstreetmap.org/9/81/197.png")
+
+        seamap = map_bg._tile_url(10, 163, 396, "seamap")
+        self.assertEqual(
+            seamap,
+            "https://tiles.openwaters.io/seamap/10/163/396.pbf",
+        )
 
     def test_tile_url_for_log_redacts_carto_key(self):
         from display.round_touch import map_bg
@@ -226,6 +244,7 @@ class TestMapStyle(unittest.TestCase):
             "toner": "© Stadia © Stamen © OSM",
             "osm": "© OpenStreetMap",
             "dark": "© OSM © CARTO",
+            "seamap": "© Open Waters: Seamap",
         }
         for style, text in cases.items():
             with self.subTest(style=style), patch.object(

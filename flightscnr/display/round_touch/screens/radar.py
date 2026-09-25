@@ -416,6 +416,7 @@ def _backdrop_cache_key(*, pan_mode: bool, calibrate: bool):
         settings.distance_units(),
         settings.map_style(),
         settings.vfr_map_opacity() if settings.map_style() == "vfr" else 0,
+        settings.seamap_opacity() if settings.map_style() == "seamap" else 0,
     )
 
 
@@ -1183,7 +1184,7 @@ def _is_tracked(flight) -> bool:
 def _pale_basemap() -> bool:
     """Pale street / VFR charts — near-black tags stay readable on light ink."""
     try:
-        return settings.map_style() in ("light", "voyager", "vfr", "streets")
+        return settings.map_style() in ("light", "voyager", "vfr", "streets", "seamap")
     except Exception:
         return False
 
@@ -1204,7 +1205,7 @@ def _light_basemap() -> bool:
 def _amber_icon_basemap() -> bool:
     """Basemaps that use dark-amber aircraft icons instead of radar yellow."""
     try:
-        return settings.map_style() in ("light", "vfr")
+        return settings.map_style() in ("light", "vfr", "seamap")
     except Exception:
         return False
 

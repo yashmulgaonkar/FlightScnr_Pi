@@ -162,7 +162,7 @@ def _ensure_airports(lat: float, lon: float, radius_km: float) -> None:
 def _runway_color():
     # Match airport_overlay: pale charts → light RGB; dark/imagery → darkmap RGB.
     style = settings.map_style()
-    if style in ("light", "voyager", "streets"):
+    if style in ("light", "voyager", "streets", "seamap"):
         return getattr(theme, "RUNWAY_LIGHT", (35, 55, 95))
     return getattr(theme, "RUNWAY_DARKMAP", getattr(theme, "AIRPORT", (120, 150, 175)))
 
@@ -212,7 +212,7 @@ def _draw_airports(
     if runways_ok:
         width_px = (
             max(2, theme.s(3))
-            if settings.map_style() in ("light", "voyager", "streets", "toner", "satellite")
+            if settings.map_style() in ("light", "voyager", "streets", "toner", "satellite", "seamap")
             else max(1, theme.s(2))
         )
         color = _runway_color()

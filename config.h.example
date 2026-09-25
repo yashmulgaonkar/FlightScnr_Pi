@@ -28,7 +28,11 @@ TOMORROW_API_KEY =
 // DUMP1090_URL = http://127.0.0.1:8080/data/aircraft.json
 
 // Optional — aisstream.io AIS vessels (https://aisstream.io — free, non-commercial)
+// Missing key or a dead stream falls back to Open Waters AIS (no key required).
 // AISSTREAM_API_KEY =
+// Optional Open Waters token for higher AIS limits (anonymous works without it).
+// The portal API Keys card can turn this key on or off.
+// OPENWATERS_AIS_API_KEY =
 
 // Optional — NASA FIRMS MAP_KEY for wildfires outside California
 // (In California the radar uses CAL FIRE incidents — no key required)

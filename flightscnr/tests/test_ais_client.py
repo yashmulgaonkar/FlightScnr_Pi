@@ -15,6 +15,7 @@ import sys
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -199,6 +200,100 @@ class TestAisHelpers(unittest.TestCase):
         self.assertEqual(entry["plane"], "Cargo")
         self.assertEqual(entry["plane_latitude"], 37.8)
         self.assertEqual(entry["heading"], 91)
+        self.assertEqual(entry["data_source"], "aisstream")
+
+    def test_openwaters_event_merges_like_aisstream(self):
+        client = AisClient()
+        client._provider = "openwaters"
+        raw = {
+            "type": "event",
+            "mmsi": 548705000,
+            "msg_type": "PositionReport",
+            "lat": 51.90118,
+            "lon": 4.3596,
+            "message": {
+                "UserID": 548705000,
+                "Latitude": 51.90118,
+                "Longitude": 4.3596,
+                "Sog": 0,
+                "Cog": 19.9,
+                "TrueHeading": 261,
+                "NavigationalStatus": 5,
+            },
+        }
+        client._ingest(json.dumps(raw))
+        ships = client.snapshot()
+        self.assertEqual(len(ships), 1)
+        self.assertEqual(ships[0].mmsi, 548705000)
+        self.assertAlmostEqual(ships[0].lat, 51.90118)
+        self.assertAlmostEqual(ships[0].cog_deg, 19.9)
+        self.assertEqual(ships[0].nav_status, 5)
+        self.assertEqual(ships[0].data_source, "openwaters")
+
+    def test_server_error_marks_session(self):
+        client = AisClient()
+        client._ingest(json.dumps({"error": "Api Key Is Not Valid"}))
+        self.assertIn("Not Valid", client._session_error)
+        self.assertEqual(client.snapshot(), [])
+
+    def test_provider_falls_back_without_key_or_during_cooldown(self):
+        client = AisClient()
+        client._api_key = ""
+        self.assertEqual(client._select_provider(), "openwaters")
+        client._api_key = "key"
+        client._aisstream_retry_at = 0
+        self.assertEqual(client._select_provider(), "aisstream")
+        client._aisstream_retry_at = time.time() + 60
+        self.assertEqual(client._select_provider(), "openwaters")
+        client.configure("new-key", 37.6, -122.4, 10)
+        self.assertEqual(client._aisstream_retry_at, 0)
+        self.assertEqual(client._select_provider(), "aisstream")
+
+    def test_marine_order_prefers_the_first_ready_source(self):
+        client = AisClient()
+        client._api_key = "key"
+        with patch(
+            "utilities.ais_client.ais_source_order",
+            return_value=("openwaters", "aisstream"),
+        ):
+            self.assertEqual(client._select_provider(), "openwaters")
+            client._openwaters_retry_at = time.time() + 60
+            self.assertEqual(client._select_provider(), "aisstream")
+        with patch(
+            "utilities.ais_client.ais_source_order",
+            return_value=("aisstream", "openwaters"),
+        ):
+            client._api_key = ""
+            client._openwaters_retry_at = time.time() + 60
+            self.assertEqual(client._select_provider(), "openwaters")
+
+    def test_openwaters_key_follows_portal_toggle(self):
+        from utilities import ais_client
+        import config
+
+        previous = config.OPENWATERS_AIS_API_KEY
+        config.OPENWATERS_AIS_API_KEY = "ow-secret"
+        try:
+            with patch("secrets_store.api_enabled", return_value=False):
+                self.assertEqual(ais_client._openwaters_api_key(), "")
+                self.assertEqual(
+                    ais_client.openwaters_ws_url(), ais_client.OPENWATERS_WSS_URL
+                )
+            with patch("secrets_store.api_enabled", return_value=True):
+                self.assertEqual(ais_client._openwaters_api_key(), "ow-secret")
+                self.assertIn("key=ow-secret", ais_client.openwaters_ws_url())
+        finally:
+            config.OPENWATERS_AIS_API_KEY = previous
+
+    def test_openwaters_bbox_stays_under_anonymous_cap(self):
+        from utilities.ais_client import openwaters_bbox
+
+        bbox = openwaters_bbox(0.0, 0.0, 5000.0, keyed=False)
+        d_lat = bbox[2] - bbox[0]
+        d_lon = bbox[3] - bbox[1]
+        self.assertLessEqual(abs(d_lat * d_lon), 90.0 + 1e-6)
+        self.assertLess(bbox[0], 0.0)
+        self.assertGreater(bbox[2], 0.0)
 
 
 if __name__ == "__main__":

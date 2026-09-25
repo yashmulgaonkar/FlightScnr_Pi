@@ -566,7 +566,7 @@ def render_live_tracking_map(
                 window = padded
             surf.blit(window, (0, 0))
             dim = pygame.Surface((width, height), pygame.SRCALPHA)
-            dim_alpha = 40 if style in ("light", "voyager", "vfr") else 70
+            dim_alpha = 40 if style in ("light", "voyager", "vfr", "seamap") else 70
             dim.fill((0, 0, 0, dim_alpha))
             surf.blit(dim, (0, 0))
 

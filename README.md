@@ -89,7 +89,7 @@ rules, review checklist, and version-compatibility contract.
 
 ### Map layers
 
-Ten basemap styles: CARTO dark/light/Voyager (free `CARTO_BASEMAPS_API_KEY`), OSM dark, **Dark Flat** (solid black), Stadia dark + Toner (free `STADIA_MAPS_API_KEY`), Esri streets/satellite, and free FAA VFR sectionals (US). Optional **tag leaders**, **color by altitude**, precipitation, airport overlays, wildfires, and earthquakes.
+Eleven basemap styles: CARTO dark/light/Voyager (free `CARTO_BASEMAPS_API_KEY`), OSM dark, **Dark Flat** (solid black), Stadia dark + Toner (free `STADIA_MAPS_API_KEY`), Esri streets/satellite, free FAA VFR sectionals (US), and **Nautical: Seamap** ([Open Waters Seamap](https://github.com/openwatersio/seamap) depths and seamarks — not for navigation). Optional **tag leaders**, **color by altitude**, precipitation, airport overlays, wildfires, and earthquakes.
 
 <table>
 <tr>
@@ -155,7 +155,7 @@ Optional frosted HUD on the radar: time, weather, wind, and US AQI. Light or dar
 
 ### Aircraft photos & marine AIS
 
-Flight detail can show aircraft photos ([planespotters.net](https://www.planespotters.net/) / Wikimedia). Optional marine AIS from [aisstream.io](https://aisstream.io/) puts vessels on the same radar, with ship photos from Wikimedia Commons. **Note:** aisstream.io is known to be unreliable — if marine traffic disappears, check your portal settings and the [upstream status monitors](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Troubleshooting#13-marine-ais-traffic-not-visible-on-radar) before assuming a FlightScnr Pi bug.
+Flight detail can show aircraft photos ([planespotters.net](https://www.planespotters.net/) / Wikimedia). Optional marine AIS from [aisstream.io](https://aisstream.io/) puts vessels on the same radar, with ship photos from Wikimedia Commons. If that key is unset or the stream fails, positions fall back to [Open Waters AIS](https://openwaters.io/api/ais/) (no key required). **Note:** aisstream.io is known to be unreliable — the fallback covers that, and the [upstream status monitors](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Troubleshooting#13-marine-ais-traffic-not-visible-on-radar) are still worth a look before assuming a FlightScnr Pi bug.
 
 <table>
 <tr>
