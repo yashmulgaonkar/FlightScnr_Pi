@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "locale": "hu",
+  "native_name": "Magyar",
+  "english_name": "Hungarian",
+  "direction": "ltr",
+  "fallback": "en",
+  "source_catalog_revision": 10,
+  "license": "CC-BY-NC-SA-4.0",
+  "authors": [
+    "Csaba Csanaki"
+  ]
+}
