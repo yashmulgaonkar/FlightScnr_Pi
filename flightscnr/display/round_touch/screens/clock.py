@@ -16,7 +16,9 @@ import pygame
 from display.round_touch import draw, nav, settings, theme, weather_data, weather_icons
 from i18n import format_date
 
-FOOTER_BUTTONS = ("radar",)
+# The footer slot now holds the power icon (drawn by the app); return to the
+# radar is a swipe up. No radar button here.
+FOOTER_BUTTONS: tuple[str, ...] = ()
 
 # Vertical rhythm — no breadcrumb chrome, so use a bit more air between blocks.
 _LINE_GAP = lambda: theme.s(4)

@@ -753,6 +753,12 @@ def _footer_arc_metrics() -> tuple[int, float, float, float]:
     return r, radar_half, side_half, gap
 
 
+def curved_footer_bottom_center() -> tuple[int, int]:
+    """Screen point of the curved footer's bottom slot (where radar sits)."""
+    r, _, _, _ = _footer_arc_metrics()
+    return theme.CENTER_X, theme.CENTER_Y + r
+
+
 def curved_footer_segments(kinds: list[str]) -> list[tuple[str, float, float]]:
     """(kind, mid_angle, half_span) per segment along the bottom arc.
 

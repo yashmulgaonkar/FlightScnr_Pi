@@ -20,8 +20,9 @@ from display.round_touch import draw, nav, theme
 from i18n import tr
 from version import APP_VERSION
 
-FOOTER_BUTTONS = ("next", "radar")
-# Nudge below the live version line; use default footer slot size (same as Settings).
+# The bottom "radar" slot now holds the power glyph (drawn by the app); swiping
+# down already returns to the radar, so the button was redundant.
+FOOTER_BUTTONS = ("next",)
 
 _BOOT_DIR = os.path.normpath(
     os.path.join(

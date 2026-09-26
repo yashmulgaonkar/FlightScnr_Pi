@@ -968,5 +968,12 @@
   "portal.radar.text_dark_color.hint": "Bovenste identiteitsregel op radar-vliegtuiglabels (vluchtnummer / callsign) voor donkere basiskaarten.",
   "portal.radar.text_light_color.label": "Kleur van vluchtnummer op lichte kaart",
   "portal.radar.text_light_color.hint": "Zelfde identiteitsregel op lichte / VFR / straat-basiskaarten. Type- en hoogteregels blijven ongewijzigd.",
-  "portal.radar.aircraft_id.alternate": "Afwisselend"
+  "portal.radar.aircraft_id.alternate": "Afwisselend",
+  "power.title": "Aan/uit",
+  "power.screen_off": "Scherm uit",
+  "power.screen_off.hint": "Verlichting uit, tik om te wekken",
+  "power.close_hint": "Tik ernaast om te sluiten",
+  "power.reboot": "Herstarten",
+  "power.shutdown": "Uitschakelen",
+  "power.restart": "App herstarten"
 }

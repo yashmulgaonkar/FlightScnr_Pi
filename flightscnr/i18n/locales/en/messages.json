@@ -968,5 +968,12 @@
   "portal.radar.text_dark_color.hint": "Top identity line on aircraft radar tags (flight number / callsign) for dark basemaps.",
   "portal.radar.text_light_color.label": "Flight Number Color for Light Map",
   "portal.radar.text_light_color.hint": "Same tag identity line on light / VFR / street basemaps. Type and altitude rows are unchanged.",
-  "portal.radar.aircraft_id.alternate": "Alternate"
+  "portal.radar.aircraft_id.alternate": "Alternate",
+  "power.title": "Power",
+  "power.screen_off": "Screen off",
+  "power.screen_off.hint": "Backlight off, tap to wake",
+  "power.close_hint": "Tap outside to close",
+  "power.reboot": "Reboot",
+  "power.shutdown": "Shut down",
+  "power.restart": "Restart app"
 }

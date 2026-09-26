@@ -43,6 +43,7 @@ from display.round_touch import (
     nav,
     pinch_handler,
     position_smooth,
+    power_menu,
     radar_hud,
     rainviewer_overlay,
     rotation,
@@ -127,6 +128,12 @@ RADAR_PEEK_S = 20.0
 
 
 class RoundTouchDisplay:
+    # Class-level defaults so helpers that build the display via
+    # object.__new__ (tests) still have the power-menu state __init__ sets.
+    _power_menu_open = False
+    _power_confirm: str | None = None
+    _manual_screen_off = False
+
     def __init__(self):
         from utilities import system_control
 
@@ -276,6 +283,10 @@ class RoundTouchDisplay:
         self._vessel_photo_redraw = False
         self._last_settings_reload = 0.0
         self._off_hours_wake_until = 0.0
+        # Quick power menu (radar/clock glyph): overlay + confirm + manual off.
+        self._power_menu_open = False
+        self._power_confirm: str | None = None
+        self._manual_screen_off = False
         # Tracks whether force-clock off-hours was already active last tick
         # (edge-detect so we don't fight deliberate navigation to radar).
         self._off_hours_force_clock_active = False
@@ -925,6 +936,7 @@ class RoundTouchDisplay:
             and not self._panning_map
             and not self._pan_commit_choice
             and not radar_hud.volume_popover_open()
+            and not self._power_menu_open
         ):
             layer, layer_gen = radar.frame_layer_snapshot()
             if layer is not None:
@@ -1113,6 +1125,24 @@ class RoundTouchDisplay:
                     tracked.draw_follow_loading(self.surface, pending)
             self._scroll.max_offset = 0
         self._scroll.clamp()
+        # Quick power menu: a muted glyph in the clock footer and a clear button
+        # on the About screen (swipe up from radar) open the overlay. The radar
+        # rim is kept clear for traffic.
+        if self._power_menu_open:
+            if self._power_confirm is not None:
+                power_menu.draw_confirm(self.surface, self._power_confirm)
+            else:
+                power_menu.draw_menu(self.surface)
+        elif self._manual_screen_off:
+            power_menu.clear_icon()
+        elif self.screen == SCREEN_CLOCK:
+            rects = nav.footer_button_rects(1)
+            if rects:
+                power_menu.draw_icon(self.surface, *rects[0].center)
+        elif self.screen == SCREEN_DETAILS:
+            power_menu.draw_icon(self.surface, *nav.curved_footer_bottom_center())
+        else:
+            power_menu.clear_icon()
         remaining = self._timeout_remaining_fraction()
         if remaining is not None:
             # Snapshot content+bezel (no ring) and a pre-rotated display base so
@@ -3271,6 +3301,12 @@ class RoundTouchDisplay:
     def _apply_brightness(self):
         from display.round_touch import backlight, off_hours
 
+        # Manual "Screen off" from the power menu wins over every schedule
+        # until the next touch clears the flag (see _handle_power_menu).
+        if self._manual_screen_off:
+            backlight.apply_percent(0)
+            return
+
         # A held quiet-dim slider previews its level directly.
         if self._quiet_dim_preview is not None:
             backlight.apply_percent(int(self._quiet_dim_preview))
@@ -4304,6 +4340,79 @@ class RoundTouchDisplay:
             logger.warning("System action %s failed: %s", action, result.get("message"))
             self._fatal_error = result.get("message") or f"{action} failed"
 
+    def _handle_power_menu(self, tap, swipe) -> bool:
+        """Quick power menu (glyph → overlay → confirm) and manual screen-off.
+
+        Returns True when the gesture was consumed and normal navigation
+        should be skipped for this tick.
+        """
+        swiped = swipe != input_handler.SWIPE_NONE
+
+        # Manual "Screen off": any touch wakes; swallow all input while dark.
+        if self._manual_screen_off:
+            if tap or swiped:
+                self._manual_screen_off = False
+                self._note_activity()
+                self._apply_brightness()
+                self._safe_draw()
+            return True
+
+        # Confirm step for reboot / shutdown / restart.
+        if self._power_menu_open and self._power_confirm is not None:
+            if tap:
+                hit = power_menu.confirm_hit(tap[0], tap[1])
+                if hit == "confirm":
+                    action = self._power_confirm
+                    self._power_confirm = None
+                    self._power_menu_open = False
+                    self._execute_system_action(action)
+                    self._safe_draw()
+                elif hit == "cancel":
+                    self._power_confirm = None
+                    self._note_activity()
+                    self._safe_draw()
+            elif swiped:
+                self._power_confirm = None
+                self._note_activity()
+                self._safe_draw()
+            return True
+
+        # Open menu: buttons act; a tap outside any button, or a swipe, closes.
+        if self._power_menu_open:
+            if tap:
+                token = power_menu.menu_hit(tap[0], tap[1])
+                if token == "screen_off":
+                    self._power_menu_open = False
+                    self._manual_screen_off = True
+                    self._apply_brightness()
+                    self._safe_draw()
+                elif token in ("reboot", "shutdown", "restart"):
+                    self._power_confirm = token
+                    self._note_activity()
+                    self._safe_draw()
+                else:
+                    self._power_menu_open = False
+                    self._note_activity()
+                    self._safe_draw()
+            elif swiped:
+                self._power_menu_open = False
+                self._note_activity()
+                self._safe_draw()
+            return True
+
+        # A tap on the power glyph (clock or About footer slot) opens the menu.
+        if (
+            tap
+            and not self._radar_modal_active()
+            and power_menu.icon_hit(tap[0], tap[1])
+        ):
+            self._power_menu_open = True
+            self._power_confirm = None
+            self._note_activity()
+            self._safe_draw()
+            return True
+        return False
+
     def _handle_navigation(self):
         if time.time() < self._boot_until:
             return
@@ -4357,6 +4466,11 @@ class RoundTouchDisplay:
                 swipe_start = gesture[3] if len(gesture) > 3 else None
             else:
                 tap = gesture[1]
+
+        # Power menu (glyph / overlay / confirm / manual screen-off) swallows
+        # input before any screen-specific navigation sees it.
+        if self._handle_power_menu(tap, swipe):
+            return
 
         if swipe != input_handler.SWIPE_NONE and self.screen not in (
             SCREEN_RADAR, SCREEN_CLOCK, SCREEN_ANALOG_CLOCK, SCREEN_ANALOG_NIGHT,
@@ -4912,9 +5026,6 @@ class RoundTouchDisplay:
                 self._open_screen(SCREEN_SETTINGS)
                 self.settings_page = info.PAGE_MAIN
                 self._note_activity()
-                self._safe_draw()
-            elif action == "radar":
-                self._return_to_radar()
                 self._safe_draw()
         elif tap and self.screen == SCREEN_UPDATE_NOTES:
             self._note_activity()

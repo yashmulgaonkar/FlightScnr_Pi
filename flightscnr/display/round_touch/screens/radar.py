@@ -297,6 +297,8 @@ def _build_frame_layer(build: pygame.Surface, backdrop, flights, offset) -> bool
         zoom_buttons.draw(build)
     except Exception:
         pass
+    # Power actions live on the About screen (swipe up), not the radar rim, so
+    # the rim stays clear for traffic and never collides with the LoFi pill.
     # lofi_controls pill is stamped per frame in rotation.present() — the
     # marquee title animates, so it can't live in this cached layer.
     _t = _rebuild_stage("2r_status", _t)
