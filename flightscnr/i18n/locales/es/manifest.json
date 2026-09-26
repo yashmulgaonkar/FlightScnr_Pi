@@ -7,5 +7,8 @@
   "fallback": "en",
   "source_catalog_revision": 10,
   "license": "CC-BY-NC-SA-4.0",
-  "authors": ["jmwijnholds (translation coordination)","OpenAI Codex (machine-assisted draft)"]
+  "authors": [
+    "jmwijnholds (translation coordination)",
+    "machine-assisted draft, pending native review"
+  ]
 }
