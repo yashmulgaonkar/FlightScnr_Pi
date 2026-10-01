@@ -4963,7 +4963,8 @@ class RoundTouchDisplay:
                 if choice in settings.FLIP_BOARD_ID_MODES:
                     settings.set_flip_board_id(choice)
                     flip_board.close_id_picker()
-                    flip_board.restart_animation(keep_ident=True)
+                    # Morph labels in place (tail ↔ flight ↔ callsign).
+                    flap_sound.reset()
                 else:
                     flip_board.close_id_picker()
                 self._note_activity()

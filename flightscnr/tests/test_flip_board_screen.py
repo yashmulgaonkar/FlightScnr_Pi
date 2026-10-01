@@ -415,6 +415,45 @@ class TestSplitFlapAnimation:
         shown = self.flip_board._flap_text(0, "      ", 1000.0)
         assert shown.strip() == ""
 
+    def test_change_walks_only_required_path(self):
+        """E→J must show F…J, not an unrelated scramble through O/0."""
+        self.flip_board._flap_text(0, "E", 1000.0)
+        assert self.flip_board._flap_text(0, "E", 1005.0) == "E"
+        seen = set()
+        for i in range(20):
+            shown = self.flip_board._flap_text(0, "J", 1005.0 + i / 60.0)
+            seen.add(shown)
+            if shown == "J" and i > 0:
+                break
+        assert seen <= set("FGHIJ")
+        assert "J" in seen
+        assert "E" not in seen or shown == "J"
+
+    def test_unchanged_column_does_not_flap(self):
+        self.flip_board._flap_text(0, "N12345", 1000.0)
+        assert self.flip_board._flap_text(0, "N12345", 1005.0) == "N12345"
+        mid = self.flip_board._flap_text(0, "N99999", 1005.0)
+        assert mid[0] == "N"
+        assert self.flip_board.turning_tile_count(now=1005.0) == 5
+
+    def test_meridiem_path_stays_on_a_and_p(self):
+        """12h suffix column must not flash letter O (reads as digit 0)."""
+        # Packed row: 6 id + HH + MM + meridiem at col 10.
+        morning = "UAL1230741A"
+        evening = "UAL1230741P"
+        self.flip_board._flap_text(0, morning, 1000.0)
+        assert self.flip_board._flap_text(0, morning, 1005.0) == morning
+        seen = set()
+        for i in range(90):
+            shown = self.flip_board._flap_text(0, evening, 1005.0 + i / 60.0)
+            seen.add(shown[10])
+            if shown == evening and i > 0:
+                break
+        assert seen <= set("AP")
+        assert "P" in seen
+        assert "O" not in seen
+        assert "0" not in seen
+
     def test_is_animating_reports_the_window(self):
         self.flip_board._flap_text(0, "N12345", 1000.0)
         assert self.flip_board.is_animating(1000.1)
@@ -441,13 +480,30 @@ class TestSplitFlapAnimation:
         assert self.flip_board._row_settled_at(3, 10) > self.flip_board._row_settled_at(0, 10)
 
 
-    def test_toggling_direction_restarts_the_flip(self):
+    def test_toggling_direction_morphs_without_blanking(self):
+        """Arrivals ↔ departures must walk old→new, not clear to blank first."""
         self.flip_board._flap_text(0, "N12345", 1000.0)
-        assert not self.flip_board.is_animating(1010.0)
+        assert self.flip_board._flap_text(0, "N12345", 1005.0) == "N12345"
         self.flip_board.toggle_direction()
-        self.flip_board._flap_text(0, "N12345", 1010.0)
+        # Same text after toggle: nothing to flip.
+        assert self.flip_board._flap_text(0, "N12345", 1010.0) == "N12345"
+        assert not self.flip_board.is_animating(1010.1)
+        # Different text: path from previous glyphs, first frame still shows old.
+        mid = self.flip_board._flap_text(0, "N99999", 1010.0)
+        assert mid[0] == "N"
+        assert mid != "N99999"
         assert self.flip_board.is_animating(1010.1)
+        # Must not have wiped state (which would intro-scramble col 0 away from N).
+        assert self.flip_board.turning_tile_count(now=1010.0) == 5
 
+    def test_set_direction_keeps_settled_glyphs(self):
+        self.flip_board._flap_text(0, "SWA2210741A", 1000.0)
+        assert self.flip_board._flap_text(0, "SWA2210741A", 1005.0) == "SWA2210741A"
+        self.flip_board.set_direction(self.flip_board.DEPARTURES)
+        mid = self.flip_board._flap_text(0, "DAL4561500P", 1005.0)
+        # S→D starts on T (forward path), not a blank intro from empty state.
+        assert mid[0] == "T"
+        assert mid[:6].strip() != ""
 class HeadingDirectionTests(ScreenTestCase):
     def test_heading_names_both_directions(self):
         from display.round_touch.screens import flip_board

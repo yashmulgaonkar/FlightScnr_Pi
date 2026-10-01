@@ -294,8 +294,9 @@ class TestCountingTurningTiles:
     def test_run_duration_matches_the_last_flap(self):
         board = self._board()
         board._flap_text(0, "N24   ", now=1000.0)
-        # Three occupied columns: last starts at 0.10 and settles at 0.55.
-        assert board.flap_run_duration_s(now=1000.0) == pytest.approx(0.10 + 0.45)
+        # Three occupied columns; last starts at 0.10 and runs intro steps.
+        expected = 0.10 + board._FLAP_INTRO_STEPS / board._FLAP_RATE
+        assert board.flap_run_duration_s(now=1000.0) == pytest.approx(expected)
 
     def test_a_settled_board_has_no_run_duration(self):
         board = self._board()

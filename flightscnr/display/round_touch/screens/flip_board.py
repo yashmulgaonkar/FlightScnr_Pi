@@ -110,13 +110,20 @@ _direction = ARRIVALS
 # Split-flap animation. Characters settle left to right, rows top to bottom,
 # so opening the page reads like a real board catching up. The same mechanism
 # flips a single row when a new movement lands, which is what keeps it live.
+#
+# Each column walks forward through its alphabet from the previous glyph to
+# the new one (E→J shows F…J). Unchanged columns stay put. First paint from
+# a blank caps the intro length so a board open still finishes quickly.
 _FLAP_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+_FLAP_DIGIT_ALPHABET = "0123456789"
+_FLAP_MERIDIEM_ALPHABET = "AP"
 _FLAP_SETTLE_S = 0.45
 _FLAP_COL_STAGGER_S = 0.05
 _FLAP_ROW_STAGGER_S = 0.08
 _FLAP_RATE = 22.0
+_FLAP_INTRO_STEPS = max(1, int(round(_FLAP_SETTLE_S * _FLAP_RATE)))
 
-# row index -> {"text": settled text, "started": monotonic start}
+# row index -> {"text", "from", "paths", "started"}
 # The airport code animates too, on its own row above the flight rows.
 _IDENT_FLAP_ROW = -1
 _flap_rows: dict[int, dict] = {}
@@ -149,24 +156,99 @@ def restart_animation(*, keep_ident: bool = False) -> None:
         _flap_rows[_IDENT_FLAP_ROW] = ident
 
 
-def _row_settled_at(row: int, columns: int) -> float:
+def _alphabet_for_column(col: int) -> str:
+    """Ident flaps use the full set; clock digits and A/P use tight sets."""
+    if col == ID_SLOTS + 4:
+        return _FLAP_MERIDIEM_ALPHABET
+    if ID_SLOTS <= col <= ID_SLOTS + 3:
+        return _FLAP_DIGIT_ALPHABET
+    return _FLAP_ALPHABET
+
+
+def _forward_path(old: str, new: str, alphabet: str) -> str:
+    """Glyphs shown while flipping ``old`` → ``new`` (``new`` last), or empty.
+
+    Walks forward through ``alphabet`` with wrap. Blank→char uses a capped
+    prefix ending on ``new`` so first paint stays near ``_FLAP_SETTLE_S``.
+    Char→blank snaps with no intermediate flaps.
+    """
+    old_ch = (old or " ")[:1]
+    new_ch = (new or " ")[:1]
+    if old_ch == new_ch:
+        return ""
+    if not new_ch.strip():
+        return ""
+    if new_ch not in alphabet:
+        return new_ch
+    end = alphabet.index(new_ch)
+    if not old_ch.strip() or old_ch not in alphabet:
+        full = alphabet[: end + 1]
+        if len(full) > _FLAP_INTRO_STEPS:
+            return full[-_FLAP_INTRO_STEPS:]
+        return full
+    start = alphabet.index(old_ch)
+    chars: list[str] = []
+    i = (start + 1) % len(alphabet)
+    while True:
+        chars.append(alphabet[i])
+        if i == end:
+            break
+        i = (i + 1) % len(alphabet)
+        if len(chars) > len(alphabet):
+            break
+    return "".join(chars)
+
+
+def _pad_row_text(text: str, width: int) -> str:
+    return (text or "").ljust(width)[:width]
+
+
+def _build_flap_entry(prev_text: str, target: str, started: float) -> dict:
+    width = len(target)
+    prev = _pad_row_text(prev_text, width)
+    paths = [
+        _forward_path(prev[col], target[col], _alphabet_for_column(col))
+        for col in range(width)
+    ]
+    return {"text": target, "from": prev, "paths": paths, "started": started}
+
+
+def _col_begin(entry: dict, row: int, col: int) -> float:
+    return float(entry["started"]) + _FLAP_ROW_STAGGER_S * row + _FLAP_COL_STAGGER_S * col
+
+
+def _col_path(entry: dict, col: int) -> str:
+    paths = entry.get("paths") or []
+    if col < len(paths):
+        return str(paths[col])
+    return ""
+
+
+def _col_settle_at(entry: dict, row: int, col: int) -> float:
+    begin = _col_begin(entry, row, col)
+    path = _col_path(entry, col)
+    if not path:
+        return begin
+    return begin + len(path) / _FLAP_RATE
+
+
+def _row_settled_at(row: int, columns: int | None = None) -> float:
     entry = _flap_rows.get(row)
     if not entry:
         return 0.0
-    last_col = max(0, columns - 1)
-    return (
-        entry["started"]
-        + _FLAP_ROW_STAGGER_S * row
-        + _FLAP_COL_STAGGER_S * last_col
-        + _FLAP_SETTLE_S
-    )
+    width = len(entry["text"])
+    if columns is not None:
+        width = max(width, int(columns))
+    if width <= 0:
+        return float(entry["started"]) + _FLAP_ROW_STAGGER_S * row
+    return max(_col_settle_at(entry, row, col) for col in range(width))
 
 
 def is_animating(now: float | None = None) -> bool:
     """True while any row is still turning, so the loop keeps painting."""
     now = time.time() if now is None else now
     for row, entry in _flap_rows.items():
-        if now < _row_settled_at(row, len(entry["text"])):
+        if now < _row_settled_at(row):
             return True
     return False
 
@@ -174,17 +256,18 @@ def is_animating(now: float | None = None) -> bool:
 def turning_tile_count(now: float | None = None) -> int:
     """How many tiles are mid-flip.
 
-    Blank slots never flap (see ``_flap_text``), so they are not counted —
+    Blank slots and unchanged columns never flap, so they are not counted —
     a mostly empty board should look sparse, not full.
     """
     now = time.time() if now is None else now
     count = 0
     for row, entry in _flap_rows.items():
-        started = entry["started"] + _FLAP_ROW_STAGGER_S * row
         for col, char in enumerate(entry["text"]):
-            if not char.strip():
+            if not str(char).strip():
                 continue
-            if now < started + _FLAP_COL_STAGGER_S * col + _FLAP_SETTLE_S:
+            if not _col_path(entry, col):
+                continue
+            if now < _col_settle_at(entry, row, col):
                 count += 1
     return count
 
@@ -192,18 +275,20 @@ def turning_tile_count(now: float | None = None) -> int:
 def flap_click_offsets(now: float | None = None) -> list[float]:
     """Seconds from the first remaining flap until each unfinished tile starts.
 
-    Blank slots and tiles that have already settled are omitted, so a kept
-    airport code does not add extra clicks on a direction change.
+    Blank slots, unchanged columns, and tiles that have already settled are
+    omitted, so a kept airport code does not add extra clicks on a direction
+    change.
     """
     now = time.time() if now is None else now
     starts: list[float] = []
     for row, entry in _flap_rows.items():
-        row_t0 = float(entry["started"]) + _FLAP_ROW_STAGGER_S * row
         for col, char in enumerate(entry["text"]):
             if not str(char).strip():
                 continue
-            begin = row_t0 + _FLAP_COL_STAGGER_S * col
-            if now >= begin + _FLAP_SETTLE_S:
+            if not _col_path(entry, col):
+                continue
+            begin = _col_begin(entry, row, col)
+            if now >= _col_settle_at(entry, row, col):
                 continue
             starts.append(begin)
     if not starts:
@@ -218,11 +303,12 @@ def flap_run_duration_s(now: float | None = None) -> float:
     last = 0.0
     any_tile = False
     for row, entry in _flap_rows.items():
-        row_t0 = float(entry["started"]) + _FLAP_ROW_STAGGER_S * row
         for col, char in enumerate(entry["text"]):
             if not str(char).strip():
                 continue
-            settle_at = row_t0 + _FLAP_COL_STAGGER_S * col + _FLAP_SETTLE_S
+            if not _col_path(entry, col):
+                continue
+            settle_at = _col_settle_at(entry, row, col)
             if now >= settle_at:
                 continue
             any_tile = True
@@ -233,22 +319,30 @@ def flap_run_duration_s(now: float | None = None) -> float:
 def _flap_text(row: int, target: str, now: float) -> str:
     """The characters to show for ``target`` right now.
 
-    A slot that has not settled shows a passing flap. Blanks stay blank —
-    scrambling empty rows would turn a quiet field into noise.
+    Each column walks the required alphabet path from its previous glyph to
+    the new one. Blanks stay blank — empty slots do not invent flaps.
     """
     entry = _flap_rows.get(row)
     if entry is None or entry["text"] != target:
-        entry = {"text": target, "started": now}
+        prev = "" if entry is None else str(entry.get("text") or "")
+        entry = _build_flap_entry(prev, target, now)
         _flap_rows[row] = entry
-    started = entry["started"] + _FLAP_ROW_STAGGER_S * row
-    out = []
+    prev = str(entry.get("from") or "")
+    out: list[str] = []
     for col, char in enumerate(target):
-        settle = started + _FLAP_COL_STAGGER_S * col + _FLAP_SETTLE_S
-        if now >= settle or not char.strip():
+        path = _col_path(entry, col)
+        if not char.strip() or not path:
             out.append(char)
             continue
-        step = int((now - started) * _FLAP_RATE + col * 3)
-        out.append(_FLAP_ALPHABET[step % len(_FLAP_ALPHABET)])
+        begin = _col_begin(entry, row, col)
+        if now < begin:
+            out.append(prev[col] if col < len(prev) else char)
+            continue
+        step = int((now - begin) * _FLAP_RATE)
+        if step >= len(path):
+            out.append(char)
+            continue
+        out.append(path[step])
     return "".join(out)
 
 
@@ -310,7 +404,9 @@ def set_direction(value: str) -> str:
     wanted = str(value or "").strip().lower()
     if wanted in (ARRIVALS, DEPARTURES) and wanted != _direction:
         _direction = wanted
-        restart_animation(keep_ident=True)
+        # Keep current glyphs so each column walks only the required path
+        # to the other board's text (no full blank→intro scramble).
+        flap_sound.reset()
     return _direction
 
 
@@ -318,7 +414,7 @@ def toggle_direction() -> str:
     """Flip the board between arrivals and departures."""
     global _direction
     _direction = DEPARTURES if _direction == ARRIVALS else ARRIVALS
-    restart_animation(keep_ident=True)
+    flap_sound.reset()
     return _direction
 
 
