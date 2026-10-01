@@ -968,5 +968,12 @@
   "portal.radar.text_dark_color.hint": "A repülőgépek radarcímkéjén a felső azonosítósor (járatszám / hívójel) színe sötét alaptérképeken.",
   "portal.radar.text_light_color.label": "Járatszám színe világos térképen",
   "portal.radar.text_light_color.hint": "Ugyanez az azonosítósor világos / VFR / utcai alaptérképeken. A típus- és magasságsorok változatlanok.",
-  "portal.radar.aircraft_id.alternate": "Váltakozó"
+  "portal.radar.aircraft_id.alternate": "Váltakozó",
+  "power.title": "Be/Ki",
+  "power.screen_off": "Képernyő kikapcsolása",
+  "power.screen_off.hint": "Háttérvilágítás ki, koppints az ébresztéshez",
+  "power.close_hint": "Koppints mellé a bezáráshoz",
+  "power.reboot": "Újraindítás",
+  "power.shutdown": "Leállítás",
+  "power.restart": "App újraindítása"
 }
