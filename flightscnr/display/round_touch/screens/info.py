@@ -272,6 +272,13 @@ _SYSTEM_BTN_FILL = (8, 36, 16)
 _SYSTEM_BTN_BORDER = (48, 160, 72)
 _SYSTEM_BTN_DANGER_FILL = (48, 18, 14)
 _SYSTEM_BTN_DANGER_BORDER = (180, 64, 48)
+# Icon accents aligned with the on-device power menu.
+_SYSTEM_ICON_COLOR = {
+    "wifi_setup": (0x42, 0xAC, 0xF4),
+    "restart": (150, 162, 173),
+    "reboot": (232, 176, 74),
+    "shutdown": (233, 96, 82),
+}
 _system_buttons: list[tuple[str, pygame.Rect]] = []
 _system_confirm_buttons: list[tuple[str, pygame.Rect]] = []
 
@@ -1566,17 +1573,28 @@ def _system_button_label(action: str) -> str:
     return action
 
 
-def _draw_system_button(surface, y: int, action: str) -> pygame.Rect:
+def _draw_system_button(
+    surface, y: int, action: str, *, btn_w: int | None = None
+) -> pygame.Rect:
+    """Draw one System row with a shared icon column + left-aligned labels."""
+    from display.round_touch import power_menu
+
     label = _system_button_label(action)
     font = draw.load_font(theme.s(13), bold=True)
     text_w, text_h = font.size(label)
-    pad_x = theme.s(14)
+    pad_x = theme.s(18)
     pad_y = theme.s(10)
     btn_h = text_h + pad_y * 2
+    icon_size = theme.s(22)
+    icon_gap = theme.s(12)
     half = draw.circle_half_width_at_row(y, btn_h)
-    btn_w = min(theme.s(240), max(theme.s(140), half * 2 - theme.s(20)))
-    btn_w = max(btn_w, text_w + pad_x * 2)
-    btn_w = min(btn_w, max(theme.s(120), half * 2 - theme.s(16)))
+    max_w = max(theme.s(120), half * 2 - theme.s(16))
+    needed = pad_x * 2 + icon_size + icon_gap + text_w
+    if btn_w is None:
+        btn_w = min(theme.s(260), max(theme.s(160), needed))
+        btn_w = min(btn_w, max_w)
+    else:
+        btn_w = min(int(btn_w), max_w)
     rect = pygame.Rect(theme.CENTER_X - btn_w // 2, y, btn_w, btn_h)
     danger = action in ("reboot", "shutdown")
     if danger:
@@ -1590,8 +1608,13 @@ def _draw_system_button(surface, y: int, action: str) -> pygame.Rect:
     pygame.draw.rect(
         surface, border, rect, width=max(1, theme.s(2)), border_radius=radius
     )
+
+    icon_cx = rect.left + pad_x + icon_size // 2
+    label_x = rect.left + pad_x + icon_size + icon_gap
+    icon_color = _SYSTEM_ICON_COLOR.get(action, border)
+    power_menu.blit_glyph(surface, action, icon_cx, rect.centery, icon_size, icon_color)
     rendered = font.render(label, True, theme.LABEL)
-    surface.blit(rendered, rendered.get_rect(center=rect.center))
+    surface.blit(rendered, rendered.get_rect(midleft=(label_x, rect.centery)))
     return rect
 
 
@@ -1601,10 +1624,19 @@ def _draw_system_page(surface, top: int, bottom: int) -> int:
     _system_buttons = []
     y = top + theme.s(14)
     gap = theme.s(12)
+    font = draw.load_font(theme.s(13), bold=True)
+    pad_x = theme.s(18)
+    icon_size = theme.s(22)
+    icon_gap = theme.s(12)
+    # One shared button width so icon centers and label starts line up.
+    needed = pad_x * 2 + icon_size + icon_gap + max(
+        font.size(_system_button_label(a))[0] for a in SYSTEM_ACTIONS
+    )
+    btn_w = min(theme.s(260), max(theme.s(160), needed))
     for action in SYSTEM_ACTIONS:
         if y > bottom:
             break
-        rect = _draw_system_button(surface, int(y), action)
+        rect = _draw_system_button(surface, int(y), action, btn_w=btn_w)
         _system_buttons.append((action, rect.copy()))
         y += rect.height + gap
     return 0

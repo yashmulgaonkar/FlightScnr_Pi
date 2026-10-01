@@ -18,14 +18,17 @@ live in ``utilities.system_control`` and are invoked by the app. Screen off is
 a manual backlight-off state cleared on the next touch.
 
 Style: a frosted, dimmed copy of the live screen, a letter-spaced POWER header,
-and separate rounded row cards. Each row carries a circular icon badge tinted
-by its semantic (blue = safe/default, amber = caution, red = destructive,
-grey = low emphasis); the default row is highlighted with a blue border.
+and separate rounded row cards. Each row carries a tinted glyph (accent tracks
+theme; amber for reboot, red for shut down, grey for restart); the default row
+is highlighted with an accent border.
+
+Row glyphs load from ``assets/power/{token}.png`` (white + alpha), stroke-matched
+across the set, and are tinted to the row accent at draw time.
 """
 
 from __future__ import annotations
 
-import math
+import os
 
 import pygame
 
@@ -50,6 +53,19 @@ _TEXT_PRIMARY = (238, 244, 240)
 _TEXT_SECONDARY = (152, 168, 158)
 _TEXT_HINT = (118, 138, 124)
 
+_ASSETS_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "assets", "power")
+)
+# token -> filename stem under assets/power/
+_ICON_FILES = {
+    "screen_off": "screen_off",
+    "reboot": "reboot",
+    "shutdown": "shutdown",
+    "restart": "restart",
+    "wifi_setup": "wifi_setup",
+}
+_icon_cache: dict[tuple[str, int], pygame.Surface] = {}
+
 
 def _brand() -> tuple[int, int, int]:
     """The device accent (theme.SWEEP), so the menu matches the other screens."""
@@ -63,9 +79,9 @@ def _resolve(accent):
 # (token, label key, hint key or None, accent, selected)
 _MENU_ROWS = (
     ("screen_off", "power.screen_off", "power.screen_off.hint", "brand", True),
+    ("restart", "power.restart", None, _GREY, False),
     ("reboot", "power.reboot", None, _AMBER, False),
     ("shutdown", "power.shutdown", None, _RED, False),
-    ("restart", "power.restart", None, _GREY, False),
 )
 
 # action -> (confirm title key, detail key, confirm button label key, accent)
@@ -120,8 +136,75 @@ def _letter_spaced(font, text, color, spacing):
     return out
 
 
+def _crop_alpha(surf: pygame.Surface) -> pygame.Surface:
+    try:
+        rect = surf.get_bounding_rect(min_alpha=8)
+    except (TypeError, AttributeError, ValueError):
+        return surf
+    if rect.w <= 0 or rect.h <= 0:
+        return surf
+    side = max(rect.w, rect.h)
+    square = pygame.Surface((side, side), pygame.SRCALPHA)
+    square.blit(surf, ((side - rect.w) // 2, (side - rect.h) // 2), rect)
+    return square
+
+
+def _load_glyph(token: str, size: int) -> pygame.Surface | None:
+    """Load a white+alpha power glyph, scaled to ``size`` (cached)."""
+    stem = _ICON_FILES.get(token)
+    if not stem or size <= 0:
+        return None
+    key = (stem, int(size))
+    cached = _icon_cache.get(key)
+    if cached is not None:
+        return cached
+    path = os.path.join(_ASSETS_DIR, f"{stem}.png")
+    if not os.path.isfile(path):
+        return None
+    try:
+        raw = pygame.image.load(path)
+        try:
+            raw = raw.convert_alpha()
+        except pygame.error:
+            pass
+        raw = _crop_alpha(raw)
+        icon = pygame.transform.smoothscale(raw, (int(size), int(size)))
+        _icon_cache[key] = icon
+        return icon
+    except pygame.error:
+        return None
+
+
+def blit_glyph(surface, token: str, cx: int, cy: int, size: int, color) -> bool:
+    """Tint a white+alpha power glyph to ``color`` and blit centered.
+
+    Public for the System settings page (same assets as the power menu).
+    Returns True on success.
+    """
+    return _blit_glyph(surface, token, cx, cy, size, color)
+
+
+def _blit_glyph(surface, token: str, cx: int, cy: int, size: int, color) -> bool:
+    """Tint a white+alpha glyph to ``color`` and blit centered. Returns True on success."""
+    glyph = _load_glyph(token, size)
+    if glyph is None:
+        return False
+    tinted = glyph.copy()
+    rgb = tuple(int(c) for c in color[:3])
+    try:
+        pixels = pygame.surfarray.pixels3d(tinted)
+        pixels[:, :, 0] = rgb[0]
+        pixels[:, :, 1] = rgb[1]
+        pixels[:, :, 2] = rgb[2]
+        del pixels
+    except pygame.error:
+        return False
+    surface.blit(tinted, tinted.get_rect(center=(cx, cy)))
+    return True
+
+
 def _draw_power_symbol(surface, cx: int, cy: int, r: int, color, width: int) -> None:
-    """IEC power glyph: a ring with a vertical bar breaking its top."""
+    """Fallback IEC power glyph when the PNG asset is missing."""
     pygame.draw.circle(surface, color, (cx, cy), int(r * 0.62), width)
     pygame.draw.line(
         surface, color,
@@ -129,37 +212,13 @@ def _draw_power_symbol(surface, cx: int, cy: int, r: int, color, width: int) -> 
     )
 
 
-def _circular_arrow(surface, cx, cy, r, color, width):
-    pygame.draw.arc(surface, color, pygame.Rect(cx - r, cy - r, 2 * r, 2 * r),
-                    math.radians(105), math.radians(65), width)
-    a = math.radians(105)
-    tx, ty = cx + r * math.cos(a), cy - r * math.sin(a)
-    ah = max(theme.s(3), width + theme.s(1))
-    pygame.draw.polygon(surface, color, [
-        (tx - ah, ty - ah * 0.2), (tx + ah * 0.4, ty - ah), (tx + ah, ty + ah * 0.5),
-    ])
-
-
-def _crescent(size, color):
-    s = pygame.Surface((size, size), pygame.SRCALPHA)
-    c = size // 2
-    pygame.draw.circle(s, color, (c, c), int(size * 0.30))
-    er = pygame.Surface((size, size), pygame.SRCALPHA)
-    pygame.draw.circle(er, (255, 255, 255, 255),
-                       (c + int(size * 0.14), c - int(size * 0.10)), int(size * 0.28))
-    s.blit(er, (0, 0), special_flags=pygame.BLEND_RGBA_SUB)
-    return s
-
-
 def _row_icon(surface, token: str, cx: int, cy: int, color) -> None:
+    size = theme.s(22)
+    if _blit_glyph(surface, token, cx, cy, size, color):
+        return
+    # Procedural fallback if assets are absent (tests / incomplete checkout).
     w = max(2, theme.s(1.5))
-    if token == "screen_off":
-        cell = theme.s(20)
-        surface.blit(_crescent(cell, color), (cx - cell // 2, cy - cell // 2))
-    elif token == "shutdown":
-        _draw_power_symbol(surface, cx, cy, theme.s(11), color, w)
-    else:  # reboot / restart: circular arrow
-        _circular_arrow(surface, cx, cy, theme.s(6), color, w)
+    _draw_power_symbol(surface, cx, cy, theme.s(11), color, w)
 
 
 def _draw_card(surface, rect, radius) -> None:
@@ -179,9 +238,11 @@ _icon_rect = pygame.Rect(0, 0, 0, 0)
 def draw_icon(surface, cx: int, cy: int) -> None:
     """Small muted power glyph in a footer slot (clock and About screen)."""
     global _icon_rect
-    r = theme.s(14)
-    _draw_power_symbol(surface, cx, cy, r, theme.HINT, max(2, theme.s(2)))
-    hit = r * 2 + theme.s(16)
+    size = theme.s(22)
+    if not _blit_glyph(surface, "shutdown", cx, cy, size, theme.HINT):
+        r = theme.s(14)
+        _draw_power_symbol(surface, cx, cy, r, theme.HINT, max(2, theme.s(2)))
+    hit = size + theme.s(16)
     _icon_rect = pygame.Rect(0, 0, hit, hit)
     _icon_rect.center = (cx, cy)
 
@@ -225,7 +286,10 @@ def draw_menu(surface) -> None:
     group_w = glyph_cell + theme.s(8) + caption.get_width()
     gx = cx - group_w // 2
     hcy = top + header_h // 2
-    _draw_power_symbol(surface, gx + glyph_cell // 2, hcy, theme.s(9), brand, max(2, theme.s(2)))
+    if not _blit_glyph(surface, "shutdown", gx + glyph_cell // 2, hcy, glyph_cell, brand):
+        _draw_power_symbol(
+            surface, gx + glyph_cell // 2, hcy, theme.s(9), brand, max(2, theme.s(2))
+        )
     surface.blit(caption, caption.get_rect(midleft=(gx + glyph_cell + theme.s(8), hcy)))
 
     y = top + header_h + header_gap
@@ -238,13 +302,9 @@ def draw_menu(surface) -> None:
         _rrect(surface, row, (*brand, 30) if selected else _ROW_FILL, radius)
         _rrect(surface, row, (*brand, 230) if selected else _ROW_BORDER, radius,
                width=theme.s(2) if selected else max(1, theme.s(1)))
-        # circular icon badge
+        # Icon glyph only — no outer badge circle.
         bcx = row.left + theme.s(16) + badge_r
         bcy = row.centery
-        badge_fill = pygame.Surface((badge_r * 2, badge_r * 2), pygame.SRCALPHA)
-        pygame.draw.circle(badge_fill, (*accent, 26), (badge_r, badge_r), badge_r)
-        surface.blit(badge_fill, (bcx - badge_r, bcy - badge_r))
-        pygame.draw.circle(surface, accent, (bcx, bcy), badge_r, max(1, theme.s(1)))
         _row_icon(surface, token, bcx, bcy, accent)
         # label (+ subtitle)
         label_x = bcx + badge_r + theme.s(14)
