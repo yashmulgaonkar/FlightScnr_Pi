@@ -14,11 +14,42 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from utilities.airline_branding import (
     aircraft_tag_identity,
+    airline_icao_from_callsign,
     display_flight_id,
     prefer_marketing_flight_id,
     raw_callsign_for_flight,
     resolve_logo_icao,
 )
+
+
+def test_tactical_callsign_not_airline_icao():
+    assert airline_icao_from_callsign("SHADO65") == ""
+    assert airline_icao_from_callsign("KNIFE1") == ""
+    assert airline_icao_from_callsign("EVAC1") == ""
+    assert airline_icao_from_callsign("UAL123") == "UAL"
+    assert airline_icao_from_callsign("SHA123") == "SHA"
+
+
+def test_shado_does_not_resolve_to_sharp_airlines():
+    assert resolve_logo_icao(
+        operator_icao="SHA",
+        flight_number="",
+        callsign="SHADO65",
+    ) == "default"
+    assert resolve_logo_icao(
+        operator_icao="",
+        flight_number="",
+        callsign="SHADO65",
+    ) == "default"
+    assert display_flight_id(callsign="SHADO65") == "SHADO65"
+
+
+def test_real_sharp_airlines_callsign_still_resolves():
+    assert resolve_logo_icao(
+        operator_icao="SHA",
+        flight_number="",
+        callsign="SHA123",
+    ) == "SHA"
 
 
 def test_skywest_united_flight_number():

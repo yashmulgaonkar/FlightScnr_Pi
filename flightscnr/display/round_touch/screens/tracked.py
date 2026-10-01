@@ -927,8 +927,17 @@ def _draw_stats_rows_at(
 
 
 def _flight_display_name(data: dict) -> str:
-    airline_name = data.get("airline_name", "") or data.get("airline", "")
     display_id = display_flight_id_for_flight(data)
+    try:
+        from utilities.aircraft_alert import is_military
+
+        if is_military(data):
+            # Military: show callsign only — never "Sharp Airlines 65".
+            cs = (data.get("callsign") or "").strip()
+            return cs or display_id
+    except ImportError:
+        pass
+    airline_name = data.get("airline_name", "") or data.get("airline", "")
     flight_num = "".join(ch for ch in display_id if ch.isnumeric())
     return f"{airline_name} {flight_num}".strip() if airline_name else display_id
 

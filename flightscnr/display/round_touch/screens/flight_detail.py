@@ -206,8 +206,19 @@ def _flight_rows(
     *,
     chrome_top: int,
 ) -> list[tuple[str, object, tuple]]:
-    callsign = display_flight_id_for_flight(f)
-    airline = f.get("airline") or tr("flight.airline_unknown")
+    try:
+        from utilities.aircraft_alert import is_military
+
+        military = is_military(f)
+    except ImportError:
+        military = False
+
+    if military:
+        callsign = (f.get("callsign") or display_flight_id_for_flight(f) or "—").strip()
+        airline = ""
+    else:
+        callsign = display_flight_id_for_flight(f)
+        airline = f.get("airline") or tr("flight.airline_unknown")
     origin = f.get("origin") or "—"
     dest = f.get("destination") or "—"
     plane_type = format_aircraft_type(f.get("plane") or "")
@@ -230,11 +241,12 @@ def _flight_rows(
         dist_line = common.format_local_distance(geo.local_offset_km(lat, lon)[2])
 
     has_photo = bool((f.get("photo_path") or "").strip())
-    show_logo = bool(SHOW_AIRLINE_LOGOS) and not has_photo
+    show_logo = bool(SHOW_AIRLINE_LOGOS) and not has_photo and not military
     rows: list[tuple[str, object, tuple]] = [
         (callsign, title_font, theme.LABEL),
-        (airline, body_font, theme.MUTED),
     ]
+    if airline:
+        rows.append((airline, body_font, theme.MUTED))
     if has_photo:
         route_y = chrome_top + theme.s(118)
     elif show_logo:

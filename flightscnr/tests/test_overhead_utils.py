@@ -544,3 +544,54 @@ class TestZoneFeedEnrichment:
         assert entry["plane"] == "B789"
         assert entry["origin"] == "SFO"
         assert entry["destination"] == "TPE"
+
+    def test_shado_callsign_does_not_become_sharp_airlines(self):
+        from utilities.fr24_client import LiveFlight
+        from utilities.overhead import _enrich_entry_from_zone_feed
+
+        lf = LiveFlight(
+            flight_id="mil1",
+            latitude=37.5,
+            longitude=-122.0,
+            altitude=28000,
+            ground_speed=420,
+            heading=90,
+            vertical_speed=0,
+            callsign="SHADO65",
+            registration="",
+            origin_airport_iata="",
+            destination_airport_iata="",
+            airline_icao="",  # corrected derivation leaves this empty
+            airline_iata="",
+            aircraft_code="K35R",
+            on_ground=False,
+            eta=0,
+        )
+        entry = {
+            "callsign": "SHADO65",
+            "plane": "K35R",
+            "db_flags": 1,
+            "plane_latitude": 37.5,
+            "plane_longitude": -122.0,
+            "data_source": "adsb_fi",
+        }
+        _enrich_entry_from_zone_feed(entry, lf)
+        assert entry.get("airline") in ("", None)
+        assert "Sharp" not in (entry.get("airline") or "")
+        assert entry.get("callsign") == "SHADO65"
+
+    def test_military_identity_clears_false_airline(self):
+        from utilities.overhead import _apply_military_identity
+
+        entry = {
+            "callsign": "SHADO65",
+            "airline": "Sharp Airlines",
+            "airline_icao": "SHA",
+            "owner_icao": "SHA",
+            "db_flags": 1,
+        }
+        _apply_military_identity(entry)
+        assert entry["airline"] == ""
+        assert entry["airline_icao"] == ""
+        assert entry["owner_icao"] == ""
+        assert entry["callsign"] == "SHADO65"

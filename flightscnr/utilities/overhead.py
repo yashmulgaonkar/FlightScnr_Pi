@@ -21,6 +21,7 @@ from utilities.airline_branding import (
     AMBIGUOUS_REGIONALS,
     IATA_TO_ICAO,
     MARKETING_BRANDS,
+    airline_icao_from_callsign,
     marketing_brand_name,
     prefer_marketing_flight_id,
     resolve_logo_icao,
@@ -368,6 +369,28 @@ def _airline_name_lookup(icao_code):
     return ""
 
 
+def _apply_military_identity(entry: dict) -> None:
+    """Military flights show the callsign — never a commercial airline name match."""
+    try:
+        from utilities.aircraft_alert import is_military
+    except ImportError:
+        return
+    if not is_military(entry):
+        return
+    callsign = (entry.get("callsign") or entry.get("registration") or "").strip()
+    entry["airline"] = ""
+    if "airline_name" in entry:
+        entry["airline_name"] = ""
+    # Only keep airline ICAO when the callsign itself is airline-form (UAL123).
+    if not airline_icao_from_callsign(callsign):
+        entry["airline_icao"] = ""
+        owner = (entry.get("owner_icao") or "").strip().upper()
+        if owner not in ("HELI", "GA", ""):
+            entry["owner_icao"] = ""
+    if callsign:
+        entry["callsign"] = callsign
+
+
 def _index_zone_flights_by_callsign(flights: list) -> dict[str, LiveFlight]:
     """Map callsign aliases to the closest FR24 live-feed flight in the zone."""
     from utilities.aircraft_alert import callsign_match_keys
@@ -445,17 +468,25 @@ def _enrich_entry_from_zone_feed(entry: dict, lf: LiveFlight, stats: dict | None
         enriched = True
 
     if not (entry.get("airline") or "").strip():
-        brand = marketing_brand_name(flight_number) or marketing_brand_name(callsign)
-        if brand:
-            entry["airline"] = brand
-            enriched = True
-        elif airline_icao:
-            local = _airline_name_lookup(airline_icao)
-            if local:
-                entry["airline"] = local
+        try:
+            from utilities.aircraft_alert import is_military as _is_mil
+            military = _is_mil(entry)
+        except ImportError:
+            military = False
+        if not military:
+            brand = marketing_brand_name(flight_number) or marketing_brand_name(callsign)
+            if brand:
+                entry["airline"] = brand
                 enriched = True
-                if stats is not None:
-                    stats["airline_lookups"] = stats.get("airline_lookups", 0) + 1
+            elif airline_icao:
+                local = _airline_name_lookup(airline_icao)
+                if local:
+                    entry["airline"] = local
+                    enriched = True
+                    if stats is not None:
+                        stats["airline_lookups"] = stats.get("airline_lookups", 0) + 1
+
+    _apply_military_identity(entry)
 
     if origin:
         coords = _airport_coords(origin)
@@ -1288,6 +1319,7 @@ class Overhead:
                             # Required for FR24↔ADS-B 15 km lag merge in aircraft_alert.
                             "data_source": "fr24_grpc",
                         }
+                        _apply_military_identity(entry)
 
                         overhead_data.append(entry)
                         stats["flights_processed"] += 1
@@ -1632,6 +1664,8 @@ class Overhead:
                 apply_adsb_alert_fields(overhead_data, adsb_entries + dump_entries)
                 _t_dedupe = time()
                 overhead_data = dedupe_flights(overhead_data)
+                for _mil_entry in overhead_data:
+                    _apply_military_identity(_mil_entry)
                 try:
                     from display.round_touch import frame_debug
 
@@ -2060,7 +2094,7 @@ class Overhead:
                 )
                 icao_hex = str(raw_hex).strip().upper().replace("0X", "")
 
-            return {
+            tracked = {
                 "callsign": display_callsign,
                 "registration": registration,
                 "number": match.number or display_callsign,
@@ -2093,6 +2127,11 @@ class Overhead:
                 "time_real_departure": time_real_dep,
                 "time_estimated_arrival": time_est_arr,
             }
+            # Tracked payload uses plane for military type detection.
+            if aircraft_type and not tracked.get("plane"):
+                tracked["plane"] = aircraft_type
+            _apply_military_identity(tracked)
+            return tracked
 
         except Exception as e:
             logger.error(f"Failed to grab tracked flight: {e}")

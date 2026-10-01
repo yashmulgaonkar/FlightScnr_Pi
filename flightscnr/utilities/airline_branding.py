@@ -115,6 +115,21 @@ def _icao_prefix(flight_id: str) -> str | None:
     return None
 
 
+def airline_icao_from_callsign(callsign: str) -> str:
+    """Airline ICAO only for ICAO+digits callsigns (UAL123), not SHADO65."""
+    return _icao_prefix(callsign) or ""
+
+
+def _is_tactical_callsign(callsign: str) -> bool:
+    """True for word-style callsigns (SHADO65, KNIFE1) vs airline UAL123."""
+    cs = _normalize(callsign)
+    if len(cs) < 4 or not cs[:3].isalpha():
+        return False
+    # Airline form is exactly 3 letters then a digit. Extra leading letters
+    # before the digits mean a tactical / military word callsign.
+    return cs[3].isalpha()
+
+
 def _marketing_icao_from_flight_id(flight_id: str) -> str | None:
     iata = _iata_prefix(flight_id)
     if iata:
@@ -276,11 +291,13 @@ def resolve_logo_icao(
     if explicit and explicit not in AMBIGUOUS_REGIONALS and explicit != "N/A":
         return explicit
 
+    cs = _normalize(callsign)
     operator = _normalize(operator_icao)
+    # Drop false positives like SHA from SHADO65 (tactical / military words).
+    if operator and _is_tactical_callsign(cs) and cs.startswith(operator):
+        operator = ""
     if not operator:
-        cs = _normalize(callsign)
-        if len(cs) >= 3 and cs[:3].isalpha():
-            operator = cs[:3]
+        operator = airline_icao_from_callsign(cs)
 
     flight_num = _normalize(flight_number)
     if flight_num:
@@ -288,7 +305,6 @@ def resolve_logo_icao(
         if marketing:
             return marketing
 
-    cs = _normalize(callsign)
     if cs:
         marketing = _marketing_icao_from_flight_id(cs)
         if marketing:

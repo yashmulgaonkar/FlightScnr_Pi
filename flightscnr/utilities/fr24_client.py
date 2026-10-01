@@ -604,6 +604,19 @@ class FR24Client:
             if len(iata_flight) >= 3 and iata_flight[:2].isalpha() and iata_flight[2:3].isdigit():
                 airline_iata = iata_flight[:2]
 
+            # Only ICAO+digits (UAL123) — not tactical words like SHADO65 → SHA.
+            try:
+                from utilities.airline_branding import airline_icao_from_callsign
+                derived_airline_icao = airline_icao_from_callsign(callsign)
+            except ImportError:
+                derived_airline_icao = (
+                    callsign[:3]
+                    if callsign and len(callsign) >= 4
+                    and callsign[:3].isalpha()
+                    and callsign[3].isdigit()
+                    else ""
+                )
+
             lf = LiveFlight(
                 flight_id=f"{f.flightid:x}" if f.flightid else "",
                 latitude=f.lat,
@@ -616,7 +629,7 @@ class FR24Client:
                 registration=registration,
                 origin_airport_iata=origin_iata,
                 destination_airport_iata=destination_iata,
-                airline_icao=callsign[:3] if callsign and len(callsign) >= 3 and callsign[:3].isalpha() else "",
+                airline_icao=derived_airline_icao,
                 airline_iata=airline_iata,
                 aircraft_code=aircraft_type,
                 on_ground=f.on_ground,

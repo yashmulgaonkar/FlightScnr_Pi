@@ -13,7 +13,7 @@ Unit tests for local database modules (airports.py, airlines.py).
 Tests cover:
   - airports.py: coordinate lookup, IATA/ICAO handling, K-prefix stripping,
     cache loading, empty/missing code handling
-  - airlines.py: name lookup, override table, empty/missing code handling
+  - airlines.py: name lookup, active filter, override table, empty/missing code handling
 """
 
 import sys
@@ -344,22 +344,24 @@ class TestRunwaysModule:
 class TestAirlinesModule:
     """Tests for utilities/airlines.py."""
 
-    def _make_test_db(self, tmpdir):
-        """Create a small test airlines.json for testing."""
-        db = {
-            "AAL": "American Airlines",
-            "DAL": "Delta Air Lines",
-            "UAL": "United Airlines",
-            "BAW": "British Airways",
-            "ENY": "American Eagle",
-            "RPA": "United Express",
-            "SKW": "SkyWest Airlines",
-            "DLH": "Lufthansa",
-        }
+    def _make_test_db(self, tmpdir, airlines=None):
+        """Create a small versioned airlines.json for testing."""
+        import utilities.airlines as airlines_mod
+        if airlines is None:
+            airlines = {
+                "AAL": {"name": "American Airlines", "active": True},
+                "DAL": {"name": "Delta Air Lines", "active": True},
+                "UAL": {"name": "United Airlines", "active": True},
+                "BAW": {"name": "British Airways", "active": True},
+                "ENY": {"name": "American Eagle", "active": True},
+                "RPA": {"name": "United Express", "active": True},
+                "SKW": {"name": "SkyWest Airlines", "active": True},
+                "DLH": {"name": "Lufthansa", "active": True},
+            }
         cache_path = os.path.join(tmpdir, "airlines.json")
         with open(cache_path, "w") as f:
-            json.dump(db, f)
-        return cache_path, db
+            json.dump({"_version": airlines_mod.CACHE_VERSION, "airlines": airlines}, f)
+        return cache_path, airlines
 
     def test_get_airline_name_known(self):
         """Looking up a known airline returns the correct name."""
@@ -408,6 +410,70 @@ class TestAirlinesModule:
         import utilities.airlines as airlines_mod
         result = airlines_mod.get_airline_name(None)
         assert result == ""
+
+    def test_inactive_airline_name_hidden(self):
+        """Inactive cache entries must not surface as display names."""
+        import utilities.airlines as airlines_mod
+        tmpdir = tempfile.mkdtemp()
+        airlines = {
+            "AAA": {"name": "Ansett Australia", "active": False},
+            "AAL": {"name": "American Airlines", "active": True},
+        }
+        cache_path, _ = self._make_test_db(tmpdir, airlines=airlines)
+
+        with patch.object(airlines_mod, 'CACHE_FILE', cache_path):
+            airlines_mod._loaded = False
+            airlines_mod._db = {}
+            assert airlines_mod.get_airline_name("AAA") == ""
+            assert airlines_mod.is_airline_active("AAA") is False
+            assert airlines_mod.get_airline_name("AAL") == "American Airlines"
+            assert airlines_mod.is_airline_active("AAL") is True
+
+    def test_download_skips_inactive_airlines(self):
+        """Upstream inactive rows are not written into the active name cache."""
+        import utilities.airlines as airlines_mod
+        tmpdir = tempfile.mkdtemp()
+        cache_path = os.path.join(tmpdir, "airlines.json")
+        upstream = [
+            {
+                "name": "American Airlines",
+                "iata": "AA",
+                "icao": "AAL",
+                "active": "Y",
+            },
+            {
+                "name": "Ansett Australia",
+                "iata": "AN",
+                "icao": "AAA",
+                "active": "N",
+            },
+            {
+                "name": "Private flight",
+                "iata": "-",
+                "icao": "N/A",
+                "active": "Y",
+            },
+        ]
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = upstream
+        mock_resp.raise_for_status.return_value = None
+
+        with patch.object(airlines_mod, 'CACHE_FILE', cache_path), \
+             patch.object(airlines_mod.requests, 'get', return_value=mock_resp):
+            airlines_mod._loaded = False
+            airlines_mod._db = {}
+            db = airlines_mod._download_and_build()
+            assert "AAL" in db
+            assert db["AAL"]["active"] is True
+            assert db["AAL"]["name"] == "American Airlines"
+            assert "AA" in db
+            assert "AAA" not in db
+            assert "AN" not in db
+            with open(cache_path) as f:
+                raw = json.load(f)
+            assert raw["_version"] == airlines_mod.CACHE_VERSION
+            assert "AAA" not in raw["airlines"]
 
     def test_override_for_regionals(self):
         """Regional airline overrides return better display names."""
