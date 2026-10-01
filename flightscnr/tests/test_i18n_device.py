@@ -56,7 +56,7 @@ class I18nDeviceTests(unittest.TestCase):
             items = info.atc_picker_items("language")
         self.assertEqual(
             {item["id"] for item in items},
-            {"system", "en", "nl", "de", "fr", "es"},
+            {"system", "en", "nl", "de", "fr", "es", "hu"},
         )
         self.assertTrue(next(item for item in items if item["id"] == "nl")["selected"])
 
@@ -107,7 +107,7 @@ class I18nDeviceTests(unittest.TestCase):
         self.assertEqual(surface.get_size(), (720, 720))
         self.assertEqual(
             first_visible | last_visible,
-            {"system", "en", "nl", "de", "fr", "es"},
+            {"system", "en", "nl", "de", "fr", "es", "hu"},
         )
 
     def test_device_picker_applies_language_without_weather_fetch(self):
