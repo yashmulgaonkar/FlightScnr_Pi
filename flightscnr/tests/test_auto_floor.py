@@ -225,7 +225,8 @@ def test_auto_floor_probe_ignores_ais_vessels():
     result = d._auto_floor_probe_flights()
 
     assert result == aircraft
-    assert d._position_smoother.seen == aircraft
+    # Probe must not call the shared smoother (would disturb AIS vessel glide).
+    assert d._position_smoother.seen is None
     assert vessel not in result
 
 

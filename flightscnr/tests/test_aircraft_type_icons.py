@@ -43,6 +43,8 @@ class TestAircraftTypeIcons(unittest.TestCase):
         self.assertFalse(is_ground_vehicle(None))
 
     def test_stationary_c0_with_registration_not_flagged(self):
+        from display.round_touch.aircraft_type_icons import is_ground_vehicle
+
         # A stray registration on a C0 report must never be treated as a
         # ground target — real aircraft never report category set C anyway,
         # but this guards the "no type/registration" branch explicitly.
@@ -59,6 +61,8 @@ class TestAircraftTypeIcons(unittest.TestCase):
         )
 
     def test_stationary_c0_airborne_not_flagged(self):
+        from display.round_touch.aircraft_type_icons import is_ground_vehicle
+
         self.assertFalse(
             is_ground_vehicle(
                 {
