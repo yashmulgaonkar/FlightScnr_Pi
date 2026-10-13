@@ -76,6 +76,7 @@ def test_catalog_preview_uses_shared_validated_catalog_without_saving(portal):
         "de",
         "fr",
         "es",
+        "hu",
     }
     assert body["date_previews"]["eu"]
     assert settings.display_language() == "en"
@@ -305,11 +306,7 @@ def test_static_portal_copy_is_catalogued_or_a_technical_identifier(portal):
     client, _settings, _web_app, _tmp_path = portal
     html = client.get("/").get_data(as_text=True)
     english = client.get("/i18n/catalog.json?language=en").get_json()
-    sources = {
-        " ".join(value.split())
-        for key, value in english["messages"].items()
-        if key.startswith("portal.")
-    }
+    sources = set(english["source_keys"])
     allowed = {
         "FlightScnrPi", "R", "G", "B", "nm, kts", "mi, mph", "km, kph",
         "mi, kts", "km, kts", "LibreWXR", "RainViewer", "CAL FIRE",
@@ -354,3 +351,84 @@ def test_static_portal_copy_is_catalogued_or_a_technical_identifier(portal):
     parser = StaticCopyParser()
     parser.feed(html)
     assert parser.unmatched == []
+
+
+@pytest.mark.parametrize("language", ["en", "nl", "de", "fr", "es", "hu"])
+@pytest.mark.parametrize("path,key", [
+    ("/wifi", "portal.wifi.page_title"), ("/stats", "portal.stats.title"),
+    ("/stats/2026-10-12", "portal.stats.daily_title"),
+    ("/closest", "portal.maps.closest"), ("/farthest", "portal.maps.farthest"),
+])
+def test_secondary_pages_render_in_selected_language(portal, language, path, key):
+    from html import escape
+    from i18n import catalog_for
+
+    client, settings, _web_app, _tmp_path = portal
+    settings.set_display_language(language)
+    response = client.get(path)
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert f'<html lang="{language}">' in html
+    title = escape(catalog_for(language).translate(key))
+    assert f'<title data-i18n="{key}">{title}</title>' in html
+
+
+def test_captive_wifi_works_without_catalog_request(portal, monkeypatch):
+    client, settings, web_app, _tmp_path = portal
+    settings.set_display_language("fr")
+    monkeypatch.setattr(web_app, "_wifi_portal_active", lambda: True)
+    response = client.get("/wifi")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Connectez FlightScnr au Wi-Fi" in html
+    assert "const I18N_MESSAGES = " in html
+    assert 'fetch("/i18n/catalog.json' not in html
+
+
+def test_response_copy_uses_newly_selected_language(portal):
+    from i18n import catalog_for
+
+    client, _settings, _web_app, _tmp_path = portal
+    response = client.post("/display", json={"display_language": "fr"})
+    french = catalog_for("fr")
+    assert response.get_json()["message"] == french.translate("portal.response.display_saved")
+    response = client.post("/route/search", json={"origin": "SFO"})
+    assert response.status_code == 400
+    assert response.get_json()["error"] == french.translate("portal.response.route_required")
+
+
+def test_wifi_validation_uses_saved_language_preference(portal, monkeypatch):
+    from i18n import catalog_for
+    from utilities import wifi_setup
+
+    client, settings, _web_app, _tmp_path = portal
+    settings.set_display_language("hu")
+    monkeypatch.setattr(wifi_setup, "_SETTINGS_JSON_PATH", settings.SETTINGS_PATH)
+    response = client.post("/wifi/connect", json={"ssid": ""})
+    assert response.status_code == 400
+    assert response.get_json()["message"] == catalog_for("hu").translate("wifi.ssid_required")
+
+
+def test_maps_follow_language_switch_and_render_in_memory(portal, monkeypatch):
+    from web import map_generator
+
+    client, settings, web_app, _tmp_path = portal
+    entry = {
+        "callsign": "TEST123", "plane_latitude": 48.0, "plane_longitude": 2.0,
+        "origin": "CDG", "destination": "LHR", "plane": "A320",
+        "origin_latitude": 49.0, "origin_longitude": 2.5,
+        "destination_latitude": 51.0, "destination_longitude": -0.5,
+    }
+    monkeypatch.setattr(web_app, "load_json", lambda *args: [entry])
+    monkeypatch.setattr(map_generator, "LOCATION_HOME", [48.5, 2.0])
+    save = mock.Mock(side_effect=AssertionError("must render in memory"))
+    monkeypatch.setattr(map_generator.folium.Map, "save", save)
+    settings.set_display_language("fr")
+    for name in ("closest", "farthest"):
+        response = client.get(f"/maps/{name}.html")
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+        assert "<b>Horodatage:</b>" in html
+        assert "TEST123" in html and "A320" in html
+    settings.set_display_language("de")
+    assert "<b>Zeitstempel:</b>" in client.get("/maps/closest.html").get_data(as_text=True)

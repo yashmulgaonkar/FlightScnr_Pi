@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+from i18n import tr
 import os
 import subprocess
 import time
@@ -112,10 +113,18 @@ def _start_power_action(
         if progress_reason:
             clear_reboot_in_progress()
         logger.warning("Could not start %s: %s", action, exc)
-        return {"ok": False, "message": f"Could not {action}: {exc}"}
+        action_key = {
+            "reboot": "power.reboot",
+            "shutdown": "power.shutdown",
+            "restart": "power.restart",
+        }.get(action, "power.restart")
+        return {
+            "ok": False,
+            "message": tr("system.action_error", action=tr(action_key), error=exc),
+        }
 
     if message is None:
-        message = f"{action.capitalize()} scheduled. This device will go offline shortly."
+        message = tr(f"system.{action}_scheduled")
     return {"ok": True, "message": message}
 
 
@@ -139,5 +148,5 @@ def request_app_restart() -> dict:
     return _start_power_action(
         "restart",
         "systemctl restart flightscnr",
-        message="FlightScnr is restarting. The display and portal will reconnect shortly.",
+        message=tr("system.restart"),
     )

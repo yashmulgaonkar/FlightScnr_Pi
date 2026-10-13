@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+from i18n import tr
 import os
 import pwd
 import re
@@ -1192,19 +1193,19 @@ def check_for_update(*, force: bool = False) -> dict:
     elif local.get("commit") and remote.get("commit"):
         update_available = local["commit"] != remote["commit"]
 
-    message = "Up to date."
+    message = tr("updates.current")
     if not local.get("is_git_repo"):
         if remote_release:
-            message = "Up to date (install is not a git checkout — use install-pi.sh to update)."
+            message = tr("updates.current_manual")
         else:
-            message = "This install is not a git checkout — use install-pi.sh manually."
+            message = tr("updates.manual")
     elif not remote.get("commit") and not remote_release:
-        message = "Could not reach GitHub to check for updates."
+        message = tr("updates.github_unreachable")
     elif update_available:
         if remote_release and local_release:
-            message = f"Update available: {local_release} → {remote_release}"
+            message = tr("updates.available_versions", local=local_release, remote=remote_release)
         else:
-            message = "A newer version is available."
+            message = tr("updates.newer")
 
     running = update_running()
     resync_needed = install_resync_needed() and not running
@@ -1214,25 +1215,22 @@ def check_for_update(*, force: bool = False) -> dict:
         status = _read_status()
         status_msg = str(status.get("message") or "")
         if "re-sync" in status_msg.lower() or "Finishing install" in status_msg:
-            message = "Install re-sync in progress… Do not turn off."
+            message = tr("updates.resync_progress")
         elif "Repairing" in status_msg:
-            message = "Repairing update… Do not turn off."
+            message = tr("updates.repair_progress")
         else:
-            message = "Update in progress…"
+            message = tr("updates.progress")
     elif blocked and update_available:
         message = (
-            "Update is blocked by a local file permission glitch — "
-            "tap Repair & Update (or Update Now)."
+            tr("updates.blocked")
         )
     elif failed and update_available:
         message = (
-            "Last update failed — tap Repair & Update. "
-            "If that button is missing, this build is too old; see the hint below."
+            tr("updates.failed")
         )
     elif resync_needed and not update_available:
         message = (
-            "Install steps pending after the last update — finishing automatically "
-            "(or tap Finish install)."
+            tr("updates.install_pending")
         )
 
     result = {
@@ -1266,11 +1264,11 @@ def mark_update_finished(success: bool, message: str) -> None:
 
 def _spawn_portal_script(*, mode: str = "update", status_message: str) -> dict:
     if update_running():
-        return {"ok": False, "message": "An update is already running."}
+        return {"ok": False, "message": tr("updates.already_running")}
 
     script = update_script_path()
     if not os.path.isfile(script):
-        return {"ok": False, "message": f"Update script not found: {script}"}
+        return {"ok": False, "message": tr("updates.script_missing", path=script)}
 
     os.makedirs(DATA_DIR, exist_ok=True)
     _write_status("running", status_message)
@@ -1298,7 +1296,7 @@ def _spawn_portal_script(*, mode: str = "update", status_message: str) -> dict:
     except OSError as exc:
         log_fh.close()
         mark_update_finished(False, f"Could not start {mode}: {exc}")
-        return {"ok": False, "message": f"Could not start {mode}: {exc}"}
+        return {"ok": False, "message": tr("updates.start_error", mode=mode, error=exc)}
 
     return {"ok": True}
 
@@ -1306,7 +1304,7 @@ def _spawn_portal_script(*, mode: str = "update", status_message: str) -> dict:
 def start_update() -> dict:
     local = local_version_info()
     if not local.get("is_git_repo"):
-        return {"ok": False, "message": "This install is not a git repository."}
+        return {"ok": False, "message": tr("updates.not_repository")}
 
     # Clear install-induced mode dirt before portal-update runs git pull.
     # Without this, Update Now fails on devices where scripts/release.sh lost +x.
@@ -1325,7 +1323,7 @@ def start_update() -> dict:
     _write_notify(state)
     return {
         "ok": True,
-        "message": "Update started. The display will restart shortly.",
+        "message": tr("updates.started_restart"),
         "cleared_pull_blockers": cleared,
     }
 
@@ -1333,10 +1331,10 @@ def start_update() -> dict:
 def start_ota_repair() -> dict:
     """Clear known pull blockers and start a normal update (portal Repair button)."""
     if update_running():
-        return {"ok": False, "message": "An update is already running."}
+        return {"ok": False, "message": tr("updates.already_running")}
     local = local_version_info()
     if not local.get("is_git_repo"):
-        return {"ok": False, "message": "This install is not a git repository."}
+        return {"ok": False, "message": tr("updates.not_repository")}
     cleared = clear_pull_blockers()
     result = _spawn_portal_script(
         mode="update",
@@ -1346,7 +1344,7 @@ def start_ota_repair() -> dict:
         return result
     return {
         "ok": True,
-        "message": "Repair started. The display will restart shortly.",
+        "message": tr("updates.repair_restart"),
         "cleared_pull_blockers": cleared,
     }
 
@@ -1354,11 +1352,11 @@ def start_ota_repair() -> dict:
 def start_factory_reset() -> dict:
     """Wipe checkout + data/env, re-clone from GitHub, reinstall, reboot."""
     if update_running():
-        return {"ok": False, "message": "An update is already running."}
+        return {"ok": False, "message": tr("updates.already_running")}
 
     script = factory_reset_script_path()
     if not os.path.isfile(script):
-        return {"ok": False, "message": f"Factory reset script not found: {script}"}
+        return {"ok": False, "message": tr("updates.reset_missing", path=script)}
 
     os.makedirs(DATA_DIR, exist_ok=True)
     _write_status("running", "Factory reset started. Do not turn off.")
@@ -1394,13 +1392,12 @@ def start_factory_reset() -> dict:
     except OSError as exc:
         log_fh.close()
         mark_update_finished(False, f"Could not start factory reset: {exc}")
-        return {"ok": False, "message": f"Could not start factory reset: {exc}"}
+        return {"ok": False, "message": tr("updates.reset_error", error=exc)}
 
     return {
         "ok": True,
         "message": (
-            "Clean install started. This page will go offline; "
-            "wait several minutes for the Pi to reinstall and reboot."
+            tr("updates.reset_started")
         ),
     }
 
@@ -1408,7 +1405,7 @@ def start_factory_reset() -> dict:
 def start_install_resync(*, auto: bool = False) -> dict:
     """Re-run install-pi.sh install --skip-apt (no git pull)."""
     if not install_resync_needed():
-        return {"ok": False, "message": "Install is already in sync."}
+        return {"ok": False, "message": tr("updates.already_synced")}
 
     result = _spawn_portal_script(
         mode="resync",
@@ -1418,7 +1415,7 @@ def start_install_resync(*, auto: bool = False) -> dict:
         return result
     return {
         "ok": True,
-        "message": "Install re-sync started. The display will restart shortly.",
+        "message": tr("updates.resync_restart"),
         "auto": auto,
     }
 

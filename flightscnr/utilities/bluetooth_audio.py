@@ -18,6 +18,7 @@ display only exposes status + quick reconnect.
 from __future__ import annotations
 
 import logging
+from i18n import tr
 import os
 import re
 import shutil
@@ -232,7 +233,7 @@ def _ensure_bluetooth_service() -> None:
 def ensure_adapter_powered() -> bool:
     """Power on the Bluetooth adapter when possible."""
     if not available():
-        _set_error("bluetoothctl not installed (sudo apt install bluez)")
+        _set_error(tr("audio.error.bluez_missing"))
         return False
     # Fresh Pi OS images often soft-block BT (rfkill) or leave bluetoothd down;
     # ``power on`` alone fails with "Adapter off" until those are cleared.
@@ -259,7 +260,7 @@ def ensure_adapter_powered() -> bool:
     text = (info.stdout or "") + (info.stderr or "")
     ok = "Powered: yes" in text
     if not ok:
-        _set_error("Bluetooth adapter is not powered on")
+        _set_error(tr("audio.error.adapter_off"))
     return ok
 
 
@@ -570,7 +571,7 @@ def scan(*, timeout: float = _SCAN_DEFAULT_S) -> list[dict]:
     BlueZ has time to resolve friendly names (otherwise many entries are MAC-only).
     """
     if not available():
-        _set_error("bluetoothctl not installed (sudo apt install bluez)")
+        _set_error(tr("audio.error.bluez_missing"))
         return list_known_devices()
     if not ensure_adapter_powered():
         return list_known_devices()
@@ -948,11 +949,11 @@ def use_usb_output(*, disconnect_bluetooth: bool = True) -> dict:
         _bluetoothctl("disconnect", preferred_mac(), timeout=15.0)
     sink = ensure_usb_pulse_sink()
     if sink is None:
-        _set_error("No USB / local audio sink found")
+        _set_error(tr("audio.error.no_local_sink"))
         _notify_speaker_change(connected=False)
         return status()
     if not _set_default_sink(sink):
-        _set_error("Could not set USB / local audio as default")
+        _set_error(tr("audio.error.local_default"))
         return status()
     _move_streams_to_sink(sink)
     try:
@@ -971,7 +972,7 @@ def apply_audio_route(route: str | None = None) -> dict:
     value = str(route or audio_route() or "usb").strip().lower()
     if value == "bluetooth":
         if not preferred_mac():
-            _set_error("No paired Bluetooth speaker — pair one on the web portal")
+            _set_error(tr("audio.error.no_paired"))
             set_audio_route("usb")
             return status()
         set_audio_route("bluetooth")
@@ -1015,10 +1016,10 @@ def connect(mac: str, *, pair_if_needed: bool = False) -> dict:
     with _action_lock:
         mac = _normalize_mac(mac)
         if not mac:
-            _set_error("Invalid Bluetooth address")
+            _set_error(tr("audio.error.address"))
             return status()
         if not available():
-            _set_error("bluetoothctl not installed (sudo apt install bluez)")
+            _set_error(tr("audio.error.bluez_missing"))
             return status()
         if not ensure_adapter_powered():
             return status()
@@ -1033,12 +1034,11 @@ def connect(mac: str, *, pair_if_needed: bool = False) -> dict:
             if not info.get("paired") and pair_proc.returncode != 0:
                 if "authentication" in pair_text or "pin" in pair_text:
                     _set_error(
-                        "Pairing needs confirmation on the speaker "
-                        "(PIN/Just Works). Put it in pairing mode and retry."
+                        tr("audio.error.pair_confirmation")
                     )
                 else:
                     _set_error(
-                        "Pairing failed. Put the speaker in pairing mode and retry."
+                        tr("audio.error.pair_failed")
                     )
                 return status()
 
@@ -1046,8 +1046,8 @@ def connect(mac: str, *, pair_if_needed: bool = False) -> dict:
         conn = _bluetoothctl("connect", mac, timeout=30.0)
         info = _device_info(mac)
         if not info.get("connected"):
-            err = (conn.stderr or conn.stdout or "Connect failed").strip()
-            _set_error(err.splitlines()[-1] if err else "Connect failed")
+            err = (conn.stderr or conn.stdout or tr("audio.error.connect_failed")).strip()
+            _set_error(err.splitlines()[-1] if err else tr("audio.error.connect_failed"))
             return status()
 
         name = str(info.get("name") or name or mac)
@@ -1055,12 +1055,12 @@ def connect(mac: str, *, pair_if_needed: bool = False) -> dict:
         sink = wait_for_sink(mac)
         if sink is None:
             _set_error(
-                "Connected, but no audio sink yet. Wait a few seconds and tap Use Bluetooth."
+                tr("audio.error.sink_wait")
             )
             _notify_speaker_change()
             return status()
         if not set_as_default_sink(mac):
-            _set_error("Connected, but could not set as default audio output")
+            _set_error(tr("audio.error.bt_default"))
             _notify_speaker_change()
             return status()
         # Headsets often reconnect at a low AVRCP/PipeWire level — restore full
@@ -1084,7 +1084,7 @@ def use_preferred() -> dict:
     """Quick reconnect for on-screen / auto-resume."""
     mac = preferred_mac()
     if not mac:
-        _set_error("No paired Bluetooth speaker — pair one on the web portal")
+        _set_error(tr("audio.error.no_paired"))
         return status()
     set_audio_route("bluetooth")
     return connect(mac, pair_if_needed=False)
@@ -1094,7 +1094,7 @@ def disconnect(mac: str | None = None) -> dict:
     with _action_lock:
         mac = _normalize_mac(mac or preferred_mac())
         if not mac:
-            _set_error("No Bluetooth speaker to disconnect")
+            _set_error(tr("audio.error.no_disconnect"))
             return status()
         _bluetoothctl("disconnect", mac, timeout=15.0)
         # Prefer leaving preferred MAC set so Use Bluetooth still works.
@@ -1107,7 +1107,7 @@ def forget(mac: str | None = None) -> dict:
     with _action_lock:
         mac = _normalize_mac(mac or preferred_mac())
         if not mac:
-            _set_error("No Bluetooth speaker to forget")
+            _set_error(tr("audio.error.no_forget"))
             return status()
         if is_connected(mac):
             _bluetoothctl("disconnect", mac, timeout=15.0)

@@ -262,6 +262,28 @@ def _portal_no_store_json(response):
     return response
 
 
+def _portal_catalog():
+    from display.round_touch import settings
+    from i18n import catalog_for
+
+    settings.sync_from_disk()
+    return catalog_for(settings.display_language())
+
+
+def _portal_tr(key: str, **values) -> str:
+    return _portal_catalog().translate(key, **values)
+
+
+@app.context_processor
+def _portal_template_i18n():
+    selection = _portal_catalog()
+    return {
+        "effective_language": selection.effective_language,
+        "tr": selection.translate,
+        "i18n_messages": dict(selection.messages),
+    }
+
+
 @app.get("/wifi")
 def wifi_setup_page():
     return render_template("wifi_setup.html")
@@ -332,17 +354,17 @@ def wifi_start_setup():
         return jsonify(
             {
                 "ok": False,
-                "message": "Wi-Fi setup is disabled by FLIGHTSCNR_SKIP_WIFI_SETUP.",
+                "message": _portal_tr("portal.response.wifi_disabled"),
             }
         ), 400
     if not wifi_setup.request_enter_wifi_setup():
         return jsonify(
-            {"ok": False, "message": "Could not request Wi-Fi setup."}
+            {"ok": False, "message": _portal_tr("portal.response.wifi_request_failed")}
         ), 500
     return jsonify(
         {
             "ok": True,
-            "message": "Opening Wi-Fi setup on the display…",
+            "message": _portal_tr("portal.system.wifi_setup.opening"),
         }
     )
 
@@ -434,10 +456,10 @@ def tracked_lookup():
     """Live lookup — check if a flight is currently findable before saving."""
     data = request.get_json(force=True)
     if not data:
-        return jsonify({"found": False, "error": "Invalid request"}), 400
+        return jsonify({"found": False, "error": _portal_tr("portal.response.invalid_request")}), 400
     callsign = data.get("callsign", "").strip().upper()
     if not callsign:
-        return jsonify({"found": False, "error": "No callsign provided"})
+        return jsonify({"found": False, "error": _portal_tr("portal.response.no_callsign")})
     result = lookup_flight(callsign)
     return jsonify(result)
 
@@ -466,10 +488,10 @@ def location_json():
 def location_set():
     data = request.get_json(force=True)
     if not data:
-        return jsonify({"message": "Invalid request"}), 400
+        return jsonify({"message": _portal_tr("portal.response.invalid_request")}), 400
     raw = data.get("location", "").strip()
     if not raw:
-        return jsonify({"message": "Enter coordinates as latitude, longitude"}), 400
+        return jsonify({"message": _portal_tr("portal.response.coordinates")}), 400
     try:
         lat, lon = parse_lat_lon_pair(raw)
     except ValueError as exc:
@@ -510,7 +532,7 @@ def location_set():
         except Exception:
             print("Map/precip invalidate after location save failed")
         payload = {
-            "message": f"Radar center saved: {favourite_locations.format_home_location()}",
+            "message": _portal_tr("portal.response.center_saved", location=favourite_locations.format_home_location()),
             "location": favourite_locations.format_home_location(),
         }
         try:
@@ -521,7 +543,7 @@ def location_set():
             pass
         return jsonify(payload)
     except Exception as e:
-        return jsonify({"message": f"Error saving location: {e}"}), 500
+        return jsonify({"message": _portal_tr("portal.response.save_location_error", error=e)}), 500
 
 
 @app.get("/airports/lookup")
@@ -574,7 +596,7 @@ def favourites_add():
             lat = float(data["lat"])
             lon = float(data["lon"])
         except (TypeError, ValueError) as exc:
-            return jsonify({"message": f"Invalid coordinates: {exc}"}), 400
+            return jsonify({"message": _portal_tr("portal.response.invalid_coordinates", error=exc)}), 400
     if icao and (not name or lat is None):
         try:
             looked = favourite_locations.lookup_icao(icao)
@@ -586,9 +608,9 @@ def favourites_add():
             lat, lon = looked["lat"], looked["lon"]
         icao = looked.get("icao") or icao
     if lat is None or lon is None:
-        return jsonify({"message": "Enter coordinates or search an ICAO code"}), 400
+        return jsonify({"message": _portal_tr("portal.response.coordinates_or_icao")}), 400
     if not name:
-        return jsonify({"message": "Enter a location name"}), 400
+        return jsonify({"message": _portal_tr("portal.response.location_name")}), 400
     try:
         entry = favourite_locations.add_location(
             name=name, lat=lat, lon=lon, icao=icao
@@ -596,8 +618,8 @@ def favourites_add():
     except ValueError as exc:
         return jsonify({"message": str(exc)}), 400
     except Exception as exc:
-        return jsonify({"message": f"Error saving favourite: {exc}"}), 500
-    return jsonify({"message": f"Added {entry['name']}.", "location": entry})
+        return jsonify({"message": _portal_tr("portal.response.save_favourite_error", error=exc)}), 500
+    return jsonify({"message": _portal_tr("portal.response.added_location", name=entry["name"]), "location": entry})
 
 
 @app.post("/favourites/delete")
@@ -607,15 +629,15 @@ def favourites_delete():
     data = request.get_json(force=True) or {}
     entry_id = (data.get("id") or "").strip()
     if not entry_id:
-        return jsonify({"message": "Missing favourite id"}), 400
+        return jsonify({"message": _portal_tr("portal.response.favourite_id")}), 400
     try:
         ok = favourite_locations.delete_location(entry_id)
     except Exception as exc:
-        return jsonify({"message": f"Error deleting favourite: {exc}"}), 500
+        return jsonify({"message": _portal_tr("portal.response.delete_favourite_error", error=exc)}), 500
     if not ok:
-        return jsonify({"message": "Favourite not found"}), 404
+        return jsonify({"message": _portal_tr("portal.response.favourite_missing")}), 404
     return jsonify({
-        "message": "Favourite deleted.",
+        "message": _portal_tr("portal.response.favourite_deleted"),
         "locations": favourite_locations.locations(),
     })
 
@@ -628,13 +650,13 @@ def favourites_select():
     data = request.get_json(force=True) or {}
     entry_id = (data.get("id") or "").strip()
     if not entry_id:
-        return jsonify({"message": "Missing favourite id"}), 400
+        return jsonify({"message": _portal_tr("portal.response.favourite_id")}), 400
     try:
         entry = favourite_locations.select_location(entry_id)
     except Exception as exc:
-        return jsonify({"message": f"Error selecting favourite: {exc}"}), 500
+        return jsonify({"message": _portal_tr("portal.response.select_favourite_error", error=exc)}), 500
     if not entry:
-        return jsonify({"message": "Favourite not found"}), 404
+        return jsonify({"message": _portal_tr("portal.response.favourite_missing")}), 404
 
     lat = float(entry["lat"])
     lon = float(entry["lon"])
@@ -669,7 +691,7 @@ def favourites_select():
         label = entry.get("name") or entry.get("icao") or "favourite"
         location = f"{lat:.6f}, {lon:.6f}"
         payload = {
-            "message": f"Radar center set to {label}.",
+            "message": _portal_tr("portal.response.center_set", location=label),
             "location": location,
             "favourite": entry,
             "active_index": favourite_locations.active_index(),
@@ -683,14 +705,14 @@ def favourites_select():
             pass
         return jsonify(payload)
     except Exception as exc:
-        return jsonify({"message": f"Error applying favourite: {exc}"}), 500
+        return jsonify({"message": _portal_tr("portal.response.apply_favourite_error", error=exc)}), 500
 
 
 @app.post("/tracked/set")
 def tracked_set():
     data = request.get_json(force=True)
     if not data:
-        return jsonify({"message": "Invalid request"}), 400
+        return jsonify({"message": _portal_tr("portal.response.invalid_request")}), 400
     callsign = data.get("callsign", "").strip().upper()[:12]
     try:
         with open(TRACKED_FILE, "w", encoding="utf-8") as f:
@@ -699,10 +721,10 @@ def tracked_set():
             os.chmod(TRACKED_FILE, 0o666)
         except OSError:
             pass
-        msg = f"Now tracking {callsign}." if callsign else "Tracking cleared."
+        msg = _portal_tr("portal.response.now_tracking", callsign=callsign) if callsign else _portal_tr("portal.tracking.cleared")
         return jsonify({"message": msg})
     except Exception as e:
-        return jsonify({"message": f"Error saving: {e}"}), 500
+        return jsonify({"message": _portal_tr("portal.response.save_error", error=e)}), 500
 
 
 @app.post("/route/search")
@@ -711,13 +733,13 @@ def route_search():
     import re
     data = request.get_json(force=True)
     if not data:
-        return jsonify({"flights": [], "error": "Invalid request"}), 400
+        return jsonify({"flights": [], "error": _portal_tr("portal.response.invalid_request")}), 400
     origin = data.get("origin", "").strip().upper()
     destination = data.get("destination", "").strip().upper()
     if not origin or not destination:
-        return jsonify({"flights": [], "error": "Origin and destination required"}), 400
+        return jsonify({"flights": [], "error": _portal_tr("portal.response.route_required")}), 400
     if not re.match(r'^[A-Z]{3,4}$', origin) or not re.match(r'^[A-Z]{3,4}$', destination):
-        return jsonify({"flights": [], "error": "Airport codes must be 3-4 letters"}), 400
+        return jsonify({"flights": [], "error": _portal_tr("portal.response.airport_codes")}), 400
     try:
         matches = _fr24_client.find_by_route(origin, destination)
         results = []
@@ -866,9 +888,9 @@ def api_keys_save():
         "restarted": restarted,
         "keys": secrets_status(),
         "message": (
-            "API keys saved and app restarted."
+            _portal_tr("portal.response.keys_restarted")
             if restarted
-            else "API keys saved. Restart the app to apply on the display: sudo systemctl restart flightscnr"
+            else _portal_tr("portal.response.keys_saved")
         ),
     })
 
@@ -895,7 +917,7 @@ def weather_save():
     data = request.get_json(silent=True) or {}
     raw = data.get("temperature_units") or data.get("units")
     if raw is None:
-        return jsonify({"message": "temperature_units is required"}), 400
+        return jsonify({"message": _portal_tr("portal.response.field_required", field="temperature_units")}), 400
     weather_prefs.update(temperature_units_value=str(raw))
     return jsonify(
         {
@@ -903,7 +925,7 @@ def weather_save():
             "temperature_units": weather_prefs.temperature_units(),
             "label": weather_prefs.portal_label(),
             "symbol": weather_prefs.unit_symbol(),
-            "message": f"Weather units set to {weather_prefs.portal_label()}.",
+            "message": _portal_tr("portal.response.weather_units", units=weather_prefs.portal_label()),
         }
     )
 
@@ -921,14 +943,13 @@ def weather_fetch_now():
         request_manual_refresh()
         status = weather_fetch_status()
     except Exception as exc:
-        return jsonify({"ok": False, "message": f"Could not request weather fetch: {exc}"}), 500
+        return jsonify({"ok": False, "message": _portal_tr("portal.response.weather_error", error=exc)}), 500
     return jsonify(
         {
             "ok": True,
             "status": status,
             "message": (
-                "Weather refresh requested. The display will fetch shortly "
-                "(Clock/Forecast, or within a few seconds on radar)."
+                _portal_tr("portal.response.weather_refresh")
             ),
         }
     )
@@ -985,7 +1006,7 @@ def display_save():
         try:
             settings.set_brightness_percent(int(data.get("brightness_percent")))
         except (TypeError, ValueError):
-            return jsonify({"message": "brightness_percent must be a number"}), 400
+            return jsonify({"message": _portal_tr("portal.response.number_required", field="brightness_percent")}), 400
     if "auto_idle_clock" in data:
         settings.set_auto_idle_clock_enabled(bool(data.get("auto_idle_clock")))
     if "quiet_dim_enabled" in data:
@@ -994,7 +1015,7 @@ def display_save():
         try:
             settings.set_quiet_dim_percent(int(data.get("quiet_dim_percent")))
         except (TypeError, ValueError):
-            return jsonify({"message": "quiet_dim_percent must be a number"}), 400
+            return jsonify({"message": _portal_tr("portal.response.number_required", field="quiet_dim_percent")}), 400
     if "flight_detail_timeout_s" in data:
         settings.set_flight_detail_timeout_s(data.get("flight_detail_timeout_s"))
     if "clock_timeout_s" in data:
@@ -1024,7 +1045,7 @@ def display_save():
         try:
             settings.set_radar_hud_opacity(int(data.get("radar_hud_opacity")))
         except (TypeError, ValueError):
-            return jsonify({"message": "radar_hud_opacity must be a number"}), 400
+            return jsonify({"message": _portal_tr("portal.response.number_required", field="radar_hud_opacity")}), 400
     if "radar_hud_dark" in data:
         settings.set_radar_hud_dark(bool(data.get("radar_hud_dark")))
     if "background_texture" in data:
@@ -1039,21 +1060,21 @@ def display_save():
         try:
             settings.set_hourly_chime_volume(int(data.get("hourly_chime_volume")))
         except (TypeError, ValueError):
-            return jsonify({"message": "hourly_chime_volume must be a number"}), 400
+            return jsonify({"message": _portal_tr("portal.response.number_required", field="hourly_chime_volume")}), 400
     if "traffic_sfx_enabled" in data:
         settings.set_traffic_sfx_enabled(bool(data.get("traffic_sfx_enabled")))
     if "traffic_sfx_volume" in data:
         try:
             settings.set_traffic_sfx_volume(int(data.get("traffic_sfx_volume")))
         except (TypeError, ValueError):
-            return jsonify({"message": "traffic_sfx_volume must be a number"}), 400
+            return jsonify({"message": _portal_tr("portal.response.number_required", field="traffic_sfx_volume")}), 400
     if "military_sfx_enabled" in data:
         settings.set_military_sfx_enabled(bool(data.get("military_sfx_enabled")))
     if "military_sfx_volume" in data:
         try:
             settings.set_military_sfx_volume(int(data.get("military_sfx_volume")))
         except (TypeError, ValueError):
-            return jsonify({"message": "military_sfx_volume must be a number"}), 400
+            return jsonify({"message": _portal_tr("portal.response.number_required", field="military_sfx_volume")}), 400
     if "earthquake_voice_enabled" in data:
         from display.round_touch import earthquake_overlay
 
@@ -1064,14 +1085,14 @@ def display_save():
         try:
             settings.set_earthquake_voice_volume(int(data.get("earthquake_voice_volume")))
         except (TypeError, ValueError):
-            return jsonify({"message": "earthquake_voice_volume must be a number"}), 400
+            return jsonify({"message": _portal_tr("portal.response.number_required", field="earthquake_voice_volume")}), 400
     if "lofi_enabled" in data:
         settings.set_lofi_enabled(bool(data.get("lofi_enabled")))
     if "lofi_volume" in data:
         try:
             settings.set_lofi_volume(int(data.get("lofi_volume")))
         except (TypeError, ValueError):
-            return jsonify({"message": "lofi_volume must be a number"}), 400
+            return jsonify({"message": _portal_tr("portal.response.number_required", field="lofi_volume")}), 400
     if "lofi_controls_enabled" in data:
         settings.set_lofi_controls_enabled(bool(data.get("lofi_controls_enabled")))
     if "lofi_title_scroll" in data:
@@ -1116,7 +1137,7 @@ def display_save():
             "lofi_controls_enabled": settings.lofi_controls_enabled(),
             "lofi_title_scroll": settings.lofi_title_scroll(),
             "auto_wifi_setup_hotspot": settings.auto_wifi_setup_hotspot_enabled(),
-            "message": "Display settings saved.",
+            "message": _portal_tr("portal.response.display_saved"),
         }
     )
 
@@ -1231,7 +1252,7 @@ def lofi_stream(name):
 
     path = lofi_audio.track_path(name)
     if path is None:
-        return jsonify({"message": "Unknown track."}), 404
+        return jsonify({"message": _portal_tr("portal.response.track_unknown")}), 404
     from flask import send_file
 
     return send_file(path, mimetype="audio/mpeg", conditional=True)
@@ -1280,10 +1301,10 @@ def _pack_download_worker(url: str) -> None:
         if count > 0:
             lofi_audio.mark_pack_installed(track_count=count)
             _pack_progress.update(
-                {"state": "done", "message": f"Installed {count} tracks."})
+                {"state": "done", "message": _portal_tr("portal.response.installed_tracks", count=count)})
         else:
             _pack_progress.update(
-                {"state": "error", "message": "Pack contained no tracks."})
+                {"state": "error", "message": _portal_tr("portal.response.pack_empty")})
     except Exception as exc:
         _pack_progress.update({"state": "error", "message": str(exc)})
     finally:
@@ -1321,7 +1342,7 @@ def lofi_pack_download():
     import threading
 
     if _pack_progress["state"] in ("downloading", "installing"):
-        return jsonify({"message": "Download already running."}), 409
+        return jsonify({"message": _portal_tr("portal.response.download_running")}), 409
     url = _lofi_pack_url()
     threading.Thread(
         target=_pack_download_worker, args=(url,), daemon=True
@@ -1336,7 +1357,7 @@ def lofi_cover(name):
 
     path = lofi_audio.track_path(name)
     if path is None:
-        return jsonify({"message": "Unknown track."}), 404
+        return jsonify({"message": _portal_tr("portal.response.track_unknown")}), 404
     try:
         from mutagen.id3 import ID3
 
@@ -1344,7 +1365,7 @@ def lofi_cover(name):
     except Exception:
         pics = []
     if not pics:
-        return jsonify({"message": "No cover art."}), 404
+        return jsonify({"message": _portal_tr("portal.response.no_cover")}), 404
     pic = pics[0]
     # The ID3 mime field is attacker-controlled (uploads); never echo it.
     allowed = {
@@ -1356,7 +1377,7 @@ def lofi_cover(name):
     }
     mime = allowed.get((pic.mime or "").lower())
     if mime is None:
-        return jsonify({"message": "Unsupported cover type."}), 415
+        return jsonify({"message": _portal_tr("portal.response.cover_type")}), 415
     resp = app.response_class(pic.data, mimetype=mime)
     resp.headers["Cache-Control"] = "public, max-age=86400"
     resp.headers["Content-Disposition"] = "inline; filename=cover"
@@ -1373,7 +1394,7 @@ def lofi_toggle_disabled():
     data = request.get_json(silent=True) or {}
     name = lofi_audio.safe_track_name(str(data.get("name") or ""))
     if name is None:
-        return jsonify({"message": "Bad track name."}), 400
+        return jsonify({"message": _portal_tr("portal.response.track_name")}), 400
     disabled = set(settings.lofi_disabled_tracks())
     if name in disabled:
         disabled.discard(name)
@@ -1389,15 +1410,15 @@ def lofi_upload():
 
     file = request.files.get("track")
     if file is None or not file.filename:
-        return jsonify({"message": "Choose an MP3 file first."}), 400
+        return jsonify({"message": _portal_tr("portal.response.choose_mp3")}), 400
     data = file.read()
     if len(data) > 30 * 1024 * 1024:
-        return jsonify({"message": "MP3 too large (30 MB max)."}), 400
+        return jsonify({"message": _portal_tr("portal.response.mp3_large")}), 400
     path = lofi_audio.save_user_track(file.filename, data)
     if path is None:
-        return jsonify({"message": "Only .mp3 files are accepted."}), 400
+        return jsonify({"message": _portal_tr("portal.response.mp3_only")}), 400
     return jsonify({"ok": True, "user": lofi_audio.user_tracks(),
-                    "message": f"Added {os.path.basename(path)} to the playlist."})
+                    "message": _portal_tr("portal.response.playlist_added", name=os.path.basename(path))})
 
 
 @app.post("/lofi/delete")
@@ -1407,9 +1428,9 @@ def lofi_delete():
     data = request.get_json(silent=True) or {}
     name = str(data.get("name") or "")
     if not lofi_audio.delete_user_track(name):
-        return jsonify({"message": "Track not found."}), 404
+        return jsonify({"message": _portal_tr("portal.response.track_missing")}), 404
     return jsonify({"ok": True, "user": lofi_audio.user_tracks(),
-                    "message": f"Removed {name}."})
+                    "message": _portal_tr("portal.response.playlist_removed", name=name)})
 
 
 @app.post("/display/chime-preview")
@@ -1422,13 +1443,13 @@ def display_chime_preview():
         try:
             settings.set_hourly_chime_volume(int(data.get("hourly_chime_volume")))
         except (TypeError, ValueError):
-            return jsonify({"message": "hourly_chime_volume must be a number"}), 400
+            return jsonify({"message": _portal_tr("portal.response.number_required", field="hourly_chime_volume")}), 400
     hourly_chime.play_chime_async()
     return jsonify(
         {
             "ok": True,
             "hourly_chime_volume": settings.hourly_chime_volume(),
-            "message": "Playing chime preview.",
+            "message": _portal_tr("portal.display.preview_chime"),
         }
     )
 
@@ -1443,13 +1464,13 @@ def display_traffic_sfx_preview():
         try:
             settings.set_traffic_sfx_volume(int(data.get("traffic_sfx_volume")))
         except (TypeError, ValueError):
-            return jsonify({"message": "traffic_sfx_volume must be a number"}), 400
+            return jsonify({"message": _portal_tr("portal.response.number_required", field="traffic_sfx_volume")}), 400
     alert_sounds.play_traffic_preview()
     return jsonify(
         {
             "ok": True,
             "traffic_sfx_volume": settings.traffic_sfx_volume(),
-            "message": "Playing tracked enter-range preview.",
+            "message": _portal_tr("portal.response.tracked_preview"),
         }
     )
 
@@ -1464,13 +1485,13 @@ def display_military_sfx_preview():
         try:
             settings.set_military_sfx_volume(int(data.get("military_sfx_volume")))
         except (TypeError, ValueError):
-            return jsonify({"message": "military_sfx_volume must be a number"}), 400
+            return jsonify({"message": _portal_tr("portal.response.number_required", field="military_sfx_volume")}), 400
     alert_sounds.play_military_preview()
     return jsonify(
         {
             "ok": True,
             "military_sfx_volume": settings.military_sfx_volume(),
-            "message": "Playing military sound preview.",
+            "message": _portal_tr("portal.display.preview_military"),
         }
     )
 
@@ -1485,14 +1506,14 @@ def display_earthquake_voice_preview():
         try:
             settings.set_earthquake_voice_volume(int(data.get("earthquake_voice_volume")))
         except (TypeError, ValueError):
-            return jsonify({"message": "earthquake_voice_volume must be a number"}), 400
+            return jsonify({"message": _portal_tr("portal.response.number_required", field="earthquake_voice_volume")}), 400
     if "lofi_enabled" in data:
         settings.set_lofi_enabled(bool(data.get("lofi_enabled")))
     if "lofi_volume" in data:
         try:
             settings.set_lofi_volume(int(data.get("lofi_volume")))
         except (TypeError, ValueError):
-            return jsonify({"message": "lofi_volume must be a number"}), 400
+            return jsonify({"message": _portal_tr("portal.response.number_required", field="lofi_volume")}), 400
     if "lofi_controls_enabled" in data:
         settings.set_lofi_controls_enabled(bool(data.get("lofi_controls_enabled")))
     if "lofi_title_scroll" in data:
@@ -1506,7 +1527,7 @@ def display_earthquake_voice_preview():
             "lofi_volume": settings.lofi_volume(),
             "lofi_controls_enabled": settings.lofi_controls_enabled(),
             "lofi_title_scroll": settings.lofi_title_scroll(),
-            "message": "Playing earthquake alert preview.",
+            "message": _portal_tr("portal.display.preview_earthquake"),
         }
     )
 
@@ -1523,7 +1544,7 @@ def settings_reload():
         pass
     return jsonify(
         {
-            "message": "Display will reload settings within about a second.",
+            "message": _portal_tr("portal.response.settings_reload"),
         }
     )
 
@@ -1668,9 +1689,9 @@ def radar_save():
         try:
             value = float(raw)
         except ValueError:
-            return jsonify({"ok": False, "message": "Range must be a number."}), 400
+            return jsonify({"ok": False, "message": _portal_tr("portal.response.number_required", field=_portal_tr("portal.radar.range.label"))}), 400
         if value <= 0:
-            return jsonify({"ok": False, "message": "Range must be greater than zero."}), 400
+            return jsonify({"ok": False, "message": _portal_tr("portal.response.range_positive")}), 400
         idx = scale.index_for_value(value, units)
         settings.set_scale_index(idx)
         scale.select(idx)
@@ -1712,7 +1733,7 @@ def radar_save():
         try:
             settings.set_custom_theme_rgb(int(rgb[0]), int(rgb[1]), int(rgb[2]))
         except (TypeError, ValueError, IndexError):
-            return jsonify({"ok": False, "message": "theme_rgb must be [r,g,b]"}), 400
+            return jsonify({"ok": False, "message": _portal_tr("portal.response.rgb_required", field="theme_rgb")}), 400
     elif "theme_index" in data:
         # Legacy portal clients still sending a preset index.
         settings.set_theme_index(int(data.get("theme_index")))
@@ -1721,25 +1742,25 @@ def radar_save():
         try:
             settings.set_runway_darkmap_rgb(int(rgb[0]), int(rgb[1]), int(rgb[2]))
         except (TypeError, ValueError, IndexError):
-            return jsonify({"ok": False, "message": "runway_darkmap_rgb must be [r,g,b]"}), 400
+            return jsonify({"ok": False, "message": _portal_tr("portal.response.rgb_required", field="runway_darkmap_rgb")}), 400
     if "runway_light_rgb" in data:
         rgb = data.get("runway_light_rgb") or []
         try:
             settings.set_runway_light_rgb(int(rgb[0]), int(rgb[1]), int(rgb[2]))
         except (TypeError, ValueError, IndexError):
-            return jsonify({"ok": False, "message": "runway_light_rgb must be [r,g,b]"}), 400
+            return jsonify({"ok": False, "message": _portal_tr("portal.response.rgb_required", field="runway_light_rgb")}), 400
     if "tag_text_dark_rgb" in data:
         rgb = data.get("tag_text_dark_rgb") or []
         try:
             settings.set_tag_text_dark_rgb(int(rgb[0]), int(rgb[1]), int(rgb[2]))
         except (TypeError, ValueError, IndexError):
-            return jsonify({"ok": False, "message": "tag_text_dark_rgb must be [r,g,b]"}), 400
+            return jsonify({"ok": False, "message": _portal_tr("portal.response.rgb_required", field="tag_text_dark_rgb")}), 400
     if "tag_text_light_rgb" in data:
         rgb = data.get("tag_text_light_rgb") or []
         try:
             settings.set_tag_text_light_rgb(int(rgb[0]), int(rgb[1]), int(rgb[2]))
         except (TypeError, ValueError, IndexError):
-            return jsonify({"ok": False, "message": "tag_text_light_rgb must be [r,g,b]"}), 400
+            return jsonify({"ok": False, "message": _portal_tr("portal.response.rgb_required", field="tag_text_light_rgb")}), 400
     if "show_compass_rose" in data:
         settings.set_show_compass_rose(bool(data.get("show_compass_rose")))
     if "show_range_rings" in data:
@@ -1818,12 +1839,12 @@ def radar_save():
         try:
             settings.set_vfr_map_opacity(int(data.get("vfr_map_opacity")))
         except (TypeError, ValueError):
-            return jsonify({"ok": False, "message": "vfr_map_opacity must be a number"}), 400
+            return jsonify({"ok": False, "message": _portal_tr("portal.response.number_required", field="vfr_map_opacity")}), 400
     if "seamap_opacity" in data:
         try:
             settings.set_seamap_opacity(int(data.get("seamap_opacity")))
         except (TypeError, ValueError):
-            return jsonify({"ok": False, "message": "seamap_opacity must be a number"}), 400
+            return jsonify({"ok": False, "message": _portal_tr("portal.response.number_required", field="seamap_opacity")}), 400
     if "traffic_mode" in data:
         settings.set_traffic_mode(str(data.get("traffic_mode") or ""))
     elif "ais_enabled" in data:
@@ -1832,12 +1853,12 @@ def radar_save():
         try:
             settings.set_vessel_min_speed_kt(data.get("vessel_min_speed_kt"))
         except (TypeError, ValueError):
-            return jsonify({"ok": False, "message": "vessel_min_speed_kt must be a number"}), 400
+            return jsonify({"ok": False, "message": _portal_tr("portal.response.number_required", field="vessel_min_speed_kt")}), 400
     if "aircraft_min_speed_kt" in data:
         try:
             settings.set_aircraft_min_speed_kt(data.get("aircraft_min_speed_kt"))
         except (TypeError, ValueError):
-            return jsonify({"ok": False, "message": "aircraft_min_speed_kt must be a number"}), 400
+            return jsonify({"ok": False, "message": _portal_tr("portal.response.number_required", field="aircraft_min_speed_kt")}), 400
     if "dump1090_enabled" in data or "dump1090_url" in data:
         from secrets_store import save_secrets_from_portal
 
@@ -1862,7 +1883,7 @@ def radar_save():
             data.get("live_tracking_max_radius_km")
         )
     settings.request_reload()
-    return jsonify({"ok": True, "message": "Radar settings saved."})
+    return jsonify({"ok": True, "message": _portal_tr("portal.radar.saved")})
 
 
 @app.get("/off-hours/json")
@@ -1899,7 +1920,7 @@ def off_hours_save():
         {
             "ok": True,
             **updated,
-            "message": "Off-hours schedule saved.",
+            "message": _portal_tr("portal.response.off_hours_saved"),
         }
     )
 
@@ -1907,6 +1928,18 @@ def off_hours_save():
 # Serve map files from the data directory
 @app.get("/maps/<path:filename>")
 def maps(filename):
+    # Rebuild the two data maps in the current portal language, in memory.
+    # Existing generated files remain available to other callers.
+    if filename in ("closest.html", "farthest.html"):
+        from web import map_generator
+
+        if filename == "closest.html":
+            entries = load_json(CLOSEST_FILE, [])
+            generate = map_generator.generate_closest_map
+        else:
+            entries = load_json(FARTHEST_FILE, [])
+            generate = map_generator.generate_farthest_map
+        return generate(entries, filename=None, catalog=_portal_catalog())
     return send_from_directory(MAPS_DIR, filename)
 
 
@@ -2242,7 +2275,7 @@ def diagnostics_export():
     except diagnostics_bundle.DiagnosticsBundleError as exc:
         return jsonify({"ok": False, "message": str(exc)}), 500
     except Exception as exc:
-        return jsonify({"ok": False, "message": f"Diagnostics export failed: {exc}"}), 500
+        return jsonify({"ok": False, "message": _portal_tr("portal.response.diagnostics_error", error=exc)}), 500
 
     buf = BytesIO(payload)
     buf.seek(0)
@@ -2266,19 +2299,18 @@ def settings_import():
 
     upload = request.files.get("config") or request.files.get("file")
     if upload is None or not upload.filename:
-        return jsonify({"ok": False, "message": "Choose a .config file to upload"}), 400
+        return jsonify({"ok": False, "message": _portal_tr("portal.response.config_choose")}), 400
 
     raw = upload.read(settings_backup.MAX_CONFIG_BYTES + 1)
     if len(raw) > settings_backup.MAX_CONFIG_BYTES:
         return jsonify({
             "ok": False,
             "message": (
-                f"Config file too large "
-                f"(max {settings_backup.MAX_CONFIG_BYTES // 1024} KiB)"
+                _portal_tr("portal.response.config_large", size=settings_backup.MAX_CONFIG_BYTES // 1024)
             ),
         }), 400
     if not raw.strip():
-        return jsonify({"ok": False, "message": "Config file is empty"}), 400
+        return jsonify({"ok": False, "message": _portal_tr("portal.response.config_empty")}), 400
 
     try:
         payload = settings_backup.parse_config_bytes(raw)
@@ -2286,7 +2318,7 @@ def settings_import():
     except settings_backup.SettingsConfigError as exc:
         return jsonify({"ok": False, "message": str(exc)}), 400
     except OSError as exc:
-        return jsonify({"ok": False, "message": f"Could not write settings: {exc}"}), 500
+        return jsonify({"ok": False, "message": _portal_tr("portal.response.settings_write_error", error=exc)}), 500
 
     # Apply radar center in this process immediately when location was restored.
     loc = (payload.get("settings") or {}).get("location")
@@ -2303,8 +2335,8 @@ def settings_import():
     restart = system_control.request_app_restart()
     written = result.get("written") or []
     message = (
-        f"Imported {len(written)} setting file(s). "
-        + (restart.get("message") or "App is restarting.")
+        _portal_tr("portal.response.imported_files", count=len(written)) + " "
+        + (restart.get("message") or _portal_tr("portal.system.restarting"))
     )
     return jsonify({
         "ok": True,

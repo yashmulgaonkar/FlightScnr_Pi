@@ -293,7 +293,7 @@ def _aqi_bits(
     font = _ampm_font()
     # Match wind-speed unit size for the "AQI" caption; number stays HUD body size.
     label_font = draw_mod.load_font(max(7, theme.s(8)), bold=True)
-    label_img = label_font.render("AQI", True, color)
+    label_img = label_font.render(tr("radar_hud.aqi"), True, color)
     value_img = font.render(str(aqi), True, value_rgb)
     w = max(label_img.get_width(), value_img.get_width())
     return w, label_img, value_img, value_rgb

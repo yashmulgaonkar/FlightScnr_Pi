@@ -1,7 +1,7 @@
 <!DOCTYPE html>
-<html>
+<html lang="{{ effective_language }}">
 <head>
-    <title>Flight Statistics</title>
+    <title data-i18n="portal.stats.title">{{ tr("portal.stats.title") }}</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
@@ -26,65 +26,68 @@
         .bar-cell { display: flex; align-items: center; gap: 8px; }
         .bar-fill { height: 14px; background: #ffb300; border-radius: 2px; }
     </style>
+<script>
+const I18N_MESSAGES = {{ i18n_messages | tojson }};
+function i18nText(key) { return I18N_MESSAGES[key] || key; }
+function i18nFormat(key, values) {
+    return i18nText(key).replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g,
+        (match, name) => Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : match);
+}
+</script>
 </head>
 <body>
-    <a class="back" href="/">← Dashboard</a>
-    <h1>Flight Statistics</h1>
+    <a class="back" href="/" data-i18n="portal.stats.back_dashboard">{{ tr("portal.stats.back_dashboard") }}</a>
+    <h1 data-i18n="portal.stats.title">{{ tr("portal.stats.title") }}</h1>
     <div id="location-label"></div>
 
     <div class="cards">
-        <div class="card"><div class="label">Daily Average</div><div class="value" id="avg">—</div></div>
-        <div class="card"><div class="label">Busiest Day</div><div class="value" id="busiest-val">—</div><div class="sub" id="busiest-sub"></div></div>
-        <div class="card"><div class="label">Peak Hour</div><div class="value" id="peak-hour">—</div></div>
-        <div class="card"><div class="label">Peak Day of Week</div><div class="value" id="peak-dow">—</div></div>
+        <div class="card"><div class="label" data-i18n="portal.stats.daily_average">{{ tr("portal.stats.daily_average") }}</div><div class="value" id="avg">—</div></div>
+        <div class="card"><div class="label" data-i18n="portal.stats.busiest_day">{{ tr("portal.stats.busiest_day") }}</div><div class="value" id="busiest-val">—</div><div class="sub" id="busiest-sub"></div></div>
+        <div class="card"><div class="label" data-i18n="portal.stats.peak_hour">{{ tr("portal.stats.peak_hour") }}</div><div class="value" id="peak-hour">—</div></div>
+        <div class="card"><div class="label" data-i18n="portal.stats.peak_weekday">{{ tr("portal.stats.peak_weekday") }}</div><div class="value" id="peak-dow">—</div></div>
     </div>
 
     <div class="chart-row">
         <div class="chart-box chart-full">
-            <h3>Average Flights by Hour</h3>
+            <h3 data-i18n="portal.stats.average_hour">{{ tr("portal.stats.average_hour") }}</h3>
             <canvas id="hourChart"></canvas>
         </div>
     </div>
 
     <div class="chart-row">
         <div class="chart-box">
-            <h3>Average Flights by Day of Week</h3>
+            <h3 data-i18n="portal.stats.average_weekday">{{ tr("portal.stats.average_weekday") }}</h3>
             <canvas id="dowChart"></canvas>
         </div>
         <div class="chart-box">
-            <h3>Airline Breakdown (Top 12)</h3>
+            <h3 data-i18n="portal.stats.airlines_top">{{ tr("portal.stats.airlines_top") }}</h3>
             <canvas id="airlineChart"></canvas>
         </div>
         <div class="chart-box">
-            <h3>Local vs Flyover</h3>
+            <h3 data-i18n="portal.stats.local_flyover">{{ tr("portal.stats.local_flyover") }}</h3>
             <canvas id="localChart"></canvas>
         </div>
     </div>
 
-    <h3>Daily Flight Log</h3>
+    <h3 data-i18n="portal.stats.daily_log">{{ tr("portal.stats.daily_log") }}</h3>
     <table>
-        <thead><tr><th>Date</th><th>Flights</th><th></th><th>First</th><th>Last</th></tr></thead>
+        <thead><tr><th data-i18n="portal.stats.date">{{ tr("portal.stats.date") }}</th><th data-i18n="portal.stats.flights">{{ tr("portal.stats.flights") }}</th><th></th><th data-i18n="portal.stats.first">{{ tr("portal.stats.first") }}</th><th data-i18n="portal.stats.last">{{ tr("portal.stats.last") }}</th></tr></thead>
         <tbody id="log-body"></tbody>
     </table>
-    <h3>Live-Position Sources (Extended Tracking)</h3>
-    <p style="color:#888;font-size:.85rem;margin-top:-.5rem">
-        How often each source actually won the fallback race today while a
-        flight was being tracked on the live map — useful for spotting how
-        often metered sources (OpenSky, ADS-B Exchange, FR24) get used
-        instead of the free local dump1090/adsb.fi sources.
-    </p>
+    <h3 data-i18n="portal.stats.sources">{{ tr("portal.stats.sources") }}</h3>
+    <p style="color:#888;font-size:.85rem;margin-top:-.5rem" data-i18n="portal.stats.sources_hint">{{ tr("portal.stats.sources_hint") }}</p>
     <table id="position-sources-table">
-        <thead><tr><th>Source</th><th>Calls today</th></tr></thead>
+        <thead><tr><th data-i18n="portal.stats.source">{{ tr("portal.stats.source") }}</th><th data-i18n="portal.stats.calls_today">{{ tr("portal.stats.calls_today") }}</th></tr></thead>
         <tbody id="position-sources-body">
-            <tr><td colspan="2" style="color:#888">No live-tracking activity yet today.</td></tr>
+            <tr><td colspan="2" style="color:#888" data-i18n="portal.stats.no_activity">{{ tr("portal.stats.no_activity") }}</td></tr>
         </tbody>
     </table>
 
     <script>
         const COLOURS = ['#ffb300','#ff6b35','#69f0ae','#ffd54f','#ff69b4','#9b59b6','#1abc9c','#e74c3c','#3498db','#f39c12','#00b894','#fd79a8'];
-        const DOWS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        const DOWS = ['sun','mon','tue','wed','thu','fri','sat'].map(day => i18nText('weekday.' + day + '.short'));
 	const POSITION_SOURCE_LABELS = {
-            dump1090: 'Local (dump1090 / readsb)',
+            dump1090: i18nText('portal.stats.local') + ' (dump1090 / readsb)',
             adsbfi: 'adsb.fi',
             opensky: 'OpenSky',
             adsbexchange: 'ADS-B Exchange',
@@ -106,7 +109,7 @@
 
             if (!summary.length) {
                 document.getElementById('location-label').textContent =
-                    'No flight data yet — statistics appear after aircraft are detected overhead.';
+                    i18nText('portal.stats.no_data');
                 return;
             }
 
@@ -200,7 +203,7 @@
             new Chart(document.getElementById('localChart'), {
                 type: 'doughnut',
                 data: {
-                    labels: ['Local', 'Flyover', 'Unknown'],
+                    labels: ['portal.stats.local', 'portal.stats.flyover', 'portal.stats.unknown'].map(i18nText),
                     datasets: [{ data: [local, flyover, unknown], backgroundColor: ['#69f0ae99','#ffb30099','#cccccc99'], borderColor: ['#69f0ae','#ffb300','#ccc'], borderWidth: 1 }]
                 },
                 options: { responsive: true, cutout: '60%', plugins: { legend: { position: 'right', labels: { font: { size: 11 } } } } }
@@ -232,6 +235,16 @@
                 tbody.appendChild(tr);
             }
         }
+        function setSourceStatus(key) {
+            const tbody = document.getElementById('position-sources-body');
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 2;
+            cell.style.color = '#888';
+            cell.textContent = i18nText(key);
+            row.appendChild(cell);
+            tbody.replaceChildren(row);
+        }
         async function loadPositionSourceStats() {
             const tbody = document.getElementById('position-sources-body');
             if (!tbody) return;
@@ -250,8 +263,7 @@
                 const entries = Object.entries(today);
 
                 if (!entries.length) {
-                    tbody.innerHTML =
-                        '<tr><td colspan="2" style="color:#888">No live-tracking activity yet today.</td></tr>';
+                    setSourceStatus('portal.stats.no_activity');
                     return;
                 }
 
@@ -270,8 +282,7 @@
                 }
             } catch (err) {
                 console.error('Failed to load position-source stats:', err);
-                tbody.innerHTML =
-                   '<tr><td colspan="2" style="color:#888">Could not load live-position source statistics.</td></tr>';
+                setSourceStatus('portal.stats.source_error');
             }
         }
         document.addEventListener('DOMContentLoaded', loadAll);

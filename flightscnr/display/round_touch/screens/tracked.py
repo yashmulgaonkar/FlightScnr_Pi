@@ -773,7 +773,7 @@ def _nearest_city_label(data) -> str:
             _city_cache["result"] = None
     nearest = _city_cache["result"]
     if nearest:
-        return f"nr {nearest['name']}"
+        return tr("tracked.near_city", city=nearest["name"])
     return ""
 
 
@@ -1239,12 +1239,12 @@ def _draw_empty(surface, top: int, bottom: int):
     detail_font = draw.load_font(theme.FONT_DETAIL)
 
     y = top + theme.s(12)
-    y = draw.draw_center_line(surface, "No tracked flight.", y, title_font, theme.LABEL)
+    y = draw.draw_center_line(surface, tr("tracked.empty"), y, title_font, theme.LABEL)
     y += theme.s(6)
     if y + body_font.get_height() <= bottom:
         y = draw.draw_center_line(
             surface,
-            "Select a flight on the web portal.",
+            tr("tracked.select_portal"),
             y,
             body_font,
             theme.MUTED,
@@ -1265,10 +1265,10 @@ def _draw_pending(surface, callsign: str, top: int, bottom: int):
     y = draw.draw_center_line(surface, callsign, y, title_font, theme.LABEL)
     y += theme.s(10)
     if y + body_font.get_height() <= bottom:
-        y = draw.draw_center_line(surface, "Waiting for flight data", y, body_font, theme.MUTED)
+        y = draw.draw_center_line(surface, tr("tracked.waiting"), y, body_font, theme.MUTED)
         y += theme.s(8)
     if y + detail_font.get_height() <= bottom:
-        y = draw.draw_center_line(surface, "Starts when flight goes live", y, detail_font, theme.HINT)
+        y = draw.draw_center_line(surface, tr("tracked.starts_live"), y, detail_font, theme.HINT)
 
 
 def _finish_marquee_frame():

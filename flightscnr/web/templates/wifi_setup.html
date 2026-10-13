@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ effective_language }}">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>FlightScnr — Wi-Fi setup</title>
+    <title data-i18n="portal.wifi.page_title">{{ tr("portal.wifi.page_title") }}</title>
     <style>
         :root {
             --bg: #0b1a0e;
@@ -118,25 +118,33 @@
             line-height: 1.4;
         }
     </style>
+<script>
+const I18N_MESSAGES = {{ i18n_messages | tojson }};
+function i18nText(key) { return I18N_MESSAGES[key] || key; }
+function i18nFormat(key, values) {
+    return i18nText(key).replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g,
+        (match, name) => Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : match);
+}
+</script>
 </head>
 <body>
 <main>
-    <h1>Connect FlightScnr to Wi-Fi</h1>
-    <p class="lead">Choose your home network. The setup hotspot will turn off after a successful connection.</p>
+    <h1 data-i18n="portal.wifi.title">{{ tr("portal.wifi.title") }}</h1>
+    <p class="lead" data-i18n="portal.wifi.lead">{{ tr("portal.wifi.lead") }}</p>
     <div class="card">
-        <label for="ssid-select">Network</label>
+        <label for="ssid-select" data-i18n="portal.wifi.network">{{ tr("portal.wifi.network") }}</label>
         <div class="row">
             <select id="ssid-select"></select>
-            <button type="button" class="btn-ghost" id="btn-rescan">Scan</button>
+            <button type="button" class="btn-ghost" id="btn-rescan" data-i18n="portal.wifi.scan">{{ tr("portal.wifi.scan") }}</button>
         </div>
-        <label for="ssid-manual">Or type SSID</label>
-        <input id="ssid-manual" type="text" autocomplete="off" placeholder="Optional if listed above">
-        <label for="password">Password</label>
-        <input id="password" type="password" autocomplete="current-password" placeholder="Leave blank if open">
-        <button type="button" class="btn-primary" id="btn-connect">Connect</button>
-        <button type="button" class="btn-secondary hidden" id="btn-try-saved">Try saved Wi‑Fi</button>
+        <label for="ssid-manual" data-i18n="portal.wifi.manual">{{ tr("portal.wifi.manual") }}</label>
+        <input id="ssid-manual" type="text" autocomplete="off" placeholder="{{ tr('portal.wifi.manual_placeholder') }}" data-i18n-placeholder="portal.wifi.manual_placeholder">
+        <label for="password" data-i18n="portal.wifi.password">{{ tr("portal.wifi.password") }}</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="{{ tr('portal.wifi.password_placeholder') }}" data-i18n-placeholder="portal.wifi.password_placeholder">
+        <button type="button" class="btn-primary" id="btn-connect" data-i18n="portal.wifi.connect">{{ tr("portal.wifi.connect") }}</button>
+        <button type="button" class="btn-secondary hidden" id="btn-try-saved" data-i18n="wifi.try_saved">{{ tr("wifi.try_saved") }}</button>
         <div class="status" id="status"></div>
-        <p class="hint">Stay on this page until you see success. The round display will leave setup mode automatically. If your home network is already saved, use Try saved Wi‑Fi instead.</p>
+        <p class="hint" data-i18n="portal.wifi.hint">{{ tr("portal.wifi.hint") }}</p>
     </div>
 </main>
 <script>
@@ -155,12 +163,12 @@ async function refreshStatus() {
         const btn = $("btn-try-saved");
         if (data.has_saved) btn.classList.remove("hidden");
         else btn.classList.add("hidden");
-        if (data.client_connected) setStatus("Connected — leaving setup…", "ok");
+        if (data.client_connected) setStatus(i18nText("portal.wifi.leaving"), "ok");
     } catch (e) { /* ignore */ }
 }
 
 async function loadNetworks(rescan) {
-    setStatus(rescan ? "Scanning…" : "Loading networks…");
+    setStatus(rescan ? i18nText("portal.wifi.scanning") : i18nText("portal.wifi.loading"));
     try {
         const r = await fetch("/wifi/networks.json?rescan=" + (rescan ? "1" : "0"));
         const data = await r.json();
@@ -170,7 +178,7 @@ async function loadNetworks(rescan) {
         if (!networks.length) {
             const opt = document.createElement("option");
             opt.value = "";
-            opt.textContent = "(none found — type SSID below)";
+            opt.textContent = i18nText("portal.wifi.none_option");
             sel.appendChild(opt);
         } else {
             networks.forEach((n) => {
@@ -180,10 +188,10 @@ async function loadNetworks(rescan) {
                 sel.appendChild(opt);
             });
         }
-        setStatus(networks.length ? `${networks.length} networks` : "No networks found", "");
+        setStatus(networks.length ? i18nFormat(networks.length === 1 ? "portal.wifi.network_count.one" : "portal.wifi.network_count.other", { count: networks.length }) : i18nText("portal.wifi.no_networks"), "");
         refreshStatus();
     } catch (e) {
-        setStatus(e.message || "Scan failed", "err");
+        setStatus(e.message || i18nText("portal.wifi.scan_failed"), "err");
     }
 }
 
@@ -191,12 +199,12 @@ async function connect() {
     const ssid = ($("ssid-manual").value || $("ssid-select").value || "").trim();
     const password = $("password").value || "";
     if (!ssid) {
-        setStatus("Choose or type a network name", "err");
+        setStatus(i18nText("portal.wifi.choose_network"), "err");
         return;
     }
     $("btn-connect").disabled = true;
     $("btn-try-saved").disabled = true;
-    setStatus("Connecting — this may take up to a minute…");
+    setStatus(i18nText("portal.wifi.connecting"));
     try {
         const r = await fetch("/wifi/connect", {
             method: "POST",
@@ -205,11 +213,11 @@ async function connect() {
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok || !data.ok) {
-            throw new Error(data.message || "Connection failed");
+            throw new Error(data.message || i18nText("portal.wifi.connection_failed"));
         }
-        setStatus(data.message || "Connected!", "ok");
+        setStatus(data.message || i18nText("portal.wifi.connected"), "ok");
     } catch (e) {
-        setStatus(e.message || "Connection failed", "err");
+        setStatus(e.message || i18nText("portal.wifi.connection_failed"), "err");
     } finally {
         $("btn-connect").disabled = false;
         $("btn-try-saved").disabled = false;
@@ -219,16 +227,16 @@ async function connect() {
 async function trySaved() {
     $("btn-connect").disabled = true;
     $("btn-try-saved").disabled = true;
-    setStatus("Leaving setup hotspot and trying saved Wi‑Fi…");
+    setStatus(i18nText("portal.wifi.trying_saved"));
     try {
         const r = await fetch("/wifi/try-saved", { method: "POST" });
         const data = await r.json().catch(() => ({}));
         if (!r.ok || !data.ok) {
-            throw new Error(data.message || "Saved Wi‑Fi not available");
+            throw new Error(data.message || i18nText("portal.wifi.saved_unavailable"));
         }
-        setStatus(data.message || "Connected!", "ok");
+        setStatus(data.message || i18nText("portal.wifi.connected"), "ok");
     } catch (e) {
-        setStatus(e.message || "Saved Wi‑Fi not available", "err");
+        setStatus(e.message || i18nText("portal.wifi.saved_unavailable"), "err");
         loadNetworks(true);
     } finally {
         $("btn-connect").disabled = false;

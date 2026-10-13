@@ -517,7 +517,7 @@ def _build_settings_picker_items(kind: str) -> list[dict]:
             loc_id = str(loc.get("id") or "").strip()
             if not loc_id:
                 continue
-            name = str(loc.get("name") or "Saved").strip() or "Saved"
+            name = str(loc.get("name") or tr("settings.favourite.saved")).strip() or tr("settings.favourite.saved")
             out.append({"id": loc_id, "label": name, "selected": i == idx})
         return out
     if kind == "range":
@@ -676,7 +676,7 @@ def _build_atc_picker_items(kind: str) -> list[dict]:
             if ap.get("has_feeds"):
                 pass
             else:
-                label = f"{label}  (no feeds)"
+                label = label + tr("settings.atc.no_feeds_suffix")
             out.append(
                 {
                     "id": ident,
@@ -865,7 +865,7 @@ def _tgt_slider_geometry(kind: str, which: str) -> tuple[pygame.Rect, int, int] 
         return None
     x0, y0, cell = _tgt_grid_origin()
     body_font = _display_font()
-    label_w = max(body_font.size(t)[0] for t in ("Size", "Opacity"))
+    label_w = max(body_font.size(t)[0] for t in (tr("settings.tgt.size"), tr("settings.tgt.opacity")))
     value_w = body_font.size("150%")[0]
     gap = theme.s(8)
     row_h = body_font.get_height() + theme.s(16)
@@ -1149,7 +1149,7 @@ def _draw_targets_editor(surface, kind: str) -> int:
         band, (14, 58, 24, 240), arc_a0=mid - half, arc_a1=mid + half,
     )
     pill_font = draw.load_font(theme.s(12), bold=True)
-    items = [pill_font.render(ch, True, theme.SWEEP) for ch in "Done"]
+    items = [pill_font.render(ch, True, theme.SWEEP) for ch in tr("common.done")]
     arc_ui.blit_arc_items(
         surface, items, r=arc_r, mid=mid, bottom=True,
         cx=theme.CENTER_X, cy=theme.CENTER_Y,
@@ -1269,7 +1269,7 @@ def _draw_time_picker(surface, kind: str) -> int:
     # Title curved along the top rim, matching the breadcrumb language.
     from display.round_touch import arc_ui
 
-    title_text = "Quiet Start" if kind == "quiet_start" else "Quiet End"
+    title_text = tr("settings.picker.quiet_start") if kind == "quiet_start" else tr("settings.picker.quiet_end")
     arc_r = int(theme.VISIBLE_RADIUS * 0.84)
     title_items = [title_font.render(ch, True, theme.LABEL) for ch in title_text]
     arc_ui.blit_arc_items(
@@ -1707,7 +1707,7 @@ def draw_system_confirm_popup(surface, action: str) -> None:
     pygame.draw.rect(
         surface, theme.GRID, cancel_rect, max(1, theme.s(1)), border_radius=theme.s(8)
     )
-    cancel_label = btn_font.render("Cancel", True, theme.LABEL)
+    cancel_label = btn_font.render(tr("common.cancel"), True, theme.LABEL)
     surface.blit(cancel_label, cancel_label.get_rect(center=cancel_rect.center))
 
     confirm_fill = _SYSTEM_BTN_DANGER_FILL if danger else _SYSTEM_BTN_FILL
@@ -1720,7 +1720,7 @@ def draw_system_confirm_popup(surface, action: str) -> None:
         max(1, theme.s(2)),
         border_radius=theme.s(8),
     )
-    confirm_label = btn_font.render("Confirm", True, theme.LABEL)
+    confirm_label = btn_font.render(tr("common.confirm"), True, theme.LABEL)
     surface.blit(confirm_label, confirm_label.get_rect(center=confirm_rect.center))
 
     _system_confirm_buttons = [
@@ -2185,7 +2185,7 @@ def display_row_at(x: int, y: int, page: int, scroll_offset: int = 0) -> int | N
 def _brightness_slider_metrics() -> tuple[int, int, int, int]:
     """track_w, row_h, label_w, value_w for the Display brightness slider."""
     body_font = _display_font()
-    label_w = body_font.size("Brightness")[0]
+    label_w = body_font.size(tr("settings.slider.brightness"))[0]
     value_w = body_font.size("100%")[0]
     track_w = theme.s(120)
     row_h = _row_pitch()
@@ -2253,7 +2253,7 @@ def brightness_slider_value_at(x: int, scroll_offset: int = 0) -> int | None:
 
 def _hud_opacity_slider_metrics() -> tuple[int, int, int, int]:
     body_font = _display_font()
-    label_w = body_font.size("HUD Opacity")[0]
+    label_w = body_font.size(tr("settings.slider.hud_opacity"))[0]
     value_w = body_font.size("100%")[0]
     track_w = theme.s(120)
     row_h = _row_pitch()
@@ -2314,7 +2314,7 @@ def _chime_volume_slider_metrics() -> tuple[int, int, int, int]:
     # Widest HUD volume label so all SFX sliders share geometry.
     label_w = max(
         body_font.size(lbl)[0]
-        for lbl in ("Chime volume", "Tracked volume", "Military volume", "Quake volume")
+        for lbl in (tr("settings.vol.chime"), tr("settings.vol.tracked"), tr("settings.vol.military"), tr("settings.vol.quake"))
     )
     value_w = body_font.size("100%")[0]
     # Shorter than the other sliders — each row also carries an on/off switch.
@@ -2520,7 +2520,7 @@ def chime_volume_slider_value_at(x: int, scroll_offset: int = 0) -> int | None:
 def _vfr_opacity_slider_metrics() -> tuple[int, int, int, int]:
     """track_w, row_h, label_w, value_w for the Options VFR opacity slider."""
     body_font = _display_font()
-    label_w = body_font.size("VFR opacity")[0]
+    label_w = body_font.size(tr("settings.slider.vfr_opacity"))[0]
     value_w = body_font.size("100%")[0]
     track_w = theme.s(100)
     row_h = _row_pitch()
@@ -2589,7 +2589,10 @@ def vfr_opacity_slider_value_at(x: int, scroll_offset: int = 0) -> int | None:
 
 def _atc_volume_slider_metrics() -> tuple[int, int, int, int]:
     body_font = _display_font()
-    label_w = body_font.size("Volume")[0]
+    label_w = max(
+        body_font.size(tr(key))[0]
+        for key in ("settings.slider.volume", "settings.slider.lofi_volume")
+    )
     value_w = body_font.size(f"{settings.ATC_VOLUME_MAX}%")[0]
     track_w = theme.s(100)
     row_h = _row_pitch()
@@ -2715,7 +2718,7 @@ def quiet_dim_row_index() -> int:
 
 def _quiet_dim_slider_metrics() -> tuple[int, int, int, int]:
     body_font = _display_font()
-    label_w = body_font.size("Dim")[0]
+    label_w = body_font.size(tr("settings.slider.dim"))[0]
     value_w = body_font.size("100%")[0]
     return theme.s(120), _row_pitch(), label_w, value_w
 
@@ -2816,7 +2819,7 @@ def _draw_quiet_dim_slider_row(surface, ry: int, focused: bool) -> None:
             lw,
         )
     label = body_font.render(
-        "Dim", True, theme.LABEL if enabled else theme.HINT
+        tr("settings.slider.dim"), True, theme.LABEL if enabled else theme.HINT
     )
     surface.blit(label, (left_x, int(ry + (row_h - text_h) // 2)))
     track_cy = int(ry + row_h // 2)
@@ -2870,7 +2873,16 @@ def _atc_status_label_from_status(st: dict | None) -> str:
     err = st.get("error")
     if err and st.get("state") == "Error":
         return tr("settings.atc.status", value=err)[:42]
-    return tr("settings.atc.status", value=st.get("state") or tr("settings.atc.stopped"))
+    state = st.get("state") or "Stopped"
+    key = {
+        "Playing (quiet override)": "portal.atc.state.playing_override",
+        "Playing": "portal.atc.state.playing",
+        "Quiet hours": "portal.atc.state.quiet_hours",
+        "Disabled": "portal.atc.state.disabled",
+        "Error": "portal.atc.state.error",
+        "Stopped": "portal.atc.state.stopped",
+    }.get(state)
+    return tr("settings.atc.status", value=tr(key) if key else state)
 
 
 def _atc_output_label() -> str:
@@ -2953,7 +2965,7 @@ def _draw_lofi_volume_slider_row(surface, ry: int, focused: bool) -> None:
     text_h = body_font.get_height()
     row_h = max(slider_h, text_h + theme.s(6))
     _draw_card(surface, ry, focused=focused)
-    label = body_font.render("Lofi Vol", True, theme.LABEL)
+    label = body_font.render(tr("settings.slider.lofi_volume"), True, theme.LABEL)
     surface.blit(label, (left_x, int(ry + (row_h - text_h) // 2)))
     track_cy = int(ry + row_h // 2)
     draw.draw_slider(surface, track_x, track_cy, track_w, (pct / 100.0) * 100.0)
@@ -2974,7 +2986,7 @@ def _draw_atc_volume_slider_row(surface, ry: int, focused: bool) -> None:
     text_h = body_font.get_height()
     row_h = max(slider_h, text_h + theme.s(6))
     _draw_card(surface, ry, focused=focused)
-    label = body_font.render("Volume", True, theme.LABEL)
+    label = body_font.render(tr("settings.slider.volume"), True, theme.LABEL)
     surface.blit(label, (left_x, int(ry + (row_h - text_h) // 2)))
     track_cy = int(ry + row_h // 2)
     draw.draw_slider(surface, track_x, track_cy, track_w, (pct / hi) * 100.0)
@@ -3402,7 +3414,7 @@ def _draw_brightness_slider_row(surface, ry: int, focused: bool) -> None:
     text_h = body_font.get_height()
     row_h = max(slider_h, text_h + theme.s(6))
     _draw_card(surface, ry, focused=focused)
-    label = body_font.render("Brightness", True, theme.LABEL)
+    label = body_font.render(tr("settings.slider.brightness"), True, theme.LABEL)
     surface.blit(label, (left_x, int(ry + (row_h - text_h) // 2)))
     track_cy = int(ry + row_h // 2)
     draw.draw_slider(surface, track_x, track_cy, track_w, (pct - lo) / max(1, hi - lo) * 100.0)
@@ -3430,7 +3442,7 @@ def _draw_hud_opacity_slider_row(surface, ry: int, focused: bool) -> None:
     text_h = body_font.get_height()
     row_h = max(slider_h, text_h + theme.s(6))
     _draw_card(surface, ry, focused=focused)
-    label = body_font.render("HUD Opacity", True, theme.MUTED)
+    label = body_font.render(tr("settings.slider.hud_opacity"), True, theme.MUTED)
     surface.blit(label, (left_x, int(ry + (row_h - text_h) // 2)))
     track_cy = int(ry + row_h // 2)
     draw.draw_slider(surface, track_x, track_cy, track_w, (pct - lo) / max(1, hi - lo) * 100.0)
@@ -3498,7 +3510,7 @@ def _draw_vfr_opacity_slider_row(surface, ry: int, focused: bool) -> None:
     text_h = body_font.get_height()
     row_h = max(slider_h, text_h + theme.s(6))
     _draw_card(surface, ry, focused=focused)
-    label = body_font.render("VFR opacity", True, theme.MUTED)
+    label = body_font.render(tr("settings.slider.vfr_opacity"), True, theme.MUTED)
     surface.blit(label, (left_x, int(ry + (row_h - text_h) // 2)))
     track_cy = int(ry + row_h // 2)
     draw.draw_slider(surface, track_x, track_cy, track_w, (pct - lo) / max(1, hi - lo) * 100.0)
@@ -3745,7 +3757,7 @@ def draw_info(
             exp_y = gy0 + _swatch_grid_h()
             exp_h = _theme_expander_h()
             if exp_y + exp_h >= top and exp_y <= bottom:
-                exp_label = body_font.render("Custom RGB", True, theme.MUTED)
+                exp_label = body_font.render(tr("settings.rgb.custom"), True, theme.MUTED)
                 lx = theme.CENTER_X - exp_label.get_width() // 2
                 ly = int(exp_y + (exp_h - text_h) // 2)
                 surface.blit(exp_label, (lx, ly))

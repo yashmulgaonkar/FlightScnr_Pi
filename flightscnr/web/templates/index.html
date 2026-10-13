@@ -348,8 +348,8 @@
             <p class="hint">Callsign/type/altitude on aircraft, and vessel name tags. Turn off to declutter a busy radar; tap a symbol for details.</p>
             <label for="aircraft_tag_id">Aircraft ID on tags</label>
             <select id="aircraft_tag_id">
-                <option value="flight_number">Flight number</option>
-                <option value="callsign">Callsign</option>
+                <option value="flight_number" data-i18n="portal.radar.aircraft_id.flight_number">Flight number</option>
+                <option value="callsign" data-i18n="portal.radar.aircraft_id.callsign">Callsign</option>
                 <option value="tail">Tail number</option>
                 <option value="alternate">Alternate</option>
             </select>
@@ -568,7 +568,7 @@
             <div class="track-row">
                 <input type="text" id="callsign-input" placeholder="UAL1083 / N2136U / CS-TPQ" maxlength="12">
                 <button class="btn btn-primary" id="btn-track" type="button">Track</button>
-                <button class="btn" id="btn-clear-track" type="button">Clear</button>
+                <button class="btn" id="btn-clear-track" type="button" data-i18n="portal.tracking.clear">Clear</button>
             </div>
             <p class="hint">Follow <strong>one</strong> aircraft worldwide on the Tracked screen (route, ETA, pin) — even outside radar range. Enter an ICAO flight number (UAL1083) or a registration / tail number (N2136U, CS-TPQ). For many flights or types on local radar only, use Alerts instead.</p>
             <p class="hint" id="current-tracked">Loading tracked flight...</p>
@@ -848,7 +848,7 @@
                 <input type="range" id="atc_volume" min="0" max="100" value="100">
             </label>
             <div class="chk">
-                <label for="atc_quiet_enabled">Quiet hours</label>
+                <label for="atc_quiet_enabled" data-i18n="portal.atc.quiet_hours.label">Quiet hours</label>
                 <span class="switch"><input id="atc_quiet_enabled" type="checkbox"><span class="track"></span></span>
             </div>
             <div class="track-row" style="flex-wrap:wrap;gap:.5rem">
@@ -888,7 +888,7 @@
             <p class="hint" id="bt_status_line">Status: —</p>
             <p class="hint" id="bt_route_line">Output: USB</p>
             <div class="track-row" style="margin-top:.55rem;flex-wrap:wrap;gap:.5rem">
-                <button class="btn btn-primary" id="btn-bt-scan" type="button">Scan</button>
+                <button class="btn btn-primary" id="btn-bt-scan" type="button" data-i18n="portal.bluetooth.scan">Scan</button>
                 <button class="btn" id="btn-bt-use" type="button">Use Bluetooth</button>
                 <button class="btn" id="btn-bt-usb" type="button">Use USB</button>
                 <button class="btn" id="btn-bt-disconnect" type="button">Disconnect</button>
@@ -970,7 +970,7 @@
             <label for="firms-key">NASA FIRMS MAP_KEY (wildfires outside USA/Canada)</label>
             <input type="password" id="firms-key" placeholder="MAP_KEY" autocomplete="off">
             <p class="hint" id="firms-hint"></p>
-            <p class="hint">Free key from <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener">FIRMS map key</a>. Used for satellite hotspots when the radar is outside the USA and Canada. In California: CAL FIRE; elsewhere in USA/Canada: NIFC WFIGS (no key).</p>
+            <p class="hint"><span data-i18n="portal.api_keys.firms.hint_before_link">Free key from</span> <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener">FIRMS map key</a>. Used for satellite hotspots when the radar is outside the USA and Canada. In California: CAL FIRE; elsewhere in USA/Canada: NIFC WFIGS (no key).</p>
             <div class="chk">
                 <label for="use-carto-basemaps">Use CARTO basemaps</label>
                 <span class="switch"><input id="use-carto-basemaps" type="checkbox" checked><span class="track"></span></span>
@@ -978,7 +978,7 @@
             <label for="carto-key">CARTO basemaps API key</label>
             <input type="password" id="carto-key" placeholder="API key" autocomplete="off">
             <p class="hint" id="carto-hint"></p>
-            <p class="hint">Free key from <a href="https://carto.com/basemaps/apikey/" target="_blank" rel="noopener">CARTO basemaps</a> (no CARTO account required). Required for Dark: Carto, Light: Carto, and Street: Voyager — without it tiles show an “API key required” watermark.</p>
+            <p class="hint"><span data-i18n="portal.api_keys.carto.hint_before_link">Free key from</span> <a href="https://carto.com/basemaps/apikey/" target="_blank" rel="noopener">CARTO basemaps</a> (no CARTO account required). Required for Dark: Carto, Light: Carto, and Street: Voyager — without it tiles show an “API key required” watermark.</p>
             <div class="chk">
                 <label for="use-stadia-maps">Use Stadia Maps</label>
                 <span class="switch"><input id="use-stadia-maps" type="checkbox" checked><span class="track"></span></span>
@@ -986,7 +986,7 @@
             <label for="stadia-key">Stadia Maps API key</label>
             <input type="password" id="stadia-key" placeholder="API key" autocomplete="off">
             <p class="hint" id="stadia-hint"></p>
-            <p class="hint">Free key from <a href="https://client.stadiamaps.com/signup/" target="_blank" rel="noopener">Stadia Maps</a>. Required for Dark: Stadia and Light: Toner basemap styles on the Radar card.</p>
+            <p class="hint"><span data-i18n="portal.api_keys.stadia.hint_before_link">Free key from</span> <a href="https://client.stadiamaps.com/signup/" target="_blank" rel="noopener">Stadia Maps</a>. Required for Dark: Stadia and Light: Toner basemap styles on the Radar card.</p>
             <div class="track-row" style="margin-top:.6rem">
                 <button class="btn btn-primary" id="btn-keys-save" type="button">Save keys</button>
                 <button class="btn" id="btn-keys-restart" type="button">Save &amp; restart</button>
@@ -1024,10 +1024,10 @@
             <p class="hint" id="update-repair-hint">If you are stuck on an old version and <strong>Repair &amp; Update</strong> is missing, on the Pi open <strong>Menu → Accessories → Terminal</strong> and paste:<br><code>curl -fsSL https://raw.githubusercontent.com/yashmulgaonkar/FlightScnr_Pi/main/scripts/repair-ota.sh | bash</code></p>
             <div class="track-row" style="margin-top:.55rem">
                 <button class="btn" id="btn-check-updates" type="button">Check Updates</button>
-                <button class="btn btn-primary hidden" id="btn-update-now" type="button">Update Now</button>
+                <button class="btn btn-primary hidden" id="btn-update-now" type="button" data-i18n="portal.updates.update_now">Update Now</button>
                 <button class="btn hidden" id="btn-update-tonight" type="button">Later tonight</button>
                 <button class="btn btn-primary hidden" id="btn-repair-update" type="button">Repair &amp; Update</button>
-                <button class="btn btn-primary hidden" id="btn-resync-install" type="button">Finish install</button>
+                <button class="btn btn-primary hidden" id="btn-resync-install" type="button" data-i18n="portal.updates.finish_install">Finish install</button>
             </div>
             <div class="track-row hidden" id="update-confirm-row">
                 <button class="btn btn-primary" id="btn-update-confirm-yes" type="button">Install &amp; Restart</button>
@@ -1089,7 +1089,7 @@
     <details class="card irreversible-card">
         <summary><span class="ico">&#9888;</span><span data-i18n="portal.section.master_caution.title">Master Caution</span><span class="sum" data-i18n="portal.section.master_caution.summary">wipe, reinstall</span><span class="chev">&#9656;</span></summary>
         <div class="body">
-            <p class="hint">Download settings from <strong data-i18n="portal.master_caution.system">System</strong> first if you want to keep radar prefs and API keys. Wi-Fi and dump1090 are not touched. If this button fails with a sudo error, tap <strong>Update Now</strong> or <strong>Finish install</strong> once so sudoers is updated.</p>
+            <p class="hint">Download settings from <strong data-i18n="portal.master_caution.system">System</strong> first if you want to keep radar prefs and API keys. Wi-Fi and dump1090 are not touched. If this button fails with a sudo error, tap <strong data-i18n="portal.master_caution.update_now">Update Now</strong> or <strong data-i18n="portal.master_caution.finish_install">Finish install</strong> once so sudoers is updated.</p>
             <div class="irreversible-row" id="irreversible-actions-row">
                 <div class="irreversible-copy">
                     <h3>Clean install</h3>
@@ -2379,7 +2379,7 @@ const MARINE_SOURCE_LABELS = {
     openwaters: "Open Waters",
 };
 const POSITION_SOURCE_LABELS = {
-    dump1090: "Local (dump1090 / readsb)",
+    dump1090: "dump1090 / readsb",
     adsbfi: "adsb.fi",
     opensky: "OpenSky",
     adsbexchange: "ADS-B Exchange",
@@ -2423,7 +2423,7 @@ function renderPositionSourceList(order) {
         li.draggable = true;
         li.dataset.source = source;
         li.className = "drag-item";
-        li.innerHTML = `<span class="drag-handle">&#9776;</span> <span>${POSITION_SOURCE_LABELS[source]}</span>`;
+        li.innerHTML = `<span class="drag-handle">&#9776;</span> <span>${source === "dump1090" ? i18nText("portal.stats.local", "Local") + " (" + POSITION_SOURCE_LABELS[source] + ")" : POSITION_SOURCE_LABELS[source]}</span>`;
         list.appendChild(li);
     }
     attachDragReorder(list);
@@ -3572,7 +3572,7 @@ if ($("btn-wifi-start-setup")) {
                 "wifi-setup-pref-status",
                 i18nText(
                     "portal.system.wifi_setup.opening",
-                    data.message || "Opening Wi-Fi setup on the display…"
+                    data.message || i18nText("portal.system.wifi_setup.opening", "Opening Wi-Fi setup on the display…")
                 )
             );
         } catch (e) {
@@ -3882,7 +3882,14 @@ function renderBluetoothStatus(st) {
     if (!line) return;
     const name = st.name || st.mac || "";
     let text = i18nFormat("portal.common.status.value", "Status: {status}", {
-        status: i18nFromSource(st.state || "—"),
+        status: i18nText({
+            "Unavailable": "portal.bluetooth.state.unavailable",
+            "Adapter off": "portal.bluetooth.state.adapter_off",
+            "Connected": "portal.bluetooth.state.connected",
+            "Connected (no sink)": "portal.bluetooth.state.no_sink",
+            "Paired": "portal.bluetooth.state.paired",
+            "Not paired": "portal.bluetooth.state.not_paired",
+        }[st.state], st.state || "—"),
     });
     if (name) text += ` — ${name}`;
     if (st.mac && st.name) text += ` (${st.mac})`;

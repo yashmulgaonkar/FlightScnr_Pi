@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ effective_language }}">
 <head>
     <meta charset="UTF-8">
-    <title>Top Farthest Flights</title>
+    <title data-i18n="portal.maps.farthest">{{ tr("portal.maps.farthest") }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         html, body {
@@ -27,7 +27,7 @@
     </style>
 </head>
 <body>
-    <h1>Top Farthest Flights</h1>
+    <h1 data-i18n="portal.maps.farthest">{{ tr("portal.maps.farthest") }}</h1>
     <iframe src="{{ url_for('maps', filename='farthest.html') }}"></iframe>
 </body>
 </html>

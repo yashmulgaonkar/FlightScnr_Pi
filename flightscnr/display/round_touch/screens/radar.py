@@ -1008,7 +1008,7 @@ def _vessel_tag_lines(flight):
 
     # Legacy multi-line vessel tag (still never uses MMSI).
     block_h, offsets, main_font, sub_font = _tag_block_metrics()
-    plane_type = flight.get("plane") or "Vessel"
+    plane_type = flight.get("plane") or tr("flight.vessel_default")
     sog = flight.get("sog_kt")
     try:
         alt = f"{float(sog):.0f} kt" if sog is not None else (flight.get("nav_status_name") or "")
@@ -1823,10 +1823,10 @@ def _draw_facing_calibrate_overlay(surface):
     facing = settings.effective_facing_deg()
     label = settings.facing_label(facing)
     lines = [
-        (f"Facing {label}", title, theme.LABEL),
-        ("Drag to rotate", font, theme.HINT),
-        ("Tap center to save", font, theme.MUTED),
-        ("Tap rim to cancel", font, theme.MUTED),
+        (tr("radar.facing.value", direction=label), title, theme.LABEL),
+        (tr("radar.facing.drag"), font, theme.HINT),
+        (tr("radar.facing.save"), font, theme.MUTED),
+        (tr("radar.facing.cancel"), font, theme.MUTED),
     ]
 
     pad_x = theme.s(8)

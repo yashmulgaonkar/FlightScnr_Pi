@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ effective_language }}">
 <head>
     <meta charset="UTF-8">
-    <title>Closest Flight</title>
+    <title data-i18n="portal.maps.closest">{{ tr("portal.maps.closest") }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         html, body {
@@ -27,7 +27,7 @@
     </style>
 </head>
 <body>
-    <h1>Closest Flight</h1>
+    <h1 data-i18n="portal.maps.closest">{{ tr("portal.maps.closest") }}</h1>
     <iframe src="{{ url_for('maps', filename='closest.html') }}"></iframe>
 </body>
 </html>
