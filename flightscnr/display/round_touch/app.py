@@ -70,6 +70,7 @@ from display.round_touch.screens import (
     clock,
     flieger_clock,
     flip_board,
+    iss as iss_screen,
     details,
     disclaimer,
     fire_detail,
@@ -102,8 +103,10 @@ SCREEN_ANALOG_NIGHT = "analog_clock_night"
 SCREEN_FLIEGER_CLOCK = "flieger_clock"
 SCREEN_MOON = "moon"
 SCREEN_FLIP_BOARD = "flip_board"
+SCREEN_ISS = "iss"
 # Long enough to read a board and page between fields before it hands
-# the dial back to radar.
+# the dial back to radar. The ISS screen beside the board uses the same
+# hold, including the pin that cancels it.
 FLIP_BOARD_TIMEOUT_S = 60.0
 SCREEN_FORECAST = "forecast"
 SCREEN_TRACKED = "tracked"
@@ -1082,6 +1085,10 @@ class RoundTouchDisplay:
         elif self.screen == SCREEN_FLIP_BOARD:
             flip_board.draw_flip_board(self.surface)
             aircraft_tile.draw(self.surface, self.flights)
+        elif self.screen == SCREEN_ISS:
+            self._scroll.max_offset = iss_screen.draw_iss(
+                self.surface, scroll_offset=self._scroll.offset
+            )
         elif self.screen == SCREEN_FORECAST:
             forecast.draw_forecast(self.surface)
         elif self.screen == SCREEN_TRACKED:
@@ -1347,6 +1354,10 @@ class RoundTouchDisplay:
         if self.screen == SCREEN_FLIP_BOARD:
             # Pinned means it stays until the user leaves.
             if flip_board.is_pinned():
+                return None
+            return float(FLIP_BOARD_TIMEOUT_S)
+        if self.screen == SCREEN_ISS:
+            if iss_screen.is_pinned():
                 return None
             return float(FLIP_BOARD_TIMEOUT_S)
         if self.screen in (SCREEN_TRACKED, SCREEN_LIVE) and tracked.is_pinned():
@@ -1798,7 +1809,7 @@ class RoundTouchDisplay:
             logger.debug("Alert reflash on radar entry failed", exc_info=True)
 
     def _open_screen(self, screen: str):
-        if screen in (SCREEN_CLOCK, SCREEN_ANALOG_CLOCK, SCREEN_ANALOG_NIGHT, SCREEN_FLIEGER_CLOCK, SCREEN_MOON, SCREEN_FLIP_BOARD, SCREEN_FORECAST):
+        if screen in (SCREEN_CLOCK, SCREEN_ANALOG_CLOCK, SCREEN_ANALOG_NIGHT, SCREEN_FLIEGER_CLOCK, SCREEN_MOON, SCREEN_FLIP_BOARD, SCREEN_FORECAST, SCREEN_ISS):
             self._last_clock_minute = -1
             self._last_clock_draw = 0.0
         previous = self.screen
@@ -3693,7 +3704,8 @@ class RoundTouchDisplay:
             and not self._overscroll_v
         ):
             return
-        if self.screen != SCREEN_SETTINGS or self.input.is_dragging():
+        on_iss_crew = self.screen == SCREEN_ISS and iss_screen.show_crew()
+        if (self.screen != SCREEN_SETTINGS and not on_iss_crew) or self.input.is_dragging():
             # A fresh grab owns the list; the spring restarts from the
             # finger's release state, not a stale velocity.
             self._scroll_momentum_v = 0.0
@@ -3795,7 +3807,45 @@ class RoundTouchDisplay:
             self._last_slider_draw = now_scroll
         self._safe_draw()
 
+    def _follow_finger_scroll(self) -> None:
+        """Drag-scroll a list the way the menu screens do, including a short flick."""
+        self.input.consume_scroll_drag()
+        if self.input.is_dragging():
+            pos = self.input.drag_pos()
+            if pos is None:
+                return
+            now_t = time.time()
+            if self._settings_drag_y is None:
+                self._scroll_samples = [(now_t, pos[1])]
+                self._scroll_momentum_v = 0.0
+            else:
+                dy = pos[1] - self._settings_drag_y
+                if dy:
+                    self._apply_scroll_delta(-dy)
+                self._scroll_samples.append((now_t, pos[1]))
+                if len(self._scroll_samples) > 6:
+                    self._scroll_samples.pop(0)
+            self._settings_drag_y = pos[1]
+            return
+        if self._settings_drag_y is None:
+            return
+        self._settings_drag_y = None
+        velocity = 0.0
+        if len(self._scroll_samples) >= 2:
+            t0, y0 = self._scroll_samples[0]
+            t1, y1 = self._scroll_samples[-1]
+            if t1 - t0 > 0.005:
+                velocity = (y1 - y0) / (t1 - t0)
+        self._scroll_samples = []
+        self._scroll_momentum_t = time.time()
+        if abs(velocity) > 120.0:
+            self._scroll_momentum_v = -velocity
+        self._safe_draw()
+
     def _handle_scroll_drag(self):
+        if self.screen == SCREEN_ISS and iss_screen.show_crew():
+            self._follow_finger_scroll()
+            return
         if self.screen == SCREEN_SETTINGS and self._atc_picker:
             # input_handler only accumulates scroll_dy before the swipe
             # threshold, then converts the rest to a swipe (which snapped the
@@ -4217,7 +4267,7 @@ class RoundTouchDisplay:
 
     def _breadcrumb_tapped(self, x: int, y: int) -> bool:
         """Screen-aware breadcrumb hit: curved band on curved-chrome screens."""
-        if self.screen == SCREEN_FLIP_BOARD:
+        if self.screen in (SCREEN_FLIP_BOARD, SCREEN_ISS):
             return False
         if self.screen in (
             SCREEN_SETTINGS, SCREEN_DETAILS, SCREEN_FLIGHT, SCREEN_FIRE, SCREEN_QUAKE,
@@ -4522,8 +4572,8 @@ class RoundTouchDisplay:
         ):
             return
 
-        # Live ← Tracked ← Radar → Flip board: swipe right moves leftward;
-        # swipe left from radar opens the arrivals board when that layer is on.
+        # Live ← Tracked ← Radar → Flip board → ISS: swipe right moves
+        # leftward; swipe left from radar opens the arrivals board.
         # Short flicks still pick aircraft / fires like a tap.
         if swipe and self.screen == SCREEN_RADAR and radial_menu.is_open():
             radial_menu.close()
@@ -4582,6 +4632,14 @@ class RoundTouchDisplay:
         elif swipe == input_handler.SWIPE_RIGHT and self.screen == SCREEN_FLIP_BOARD:
             flip_board.clear_pinned()
             self._return_to_radar()
+            self._safe_draw()
+        elif swipe == input_handler.SWIPE_LEFT and self.screen == SCREEN_FLIP_BOARD:
+            self._open_screen(SCREEN_ISS)
+            self._note_activity()
+            self._safe_draw()
+        elif swipe == input_handler.SWIPE_RIGHT and self.screen == SCREEN_ISS:
+            self._open_screen(SCREEN_FLIP_BOARD)
+            self._note_activity()
             self._safe_draw()
         elif swipe == input_handler.SWIPE_RIGHT and self.screen == SCREEN_MOON:
             self._open_screen(SCREEN_FLIEGER_CLOCK)
@@ -5011,6 +5069,22 @@ class RoundTouchDisplay:
                     flip_board.toggle_direction()
                     self._note_activity()
                     self._safe_draw()
+        elif tap and self.screen == SCREEN_ISS:
+            action = iss_screen.handle_tap(tap[0], tap[1])
+            if action == "radar":
+                iss_screen.clear_pinned()
+                self._return_to_radar()
+                self._safe_draw()
+            elif action == "pin":
+                iss_screen.toggle_pinned()
+                self._note_activity()
+                self._safe_draw()
+            elif action in ("toggle", "astronaut"):
+                iss_screen.toggle_crew()
+                self._scroll.reset()
+                self._scroll_momentum_v = 0.0
+                self._note_activity()
+                self._safe_draw()
         elif tap and self.screen == SCREEN_FORECAST:
             action = forecast.tap_footer_action(tap[0], tap[1])
             if action == "radar":
@@ -5137,6 +5211,10 @@ class RoundTouchDisplay:
         # pinned board clock_timeout_s() instead of no timeout at all.
         if self.screen == SCREEN_FLIP_BOARD and flip_board.is_pinned():
             return
+        # Same trap as the board: a pinned ISS screen reports no timeout,
+        # and must not fall through to the clock-family substitute.
+        if self.screen == SCREEN_ISS and iss_screen.is_pinned():
+            return
 
         timeout_s = self._timeout_duration_s()
         if timeout_s is None:
@@ -5152,6 +5230,22 @@ class RoundTouchDisplay:
         if time.time() - self._secondary_activity >= timeout_s:
             self._return_to_radar()
             self._safe_draw()
+
+    def _tick_iss(self) -> None:
+        """Refresh the map for the age readout, a scrolling OVER line, and tiles."""
+        now = time.time()
+        iss_screen.tick_over_marquee(now)
+        refresh_s = theme.SWEEP_FRAME_MS / 1000.0 if iss_screen.over_marquee_animating() else 1.0
+        if (now - self._last_clock_draw) >= refresh_s or route_map.basemap_needs_redraw():
+            self._last_clock_draw = now
+            self._last_static_draw = now
+            self._safe_draw()
+            return
+        if self._timeout_remaining_fraction() is None:
+            return
+        if (now - self._last_static_draw) >= (theme.SWEEP_FRAME_MS / 1000.0):
+            self._last_static_draw = now
+            self._redraw_timeout_ring_only()
 
     def _tick_clock(self):
         if self.screen not in (SCREEN_CLOCK, SCREEN_ANALOG_CLOCK, SCREEN_ANALOG_NIGHT, SCREEN_FLIEGER_CLOCK, SCREEN_MOON, SCREEN_FLIP_BOARD, SCREEN_FORECAST):
@@ -5938,6 +6032,12 @@ class RoundTouchDisplay:
                 "or   tail -f $FLIGHTSCNR_CURSOR_LOG"
             )
         running = True
+        try:
+            from utilities import iss as iss_feed
+
+            iss_feed.start()
+        except Exception:
+            logger.exception("ISS tracker failed to start")
         last_data_poll = 0
         last_location_check = 0
         last_ota_auto = 0.0
@@ -6382,6 +6482,8 @@ class RoundTouchDisplay:
                             )
                             self._prewarm_thread.start()
                             self._loop_stage("loop_prewarm_spawn", _lt)
+                elif self.screen == SCREEN_ISS:
+                    self._tick_iss()
                 elif self.screen in (SCREEN_CLOCK, SCREEN_ANALOG_CLOCK, SCREEN_ANALOG_NIGHT, SCREEN_FLIEGER_CLOCK, SCREEN_MOON, SCREEN_FLIP_BOARD, SCREEN_FORECAST):
                     self._tick_clock()
                 elif self.screen in (SCREEN_TRACKED, SCREEN_LIVE):
@@ -6507,6 +6609,12 @@ class RoundTouchDisplay:
             logger.exception("Display loop crashed")
             raise
         finally:
+            try:
+                from utilities import iss as iss_feed
+
+                iss_feed.stop()
+            except Exception:
+                logger.exception("Could not stop the ISS tracker")
             try:
                 from utilities.overhead import flush_flight_counter
 

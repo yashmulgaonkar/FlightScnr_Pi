@@ -123,6 +123,11 @@ def _load():
         _loaded = True
 
 
+def is_ready() -> bool:
+    """True once the city list is in memory. Does not download it."""
+    return _loaded and bool(_db)
+
+
 def get_nearest_city(latitude, longitude):
     """
     Find the nearest city to the given coordinates.

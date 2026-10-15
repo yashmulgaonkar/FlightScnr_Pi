@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import math
+import os
 
 import pygame
 
@@ -722,7 +723,7 @@ def draw_lines_scrolled(
 
 from display.round_touch import arc_ui  # noqa: E402  (kept near its users)
 
-_CURVED_FOOTER_ORDER = ("pin", "prev", "radar", "back", "next", "board_id")  # screen left → right
+_CURVED_FOOTER_ORDER = ("pin", "prev", "radar", "back", "next", "board_id", "astronaut")  # screen left → right
 
 
 def __getattr__(name: str):
@@ -791,7 +792,7 @@ def curved_footer_segments(kinds: list[str]) -> list[tuple[str, float, float]]:
                     pin_half,
                 )
             )
-        elif kind == "board_id":
+        elif kind in ("board_id", "astronaut"):
             # Mirror of pin: icon-sized, outboard of Next on screen-right.
             id_half = side_half * 0.42
             out.append(
@@ -821,6 +822,41 @@ def curved_footer_hit(x: int, y: int, kinds: list[str]) -> str | None:
     return None
 
 
+_ASTRONAUT_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "assets", "astronaut.png")
+)
+_WORLDMAP_PATH = os.path.abspath(
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "assets", "aircraft", "icons", "worldmap.png"
+    )
+)
+_silhouette_cache: dict[tuple, pygame.Surface | None] = {}
+
+
+def _silhouette_glyph(path: str, size: int, glyph_color) -> pygame.Surface | None:
+    """Black artwork, tinted to the footer glyph color."""
+    color = tuple(glyph_color[:3])
+    key = (path, size, color)
+    if key in _silhouette_cache:
+        return _silhouette_cache[key]
+    try:
+        image = pygame.image.load(path).convert_alpha()
+    except pygame.error:
+        _silhouette_cache[key] = None
+        return None
+    width, height = image.get_size()
+    scale = size / float(max(1, max(width, height)))
+    image = pygame.transform.smoothscale(
+        image, (max(1, int(width * scale)), max(1, int(height * scale)))
+    )
+    image.fill((255, 255, 255, 255), special_flags=pygame.BLEND_RGB_MAX)
+    tint = pygame.Surface(image.get_size(), pygame.SRCALPHA)
+    tint.fill((*color, 255))
+    image.blit(tint, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    _silhouette_cache[key] = image
+    return image
+
+
 def _fallback_radar_glyph(size: int, glyph_color) -> pygame.Surface:
     """Vector radar glyph when the PNG art is unavailable."""
     side = size + 2
@@ -839,7 +875,11 @@ def _fallback_radar_glyph(size: int, glyph_color) -> pygame.Surface:
 
 
 def draw_curved_footer(
-    surface: pygame.Surface, kinds: list[str], *, pin_active: bool = False
+    surface: pygame.Surface,
+    kinds: list[str],
+    *,
+    pin_active: bool = False,
+    crew_open: bool = False,
 ) -> None:
     """Curved footer: frosted Prev/Next pills + bare oversized radar art."""
     if not kinds:
@@ -854,18 +894,25 @@ def draw_curved_footer(
         tuple(glyph_color),
         tuple(fill_rgba),
         bool(pin_active),
+        bool(crew_open),
         active_catalog().effective_language,
     )
     surf_pos = _overlay_cached(
         _footer_cache, key,
-        lambda tmp: _draw_curved_footer_uncached(tmp, kinds, pin_active=pin_active),
+        lambda tmp: _draw_curved_footer_uncached(
+            tmp, kinds, pin_active=pin_active, crew_open=crew_open
+        ),
     )
     if surf_pos and surf_pos[0] is not None:
         surface.blit(surf_pos[0], surf_pos[1])
 
 
 def _draw_curved_footer_uncached(
-    surface: pygame.Surface, kinds: list[str], *, pin_active: bool = False
+    surface: pygame.Surface,
+    kinds: list[str],
+    *,
+    pin_active: bool = False,
+    crew_open: bool = False,
 ) -> None:
     from display.round_touch import radar_hud
 
@@ -916,6 +963,18 @@ def _draw_curved_footer_uncached(
                 label = None
             if label is not None:
                 surface.blit(label, label.get_rect(center=(px, py)))
+            continue
+        if kind == "astronaut":
+            px = cx + int(round(r * math.cos(mid)))
+            py = cy + int(round(r * math.sin(mid)))
+            # The crew list is open: this same pill returns to the world map.
+            icon = _silhouette_glyph(
+                _WORLDMAP_PATH if crew_open else _ASTRONAUT_PATH,
+                theme.s(22 if crew_open else 18),
+                glyph_color,
+            )
+            if icon is not None:
+                surface.blit(icon, icon.get_rect(center=(px, py)))
             continue
         arc_key = _FOOTER_ARC_KEYS.get(kind)
         label = tr(arc_key) if arc_key else None
