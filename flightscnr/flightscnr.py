@@ -58,8 +58,7 @@ def validate_config():
         masked = TOMORROW_API_KEY[:4] + "..." + TOMORROW_API_KEY[-4:]
         logger.info(f"  ✓ TOMORROW_API_KEY: {masked}")
     else:
-        errors.append("TOMORROW_API_KEY")
-        logger.warning("  ⚠ TOMORROW_API_KEY is NOT SET — clock weather will not work")
+        logger.info("  TOMORROW_API_KEY is not set — using Open-Meteo weather")
 
     # --- Location ---
     if location_configured():

@@ -115,4 +115,6 @@ def draw_forecast(surface):
             )
             surface.blit(rain, rain.get_rect(midtop=(cx, row_y)))
 
-    weather_icons.draw_attribution(surface)
+    weather_icons.draw_attribution(surface, sources={
+        "forecast": (wx.get("sources") or {}).get("forecast"),
+    })

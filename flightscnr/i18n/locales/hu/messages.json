@@ -1027,5 +1027,10 @@
   "iss.pass.on_date": "on {month} {day}, at {clock}",
   "iss.pass.now": "now.",
   "iss.pass.detail": "in {when} · {elev}° · {length} · {where}",
-  "iss.pass.overhead_detail": "now . {elev}° . {left}."
+  "iss.pass.overhead_detail": "now . {elev}° . {left}.",
+  "portal.weather.providers_hint": "A Tomorrow.io az elsődleges forrás, ha engedélyezve és beállítva van. Az Open-Meteo automatikusan biztosítja az időjárási adatokat, ha a Tomorrow.io nem érhető el, vagy ki van kapcsolva. Az Open-Meteo használatához nem kell API-kulcs.",
+  "portal.weather.fetch.providers_hint": "Az aktuális időjárás frissítését kéri a kijelzőtől, automatikus Open-Meteo-tartalékkal. Törli a Tomorrow.io helyi várakozási idejét; a szolgáltató korlátai továbbra is érvényesek. Az időjárás és a szél :01 és :31 perckor, az előrejelzés :01 perckor frissül. A kézi frissítést ritkán használd.",
+  "weather.attribution.data": "Időjárás: {providers}",
+  "weather.attribution.icons": "Ikonok: Tomorrow.io",
+  "weather.providers_unavailable": "Az időjárási szolgáltatások nem érhetők el - automatikus újrapróbálkozás"
 }

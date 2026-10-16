@@ -306,4 +306,4 @@ def draw_clock(surface):
             y = _draw_moon_row(surface, y, detail_font)
 
     nav.draw_footer_buttons(surface, list(FOOTER_BUTTONS))
-    weather_icons.draw_attribution(surface)
+    weather_icons.draw_attribution(surface, sources=(wx or {}).get("sources"))

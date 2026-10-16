@@ -101,6 +101,7 @@ def weather_status_messages(
 ) -> tuple[str, str]:
     selected = _catalog(catalog)
     keys = {
+        "unavailable": ("weather.unavailable", "weather.providers_unavailable"),
         "no_key": ("weather.unavailable", "weather.add_api_key"),
         "disabled": ("weather.disabled", "weather.enable_tomorrow"),
         "backoff": ("weather.rate_limited", "weather.limit_reached"),

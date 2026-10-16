@@ -308,9 +308,12 @@ def draw_attribution(
     y: int | None = None,
     font=None,
     color=None,
+    *,
+    sources: dict | None = None,
 ) -> int:
-    """Draw Tomorrow.io attribution (required when using their icons)."""
+    """Credit weather data separately from Tomorrow.io's icon artwork."""
     from display.round_touch import draw, nav, theme
+    from i18n import tr
 
     if y is None:
         y = nav.attribution_y()
@@ -318,4 +321,13 @@ def draw_attribution(
         font = draw.load_font(max(8, theme.s(10)))
     if color is None:
         color = theme.HINT
-    return draw.draw_center_line(surface, ATTRIBUTION, y, font, color)
+    providers = []
+    for source, name in (("tomorrow", "Tomorrow.io"), ("open-meteo", "Open-Meteo")):
+        if source in (sources or {}).values():
+            providers.append(name)
+    if providers:
+        y = draw.draw_center_line(
+            surface, tr("weather.attribution.data", providers=" + ".join(providers)),
+            y - font.get_height() - theme.s(2), font, color,
+        )
+    return draw.draw_center_line(surface, tr("weather.attribution.icons"), y, font, color)

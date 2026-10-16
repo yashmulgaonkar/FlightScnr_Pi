@@ -1027,5 +1027,10 @@
   "iss.pass.on_date": "on {month} {day}, at {clock}",
   "iss.pass.now": "now.",
   "iss.pass.detail": "in {when} · {elev}° · {length} · {where}",
-  "iss.pass.overhead_detail": "now . {elev}° . {left}."
+  "iss.pass.overhead_detail": "now . {elev}° . {left}.",
+  "portal.weather.providers_hint": "Tomorrow.io wird bevorzugt, wenn es aktiviert und eingerichtet ist. Open-Meteo liefert automatisch Wetterdaten, wenn Tomorrow.io nicht verfügbar oder ausgeschaltet ist. Für Open-Meteo ist kein API-Schlüssel erforderlich.",
+  "portal.weather.fetch.providers_hint": "Fordert eine Aktualisierung des aktuellen Wetters durch das Display an, mit automatischem Open-Meteo-Ersatz. Löscht die lokale Tomorrow.io-Wartezeit; Serverkontingente gelten weiterhin. Wetter und Wind werden um :01 und :31 aktualisiert, die Vorhersage um :01. Manuelle Aktualisierungen sparsam verwenden.",
+  "weather.attribution.data": "Wetter: {providers}",
+  "weather.attribution.icons": "Symbole: Tomorrow.io",
+  "weather.providers_unavailable": "Wetterdienste nicht verfügbar - automatischer neuer Versuch"
 }

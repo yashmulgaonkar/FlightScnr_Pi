@@ -60,6 +60,21 @@ Radar home, flight detail, **tracked flight** with route map, **Follow / Live** 
 </tr>
 </table>
 
+### Weather providers
+
+Tomorrow.io is the preferred source for current weather and daily forecasts.
+**Open-Meteo automatically takes over** when the Tomorrow.io key is missing,
+its portal switch is off, quotas are reached, or requests fail. No additional
+setting or Open-Meteo key is needed. Current weather and wind refresh at `:01`
+and `:31`; daily forecasts at `:01`. Tomorrow.io resumes priority on the next
+allowed refresh. If both services fail, the display keeps its last readings.
+
+Weather data sources are credited separately from the Tomorrow.io icon artwork.
+Open-Meteo data is [CC BY 4.0](https://open-meteo.com/en/terms), and its public
+API is for non-commercial use. This project remains CC BY-NC-SA 4.0; commercial
+use requires separate permission from Yash Mulgaonkar, the original author of
+[FlightScnr_Pi](https://github.com/yashmulgaonkar/FlightScnr_Pi).
+
 ### Language and region
 
 The clock, date, forecast, Tomorrow.io weather descriptions, portal settings

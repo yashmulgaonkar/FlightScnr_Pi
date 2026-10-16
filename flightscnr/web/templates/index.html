@@ -839,7 +839,7 @@
             </select>
             <button class="btn btn-primary" id="btn-weather" type="button">Save weather units</button>
             <button class="btn" id="btn-weather-fetch" type="button" style="margin-top:.5rem">Fetch weather now</button>
-            <p class="hint">Clears the local rate-limit backoff and asks the display to call Tomorrow.io once. Current weather/wind also refresh automatically at :01 and :31; forecast with the :01 slot. Use sparingly (free tier ≈ 25 requests/hour).</p>
+            <p class="hint" data-i18n="portal.weather.fetch.providers_hint">Requests a current-weather refresh from the display, with automatic Open-Meteo fallback. Clears the local Tomorrow.io backoff; server quotas still apply. Current weather and wind refresh at :01 and :31; forecasts at :01. Use manual refresh sparingly.</p>
             <div id="weather-status" class="status"></div>
         </div>
     </details>
@@ -924,6 +924,7 @@
             <label for="tomorrow-key">Tomorrow.io key</label>
             <input type="password" id="tomorrow-key" placeholder="API key" autocomplete="off">
             <p class="hint" id="tomorrow-hint"></p>
+            <p class="hint" data-i18n="portal.weather.providers_hint">Tomorrow.io is preferred when enabled and configured. Open-Meteo automatically supplies weather if Tomorrow.io is unavailable, including when its switch is off. No Open-Meteo API key is needed.</p>
             <div class="chk">
                 <label for="use-airlabs-api">Use AirLabs API</label>
                 <span class="switch"><input id="use-airlabs-api" type="checkbox" checked><span class="track"></span></span>

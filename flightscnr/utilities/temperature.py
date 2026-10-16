@@ -8,7 +8,7 @@
 # 3. Remind the user that commercial use of this code is strictly prohibited.
 
 """
-Tomorrow.io weather API wrapper with built-in rate limiting.
+Weather provider selection with Tomorrow.io priority and Open-Meteo fallback.
 
 Free tier: 25 requests/hour, 500/day. We keep a shared on-disk limiter so the
 display and web portal processes share one budget. Scheduled cadence is
@@ -29,6 +29,7 @@ from requests import Session
 from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 from urllib3.util.retry import Retry
+from utilities.open_meteo import number
 
 try:
     import fcntl
@@ -94,6 +95,7 @@ def invalidate_caches() -> None:
     global _cached_temp, _cached_temp_ts, _cached_forecast, _cached_forecast_ts
     global _cached_temp_units, _cached_forecast_units, _cached_weather_code
     global _cached_wind_speed, _cached_wind_direction
+    global _current_source, _forecast_source, _wind_source, _wind_fetch_ts
     _cached_temp = None
     _cached_temp_ts = 0.0
     _cached_forecast = None
@@ -103,6 +105,8 @@ def invalidate_caches() -> None:
     _cached_weather_code = None
     _cached_wind_speed = None
     _cached_wind_direction = None
+    _current_source = _forecast_source = _wind_source = None
+    _wind_fetch_ts = 0.0
     for path in (_TEMP_CACHE_FILE, _FORECAST_CACHE_FILE):
         try:
             _os.remove(path)
@@ -117,6 +121,9 @@ def reset_for_location_change() -> None:
     across processes and recenters must not unlock a burst of API calls.
     """
     invalidate_caches()
+    from utilities import open_meteo
+
+    open_meteo.invalidate_cache()
 
 # ─── Rate Limiter (shared across display + portal via disk) ───────────────────
 # Free tier ≈ 25 req/hour. Scheduled cadence:
@@ -367,13 +374,16 @@ def _mark_timelines_forbidden() -> None:
 def weather_fetch_status() -> str:
     """Coarse reason weather may be missing - for UI copy (not HTTP).
 
-    Returns one of: ``ok``, ``disabled``, ``no_key``, ``backoff``,
-    ``rate_limited``, ``unknown``.
+    Returns one of: ``ok``, ``unavailable``, ``rate_limited``, ``unknown``.
+    A missing/disabled Tomorrow.io key alone never disables weather.
     """
-    if not _weather_enabled():
-        return "disabled"
-    if not TOMORROW_API_KEY:
-        return "no_key"
+    _check_location()
+    if _cached_temp and _cached_temp[0] is not None:
+        return "ok"
+    if _cached_forecast and _forecast_from_today(_cached_forecast):
+        return "ok"
+    if not _weather_enabled() or not TOMORROW_API_KEY:
+        return "unavailable"
 
     def mutate(state: dict) -> str:
         now = time.time()
@@ -383,7 +393,7 @@ def weather_fetch_status() -> str:
             state["in_backoff"] = False
             in_backoff = False
         if in_backoff:
-            return "backoff"
+            return "unavailable"
         any_ts = float(state.get("any_last_call_ts") or 0.0)
         if any_ts > 0 and (now - any_ts) < _MIN_ANY_INTERVAL_S:
             return "rate_limited"
@@ -496,6 +506,7 @@ def get_session() -> Session:
             allowed_methods=["GET", "POST"],
             # Do NOT retry on 429 - that makes rate limiting worse
             status_forcelist=[500, 502, 503, 504],
+            respect_retry_after_header=False,
             raise_on_status=False,
         )
 
@@ -527,6 +538,7 @@ def invalidate_temp_cache() -> None:
     """Clear realtime temp/wind caches only (keep forecast)."""
     global _cached_temp, _cached_temp_ts, _cached_temp_units, _cached_weather_code
     global _cached_wind_speed, _cached_wind_direction, _wind_fetch_ts
+    global _current_source, _wind_source
     _cached_temp = None
     _cached_temp_ts = 0.0
     _cached_temp_units = None
@@ -534,6 +546,7 @@ def invalidate_temp_cache() -> None:
     _cached_wind_speed = None
     _cached_wind_direction = None
     _wind_fetch_ts = 0.0
+    _current_source = _wind_source = None
     try:
         _os.remove(_TEMP_CACHE_FILE)
     except OSError:
@@ -545,16 +558,21 @@ def _load_file_cache(path):
     try:
         with open(path, "r") as f:
             obj = _json.load(f)
-            return obj.get("data"), obj.get("ts", 0), obj.get("units")
-    except (FileNotFoundError, _json.JSONDecodeError, KeyError):
+            stamp = number(obj.get("ts", 0))
+            if stamp is None:
+                return None, 0, None
+            return obj.get("data"), stamp, obj.get("units")
+    except (OSError, ValueError, TypeError, AttributeError):
         return None, 0, None
 
 
-def _save_file_cache(path, data, units: str | None = None):
+def _save_file_cache(path, data, units: str | None = None, *, stamp=None, source=None):
     """Save data + timestamp + units to file cache."""
     try:
         with open(path, "w") as f:
-            _json.dump({"data": data, "ts": time.time(), "units": units}, f)
+            _json.dump({"data": data, "ts": time.time() if stamp is None else stamp,
+                        "units": units, "source": source,
+                        "location": _temperature_location()}, f)
     except (PermissionError, OSError) as e:
         logger.warning(f"Cannot write cache {path}: {e}")
 
@@ -569,27 +587,78 @@ _cached_wind_direction = None
 _wind_fetch_ts = 0.0
 _WIND_FETCH_COOLDOWN_S = 1800  # Match half-hour current-weather cadence
 _TEMP_CACHE_TTL = 1800  # 30 minutes — realtime + wind
+_current_source = None
+_forecast_source = None
+_wind_source = None
+_cached_location = _temperature_location()
+_current_fetch_lock = threading.Lock()
+_forecast_fetch_lock = threading.Lock()
+
+
+def _cache_metadata(path) -> dict:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = _json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _check_location() -> None:
+    global _cached_location
+    location = _temperature_location()
+    if location != _cached_location:
+        reset_for_location_change()
+        _cached_location = location
+
+
+def weather_sources() -> dict:
+    """Sources for currently cached data; this accessor never performs HTTP."""
+    _check_location()
+    return {"current": _current_source, "forecast": _forecast_source, "wind": _wind_source}
+
+
+def weather_timestamps() -> dict:
+    """Original data timestamps, including when a failed fetch returns old data."""
+    return {"current": _cached_temp_ts, "forecast": _cached_forecast_ts}
+
+
+def _save_temperature() -> None:
+    if not _cached_temp:
+        return
+    temp, humidity = _cached_temp
+    _save_file_cache(_TEMP_CACHE_FILE, {
+        "temperature": temp, "humidity": humidity,
+        "weather_code": _cached_weather_code,
+        "wind_speed": _cached_wind_speed, "wind_direction": _cached_wind_direction,
+        "wind_source": _wind_source,
+    }, "metric", stamp=_cached_temp_ts, source=_current_source)
 
 
 def _store_wind(speed, direction) -> None:
     global _cached_wind_speed, _cached_wind_direction
     try:
-        _cached_wind_speed = float(speed) if speed is not None else None
+        _cached_wind_speed = number(speed)
     except (TypeError, ValueError):
         _cached_wind_speed = None
     try:
-        _cached_wind_direction = float(direction) if direction is not None else None
+        _cached_wind_direction = number(direction)
     except (TypeError, ValueError):
         _cached_wind_direction = None
 
 
 # Load persistent cache on startup
 _startup_temp, _startup_temp_ts, _startup_temp_units = _load_file_cache(_TEMP_CACHE_FILE)
+_startup_temp_meta = _cache_metadata(_TEMP_CACHE_FILE)
+if _startup_temp_meta.get("location", _cached_location) != _cached_location:
+    _startup_temp = None
 if _startup_temp and (time.time() - _startup_temp_ts) < _TEMP_CACHE_TTL * 2:
+    _current_source = _startup_temp_meta.get("source") or "tomorrow"
     if isinstance(_startup_temp, dict):
         _cached_temp = (_startup_temp.get("temperature"), _startup_temp.get("humidity"))
         _cached_weather_code = _startup_temp.get("weather_code")
         _store_wind(_startup_temp.get("wind_speed"), _startup_temp.get("wind_direction"))
+        _wind_source = _startup_temp.get("wind_source")
     else:
         _cached_temp = tuple(_startup_temp) if isinstance(_startup_temp, list) else _startup_temp
     _cached_temp_ts = _startup_temp_ts
@@ -599,6 +668,7 @@ if _startup_temp and (time.time() - _startup_temp_ts) < _TEMP_CACHE_TTL * 2:
 
 def current_weather_code():
     """Latest weather code from realtime (may be None)."""
+    _check_location()
     return _cached_weather_code
 
 
@@ -609,6 +679,7 @@ def current_wind():
     the wind is coming *from* (0=N, 90=E). Source is Tomorrow.io realtime when
     available; Open-Meteo fills gaps. FR24 has no weather/wind fields.
     """
+    _check_location()
     if _cached_wind_speed is None and _cached_wind_direction is None:
         _ensure_wind()
     speed = _cached_wind_speed
@@ -640,50 +711,24 @@ def _parse_lat_lon() -> tuple[float, float] | None:
         return None
 
 
+def _open_meteo_weather(*, force=False):
+    from utilities import open_meteo
+
+    return open_meteo.fetch(_parse_lat_lon(), FORECAST_DAYS, force=force)
+
+
 def _ensure_wind() -> None:
-    """Populate wind from Open-Meteo when Tomorrow cache lacks it."""
-    global _cached_wind_speed, _cached_wind_direction, _wind_fetch_ts
+    """Use the shared Open-Meteo response when realtime wind is absent."""
+    global _wind_source
     if _cached_wind_speed is not None or _cached_wind_direction is not None:
         return
-    now = time.time()
-    if now - _wind_fetch_ts < _WIND_FETCH_COOLDOWN_S:
-        return
-    _wind_fetch_ts = now
-    coords = _parse_lat_lon()
-    if coords is None:
-        return
-    lat, lon = coords
-    try:
-        s = get_session()
-        resp = s.get(
-            "https://api.open-meteo.com/v1/forecast",
-            params={
-                "latitude": lat,
-                "longitude": lon,
-                "current": "wind_speed_10m,wind_direction_10m",
-                "wind_speed_unit": "ms",
-            },
-            timeout=(3, 10),
-        )
-        if resp.status_code != 200:
-            return
-        cur = (resp.json() or {}).get("current") or {}
-        _store_wind(cur.get("wind_speed_10m"), cur.get("wind_direction_10m"))
-        if _cached_temp and (_cached_wind_speed is not None or _cached_wind_direction is not None):
-            temp, humidity = _cached_temp
-            _save_file_cache(
-                _TEMP_CACHE_FILE,
-                {
-                    "temperature": temp,
-                    "humidity": humidity,
-                    "weather_code": _cached_weather_code,
-                    "wind_speed": _cached_wind_speed,
-                    "wind_direction": _cached_wind_direction,
-                },
-                _cached_temp_units or "metric",
-            )
-    except (RequestException, ValueError, TypeError, OSError) as exc:
-        logger.debug("Open-Meteo wind fallback failed: %s", exc)
+    result = _open_meteo_weather()
+    if result:
+        cur = result.get("current") or {}
+        _store_wind(cur.get("wind_speed"), cur.get("wind_direction"))
+        if _cached_wind_speed is not None or _cached_wind_direction is not None:
+            _wind_source = "open-meteo"
+            _save_temperature()
 
 
 def _return_temperature():
@@ -693,123 +738,83 @@ def _return_temperature():
     return _convert_temperature(temp, "metric"), humidity
 
 
-def grab_temperature_and_humidity(*, force: bool = False):
-    """
-    Fetch current temperature and humidity.
-    Returns cached data if called within the cache TTL or rate limit window.
-
-    ``force=True`` skips the in-memory TTL and shared rate budget (manual
-    refresh / location change). Still subject to Tomorrow.io's real quotas.
-    """
+def _fallback_temperature(*, force=False):
     global _cached_temp, _cached_temp_ts, _cached_temp_units, _cached_weather_code
+    global _current_source, _wind_source
+    result = _open_meteo_weather(force=force)
+    if result:
+        cur = result.get("current") or {}
+        temperature = cur.get("temperature")
+        stamp = result["ts"]
+        if temperature is not None and (not _cached_temp or stamp >= _cached_temp_ts):
+            _cached_temp = (temperature, cur.get("humidity"))
+            _cached_temp_ts = stamp
+            _cached_temp_units = "metric"
+            _cached_weather_code = cur.get("weather_code")
+            _current_source = "open-meteo"
+            _store_wind(cur.get("wind_speed"), cur.get("wind_direction"))
+            _wind_source = "open-meteo" if (
+                _cached_wind_speed is not None or _cached_wind_direction is not None
+            ) else None
+            _save_temperature()
+            logger.info("Current weather supplied by Open-Meteo")
+    return _return_temperature()
 
-    if not _weather_enabled():
-        logger.info("Tomorrow.io weather disabled in web portal settings")
-        if _cached_temp:
-            _ensure_wind()
-            return _return_temperature()
-        return None, None
-    if not TOMORROW_API_KEY:
-        logger.warning("TOMORROW_API_KEY not set - skipping temperature fetch")
-        if _cached_temp:
-            _ensure_wind()
-            return _return_temperature()
-        return None, None
 
-    units = _temperature_units()
+def grab_temperature_and_humidity(*, force: bool = False):
+    """Current weather: fresh cache, Tomorrow.io, Open-Meteo, last reading.
 
-    # Return cache if still fresh (convert if display units changed)
-    if (
-        not force
-        and _cached_temp
-        and (time.time() - _cached_temp_ts) < _TEMP_CACHE_TTL
-    ):
+    force bypasses the data TTL, not the shared provider budget. Manual refresh
+    explicitly unlocks Tomorrow.io before calling this function.
+    """
+    with _current_fetch_lock:
+        return _grab_current(force=force)
+
+
+def _grab_current(*, force=False):
+    global _cached_temp, _cached_temp_ts, _cached_temp_units, _cached_weather_code
+    global _current_source, _wind_source
+    _check_location()
+    if not force and _cached_temp and time.time() - _cached_temp_ts < _TEMP_CACHE_TTL:
         _ensure_wind()
         return _return_temperature()
-
-    # Rate limit check
-    if not force and _rate_limited("temp"):
-        logger.debug("Rate limit: skipping temperature API call, using cache")
-        if _cached_temp:
-            _ensure_wind()
-            return _return_temperature()
-        return None, None
-
+    if not _weather_enabled() or not TOMORROW_API_KEY or _rate_limited("temp"):
+        return _fallback_temperature(force=force)
     try:
-        s = get_session()
-        request = s.get(
-            f"{TOMORROW_API_URL}/weather/realtime",
-            params={
-                "location": _temperature_location(),
-                "units": _temperature_units(),
-                "apikey": TOMORROW_API_KEY
-            },
-            timeout=(5, 20)
-        )
-
-        if request.status_code == 429:
-            _record_call("temp")
-            _enter_backoff()
-            if _cached_temp:
-                _ensure_wind()
-                return _return_temperature()
-            return None, None
-
-        request.raise_for_status()
         _record_call("temp")
-        _exit_backoff()
-
-        data = request.json().get("data", {}).get("values", {})
-        temperature = data.get("temperature")
-        humidity = data.get("humidity")
-        code = data.get("weatherCode")
-
-        if temperature is None:
-            logger.error("Incomplete data from Tomorrow.io API")
-            if _cached_temp:
-                _ensure_wind()
-                return _return_temperature()
-            return None, None
-
-        try:
-            _cached_weather_code = int(code) if code is not None else None
-        except (TypeError, ValueError):
-            _cached_weather_code = None
-        _store_wind(data.get("windSpeed"), data.get("windDirection"))
-        if _cached_wind_speed is None and _cached_wind_direction is None:
-            _ensure_wind()
-        _cached_temp = (temperature, humidity)
+        response = get_session().get(
+            f"{TOMORROW_API_URL}/weather/realtime",
+            params={"location": _temperature_location(), "units": _temperature_units(),
+                    "apikey": TOMORROW_API_KEY}, timeout=(5, 20),
+        )
+        if response.status_code == 429:
+            _enter_backoff()
+            return _fallback_temperature(force=force)
+        response.raise_for_status()
+        payload = response.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        values = data.get("values") if isinstance(data, dict) else None
+        if not isinstance(values, dict) or number(values.get("temperature")) is None:
+            raise ValueError("Tomorrow.io returned no usable temperature")
+        _cached_temp = (number(values.get("temperature")), number(values.get("humidity")))
         _cached_temp_ts = time.time()
         _cached_temp_units = "metric"
-        _save_file_cache(
-            _TEMP_CACHE_FILE,
-            {
-                "temperature": temperature,
-                "humidity": humidity,
-                "weather_code": _cached_weather_code,
-                "wind_speed": _cached_wind_speed,
-                "wind_direction": _cached_wind_direction,
-            },
-            "metric",
-        )
-        return _convert_temperature(temperature, "metric"), humidity
-
-    except (RequestException, ValueError) as e:
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        # Don't clear backoff on network errors - let auto-clear (2hr) handle it
-        if is_dns_error(e):
-            logger.error(
-                f"[{timestamp}] DNS failure resolving api.tomorrow.io - will retry"
-            )
-        else:
-            logger.error(
-                f"[{timestamp}] Temperature request failed: {e}"
-            )
-
-        if _cached_temp:
-            _ensure_wind()
-            return _return_temperature()
-        return None, None
+        code = number(values.get("weatherCode"))
+        _cached_weather_code = int(code) if code is not None else None
+        _current_source = "tomorrow"
+        _store_wind(values.get("windSpeed"), values.get("windDirection"))
+        _wind_source = "tomorrow" if (
+            _cached_wind_speed is not None or _cached_wind_direction is not None
+        ) else None
+        _exit_backoff()
+        _ensure_wind()
+        _save_temperature()
+        return _return_temperature()
+    except (RequestException, ValueError, TypeError, KeyError) as exc:
+        # Do not log exception URLs: Tomorrow.io query strings contain the key.
+        logger.warning("Tomorrow.io current weather failed (%s); trying Open-Meteo",
+                       type(exc).__name__)
+        return _fallback_temperature(force=force)
 
 
 # ─── Forecast ────────────────────────────────────────────────────────────────
@@ -866,8 +871,12 @@ def _return_forecast():
 
 # Load persistent forecast cache on startup
 _startup_fc, _startup_fc_ts, _startup_fc_units = _load_file_cache(_FORECAST_CACHE_FILE)
+_startup_fc_meta = _cache_metadata(_FORECAST_CACHE_FILE)
+if _startup_fc_meta.get("location", _cached_location) != _cached_location:
+    _startup_fc = None
 if _startup_fc and (time.time() - _startup_fc_ts) < _FORECAST_CACHE_TTL * 2:
     _cached_forecast = _startup_fc
+    _forecast_source = _startup_fc_meta.get("source") or "tomorrow"
     _cached_forecast_ts = _startup_fc_ts
     _cached_forecast_units = _startup_fc_units or "metric"
     logger.info(f"Loaded cached forecast from file ({len(_startup_fc)} intervals)")
@@ -914,211 +923,117 @@ def _intervals_from_weather_forecast_payload(payload: dict) -> list:
     ]
 
 
-def _store_forecast_intervals(intervals: list) -> list:
-    global _cached_forecast, _cached_forecast_ts, _cached_forecast_units
-    intervals = _forecast_from_today(intervals)
+def _store_forecast_intervals(intervals: list, *, source="tomorrow", stamp=None) -> list:
+    global _cached_forecast, _cached_forecast_ts, _cached_forecast_units, _forecast_source
+    usable = []
+    for item in intervals:
+        if not isinstance(item, dict) or not isinstance(item.get("values"), dict):
+            continue
+        if _interval_local_date(item.get("startTime") or "") is None:
+            continue
+        values = _normalize_forecast_values(item["values"])
+        lo, hi = number(values.get("temperatureMin")), number(values.get("temperatureMax"))
+        if lo is None and hi is None:
+            continue
+        values.update(temperatureMin=lo, temperatureMax=hi)
+        usable.append({**item, "values": values})
+    intervals = _forecast_from_today(usable)
     if not intervals:
         return []
     _cached_forecast = intervals
-    _cached_forecast_ts = time.time()
+    _cached_forecast_ts = time.time() if stamp is None else stamp
     _cached_forecast_units = "metric"
-    _save_file_cache(_FORECAST_CACHE_FILE, intervals, "metric")
+    _forecast_source = source
+    _save_file_cache(_FORECAST_CACHE_FILE, intervals, "metric",
+                     stamp=_cached_forecast_ts, source=source)
     return _return_forecast()
 
 
 def _fetch_forecast_via_weather_endpoint(tag: str) -> list:
-    """Fallback when /timelines is forbidden on the current API key/plan."""
-    s = get_session()
-    resp = s.get(
+    """Keep Tomorrow.io's alternative daily endpoint for restricted keys."""
+    _record_call("forecast")
+    response = get_session().get(
         f"{TOMORROW_API_URL}/weather/forecast",
-        params={
-            "location": _temperature_location(),
-            "units": _temperature_units(),
-            "timesteps": "1d",
-            "apikey": TOMORROW_API_KEY,
-        },
-        timeout=(5, 20),
+        params={"location": _temperature_location(), "units": _temperature_units(),
+                "timesteps": "1d", "apikey": TOMORROW_API_KEY}, timeout=(5, 20),
     )
-    if resp.status_code == 429:
-        _record_call("forecast")
+    if response.status_code == 429:
         _enter_backoff()
         return []
-    resp.raise_for_status()
-    _record_call("forecast")
-    _exit_backoff()
-    intervals = _intervals_from_weather_forecast_payload(resp.json() or {})
-    if not intervals:
-        logger.error("[Forecast:%s] weather/forecast returned no daily rows", tag)
-        return []
-    logger.info("[Forecast:%s] Using weather/forecast fallback (%d days)", tag, len(intervals))
-    return _store_forecast_intervals(intervals)
+    response.raise_for_status()
+    result = _store_forecast_intervals(
+        _intervals_from_weather_forecast_payload(response.json())
+    )
+    if result:
+        _exit_backoff()
+    return result
+
+
+def _fallback_forecast(*, force=False):
+    result = _open_meteo_weather(force=force)
+    if result and (not _cached_forecast or result["ts"] >= _cached_forecast_ts):
+        stored = _store_forecast_intervals(result.get("intervals") or [],
+                                           source="open-meteo", stamp=result["ts"])
+        if stored:
+            logger.info("Daily forecast supplied by Open-Meteo")
+            return stored
+    return _return_forecast()
 
 
 def grab_forecast(tag="unknown", *, force: bool = False):
+    """Daily forecast: fresh cache, Tomorrow.io, Open-Meteo, last forecast.
+
+    force bypasses freshness only. A manual refresh unlocks the budget separately.
     """
-    Fetch daily forecast data.
-    Returns cached data if called within the cache TTL or rate limit window.
+    with _forecast_fetch_lock:
+        return _grab_forecast(tag, force=force)
 
-    ``force=True`` skips the in-memory TTL and shared rate budget (manual refresh).
-    """
-    global _cached_forecast, _cached_forecast_ts, _cached_forecast_units
 
-    if not _weather_enabled():
-        logger.info("Tomorrow.io weather disabled in web portal settings")
-        return []
-    if not TOMORROW_API_KEY:
-        logger.warning("TOMORROW_API_KEY not set - skipping forecast fetch")
-        return []
-
-    # Return cache if still fresh (convert if display units changed)
-    if (
-        not force
-        and _cached_forecast
-        and (time.time() - _cached_forecast_ts) < _FORECAST_CACHE_TTL
-    ):
+def _grab_forecast(tag, *, force=False):
+    _check_location()
+    if not force and _cached_forecast and time.time() - _cached_forecast_ts < _FORECAST_CACHE_TTL:
         if _forecast_from_today(_cached_forecast):
             return _return_forecast()
-
-    # Rate limit check
-    if not force and _rate_limited("forecast"):
-        logger.debug(f"[Forecast:{tag}] Rate limit: skipping API call, using cache")
-        if _cached_forecast:
-            return _return_forecast()
-        return []
-
-    dt = datetime.now()
-    today_start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    # Free / restricted keys often 403 /timelines - skip straight to forecast.
-    if _timelines_is_forbidden():
-        try:
-            result = _fetch_forecast_via_weather_endpoint(tag)
-            if result:
-                return result
-        except RequestException as fallback_exc:
-            logger.error(
-                "[Forecast:%s] weather/forecast failed: %s",
-                tag,
-                fallback_exc,
-            )
-        if _cached_forecast:
-            return _return_forecast()
-        return []
-
+    if not _weather_enabled() or not TOMORROW_API_KEY or _rate_limited("forecast"):
+        return _fallback_forecast(force=force)
     try:
-        s = get_session()
-        resp = s.post(
-            f"{TOMORROW_API_URL}/timelines",
-            headers={
-                "Accept-Encoding": "gzip",
-                "accept": "application/json",
-                "content-type": "application/json"
-            },
-            params={"apikey": TOMORROW_API_KEY},
-            json={
-                "location": _temperature_location(),
-                "units": _temperature_units(),
-                "timezone": "auto",
-                "startTime": today_start.isoformat(),
-                "dailyStartHour": 6,
-                "fields": [
-                    "temperatureMin",
-                    "temperatureMax",
-                    "weatherCodeFullDay",
-                    "sunriseTime",
-                    "sunsetTime",
-                    "moonPhase",
-                    "precipitationProbabilityAvg",
-                ],
-                "timesteps": ["1d"],
-                "endTime": (today_start + timedelta(days=int(FORECAST_DAYS))).isoformat(),
-            },
-            timeout=(5, 20)
-        )
-
-        if resp.status_code == 429:
-            _record_call("forecast")
-            _enter_backoff()
-            if _cached_forecast:
-                return _return_forecast()
-            return []
-
-        # Free / restricted keys often 403 the timelines endpoint - fall back once,
-        # then remember so we never waste another call on /timelines.
-        if resp.status_code in (400, 401, 403):
-            _record_call("forecast")
-            _mark_timelines_forbidden()
-            logger.warning(
-                "[Forecast:%s] timelines HTTP %s - trying weather/forecast",
-                tag,
-                resp.status_code,
-            )
-            try:
-                result = _fetch_forecast_via_weather_endpoint(tag)
-                if result:
-                    return result
-            except RequestException as fallback_exc:
-                logger.error(
-                    "[Forecast:%s] weather/forecast fallback failed: %s",
-                    tag,
-                    fallback_exc,
-                )
-            if _cached_forecast:
-                return _return_forecast()
-            return []
-
-        resp.raise_for_status()
-        _record_call("forecast")
-        _exit_backoff()
-
-        intervals = _intervals_from_timelines_payload(resp.json() or {})
-        if not intervals:
-            logger.error(f"[Forecast:{tag}] No timelines returned from API")
-            try:
-                result = _fetch_forecast_via_weather_endpoint(tag)
-                if result:
-                    return result
-            except RequestException:
-                pass
-            if _cached_forecast:
-                return _return_forecast()
-            return []
-
-        stored = _store_forecast_intervals(intervals)
-        if stored:
-            return stored
-        logger.error(f"[Forecast:{tag}] No current-or-future intervals after date filter")
-        if _cached_forecast:
-            return _return_forecast()
-        return []
-
-    except RequestException as e:
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        # Don't clear backoff on network errors - let auto-clear (2hr) handle it
-        if is_dns_error(e):
-            logger.error(
-                f"[{timestamp}] [Forecast:{tag}] DNS failure resolving api.tomorrow.io - will retry"
-            )
+        if _timelines_is_forbidden():
+            result = _fetch_forecast_via_weather_endpoint(tag)
         else:
-            logger.error(
-                f"[{timestamp}] [Forecast:{tag}] API request failed: {e}"
+            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            _record_call("forecast")
+            response = get_session().post(
+                f"{TOMORROW_API_URL}/timelines",
+                headers={"Accept-Encoding": "gzip", "accept": "application/json",
+                         "content-type": "application/json"},
+                params={"apikey": TOMORROW_API_KEY},
+                json={"location": _temperature_location(), "units": _temperature_units(),
+                      "timezone": "auto", "startTime": today_start.isoformat(),
+                      "dailyStartHour": 6,
+                      "fields": ["temperatureMin", "temperatureMax", "weatherCodeFullDay",
+                                 "sunriseTime", "sunsetTime", "moonPhase",
+                                 "precipitationProbabilityAvg"],
+                      "timesteps": ["1d"],
+                      "endTime": (today_start + timedelta(days=int(FORECAST_DAYS))).isoformat()},
+                timeout=(5, 20),
             )
-            try:
+            if response.status_code == 429:
+                _enter_backoff()
+                return _fallback_forecast(force=force)
+            if response.status_code in (400, 401, 403):
+                _mark_timelines_forbidden()
                 result = _fetch_forecast_via_weather_endpoint(tag)
-                if result:
-                    return result
-            except RequestException as fallback_exc:
-                logger.error(
-                    "[Forecast:%s] weather/forecast fallback failed: %s",
-                    tag,
-                    fallback_exc,
+            else:
+                response.raise_for_status()
+                result = _store_forecast_intervals(
+                    _intervals_from_timelines_payload(response.json())
                 )
-        if _cached_forecast:
-            return _return_forecast()
-        return []
-
-    except KeyError as e:
-        logger.error(f"[Forecast:{tag}] Unexpected data format: {e}")
-        if _cached_forecast:
-            return _return_forecast()
-        return []
+                if not result:
+                    result = _fetch_forecast_via_weather_endpoint(tag)
+        if result:
+            _exit_backoff()
+            return result
+    except (RequestException, ValueError, TypeError, KeyError, AttributeError) as exc:
+        logger.warning("Tomorrow.io forecast failed (%s); trying Open-Meteo",
+                       type(exc).__name__)
+    return _fallback_forecast(force=force)

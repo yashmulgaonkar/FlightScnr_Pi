@@ -1027,5 +1027,10 @@
   "iss.pass.on_date": "on {month} {day}, at {clock}",
   "iss.pass.now": "now.",
   "iss.pass.detail": "in {when} · {elev}° · {length} · {where}",
-  "iss.pass.overhead_detail": "now . {elev}° . {left}."
+  "iss.pass.overhead_detail": "now . {elev}° . {left}.",
+  "portal.weather.providers_hint": "Tomorrow.io heeft voorrang wanneer het is ingeschakeld en ingesteld. Open-Meteo levert automatisch weergegevens als Tomorrow.io niet beschikbaar is, ook als de schakelaar uit staat. Voor Open-Meteo is geen API-sleutel nodig.",
+  "portal.weather.fetch.providers_hint": "Vraagt het scherm om het actuele weer te vernieuwen, met automatische Open-Meteo-terugval. Wist de lokale Tomorrow.io-wachttijd; serverquota blijven gelden. Weer en wind worden om :01 en :31 vernieuwd; de verwachting om :01. Gebruik handmatig vernieuwen spaarzaam.",
+  "weather.attribution.data": "Weer: {providers}",
+  "weather.attribution.icons": "Pictogrammen: Tomorrow.io",
+  "weather.providers_unavailable": "Weerdiensten niet beschikbaar - automatische nieuwe poging"
 }

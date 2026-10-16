@@ -75,13 +75,8 @@ class TestForecastDayRollover:
         def fake_grab_forecast(_tag, **kw):
             return [_interval(calls["day"])]
 
-        monkeypatch.setitem(
-            sys.modules,
-            "utilities.temperature",
-            type(sys)("utilities.temperature"),
-        )
-        import utilities.temperature as temp_mod
-
+        temp_mod = type(sys)("utilities.temperature")
+        monkeypatch.setitem(sys.modules, "utilities.temperature", temp_mod)
         temp_mod.grab_forecast = fake_grab_forecast
         temp_mod.grab_temperature_and_humidity = lambda **kw: (70, 40)
 
