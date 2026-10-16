@@ -965,6 +965,8 @@ def display_json():
             "traffic_sfx_volume": settings.traffic_sfx_volume(),
             "military_sfx_enabled": settings.military_sfx_enabled(),
             "military_sfx_volume": settings.military_sfx_volume(),
+            "iss_sfx_enabled": settings.iss_sfx_enabled(),
+            "iss_sfx_volume": settings.iss_sfx_volume(),
             "earthquake_voice_enabled": settings.earthquake_voice_enabled(),
             "earthquake_voice_volume": settings.earthquake_voice_volume(),
             "lofi_enabled": settings.lofi_enabled(),
@@ -1054,6 +1056,13 @@ def display_save():
             settings.set_military_sfx_volume(int(data.get("military_sfx_volume")))
         except (TypeError, ValueError):
             return jsonify({"message": "military_sfx_volume must be a number"}), 400
+    if "iss_sfx_enabled" in data:
+        settings.set_iss_sfx_enabled(bool(data.get("iss_sfx_enabled")))
+    if "iss_sfx_volume" in data:
+        try:
+            settings.set_iss_sfx_volume(int(data.get("iss_sfx_volume")))
+        except (TypeError, ValueError):
+            return jsonify({"message": "iss_sfx_volume must be a number"}), 400
     if "earthquake_voice_enabled" in data:
         from display.round_touch import earthquake_overlay
 
@@ -1109,6 +1118,8 @@ def display_save():
             "traffic_sfx_volume": settings.traffic_sfx_volume(),
             "military_sfx_enabled": settings.military_sfx_enabled(),
             "military_sfx_volume": settings.military_sfx_volume(),
+            "iss_sfx_enabled": settings.iss_sfx_enabled(),
+            "iss_sfx_volume": settings.iss_sfx_volume(),
             "earthquake_voice_enabled": settings.earthquake_voice_enabled(),
             "earthquake_voice_volume": settings.earthquake_voice_volume(),
             "lofi_enabled": settings.lofi_enabled(),
@@ -1471,6 +1482,27 @@ def display_military_sfx_preview():
             "ok": True,
             "military_sfx_volume": settings.military_sfx_volume(),
             "message": "Playing military sound preview.",
+        }
+    )
+
+
+@app.post("/display/iss-sfx-preview")
+def display_iss_sfx_preview():
+    """Play the ISS enter tone once at the current volume."""
+    from display.round_touch import alert_sounds, settings
+
+    data = request.get_json(silent=True) or {}
+    if "iss_sfx_volume" in data:
+        try:
+            settings.set_iss_sfx_volume(int(data.get("iss_sfx_volume")))
+        except (TypeError, ValueError):
+            return jsonify({"message": "iss_sfx_volume must be a number"}), 400
+    alert_sounds.play_iss_preview()
+    return jsonify(
+        {
+            "ok": True,
+            "iss_sfx_volume": settings.iss_sfx_volume(),
+            "message": "Playing ISS sound preview.",
         }
     )
 

@@ -483,6 +483,8 @@ _defaults = {
     "traffic_sfx_volume": 80,
     "military_sfx_enabled": True,
     "military_sfx_volume": 80,
+    "iss_sfx_enabled": True,
+    "iss_sfx_volume": 80,
     "earthquake_voice_volume": 80,
     # Master mute for ATC / chime / alert SFX (radar HUD volume icon).
     "master_sound_enabled": True,
@@ -1111,6 +1113,7 @@ def _load():
     for _sfx_en_key, _sfx_en_default in (
         ("traffic_sfx_enabled", True),
         ("military_sfx_enabled", True),
+        ("iss_sfx_enabled", True),
         ("master_sound_enabled", True),
         ("atc_sound_enabled", True),
     ):
@@ -1143,6 +1146,7 @@ def _load():
     for _sfx_vol_key in (
         "traffic_sfx_volume",
         "military_sfx_volume",
+        "iss_sfx_volume",
         "earthquake_voice_volume",
     ):
         try:
@@ -1376,6 +1380,8 @@ def _settings_snapshot(state: dict) -> tuple:
         clamp_sfx_volume(state.get("traffic_sfx_volume", 80)),
         bool(state.get("military_sfx_enabled", True)),
         clamp_sfx_volume(state.get("military_sfx_volume", 80)),
+        bool(state.get("iss_sfx_enabled", True)),
+        clamp_sfx_volume(state.get("iss_sfx_volume", 80)),
         clamp_sfx_volume(state.get("earthquake_voice_volume", 80)),
         bool(state.get("master_sound_enabled", True)),
         clamp_master_sound_volume(state.get("master_sound_volume", 100)),
@@ -3584,6 +3590,35 @@ def set_military_sfx_volume(value: int, *, persist: bool = True) -> int:
     _state["military_sfx_volume"] = vol
     if persist:
         _rmw_save({"military_sfx_volume": vol})
+    else:
+        _disk_synced = False
+    return vol
+
+
+def iss_sfx_enabled() -> bool:
+    return bool(_state.get("iss_sfx_enabled", True))
+
+
+def set_iss_sfx_enabled(enabled: bool) -> None:
+    _state["iss_sfx_enabled"] = bool(enabled)
+    _save(_state)
+
+
+def toggle_iss_sfx_enabled() -> bool:
+    set_iss_sfx_enabled(not iss_sfx_enabled())
+    return iss_sfx_enabled()
+
+
+def iss_sfx_volume() -> int:
+    return clamp_sfx_volume(_state.get("iss_sfx_volume", 80))
+
+
+def set_iss_sfx_volume(value: int, *, persist: bool = True) -> int:
+    global _disk_synced
+    vol = clamp_sfx_volume(value)
+    _state["iss_sfx_volume"] = vol
+    if persist:
+        _rmw_save({"iss_sfx_volume": vol})
     else:
         _disk_synced = False
     return vol

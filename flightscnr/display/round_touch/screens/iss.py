@@ -38,6 +38,8 @@ _ICON_PATH = os.path.abspath(
 )
 _station_icon: pygame.Surface | None = None
 _station_icon_key: tuple | None = None
+_radar_icon: pygame.Surface | None = None
+_radar_icon_key: tuple | None = None
 
 # Mercator latitude that keeps a full-world chart at the panel's 2:1 shape.
 _WORLD_LAT = 66.5
@@ -431,21 +433,80 @@ def _station_marker() -> pygame.Surface | None:
     key = (size, color)
     if _station_icon is not None and _station_icon_key == key:
         return _station_icon
+    _station_icon = _tinted_station(size, color)
+    _station_icon_key = key
+    return _station_icon
+
+
+def _tinted_station(size: int, color: tuple[int, int, int]) -> pygame.Surface | None:
+    """ISS silhouette at ``size``, tinted like an aircraft blip."""
     try:
         image = pygame.image.load(_ICON_PATH).convert_alpha()
     except pygame.error:
-        _station_icon = None
-        _station_icon_key = key
         return None
     image = pygame.transform.smoothscale(image, (size, size))
-    # The file is a black shape. Lift it to white, then multiply by the blip color.
     image.fill((255, 255, 255, 255), special_flags=pygame.BLEND_RGB_MAX)
     tint = pygame.Surface(image.get_size(), pygame.SRCALPHA)
     tint.fill((*color, 255))
     image.blit(tint, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
-    _station_icon = image
-    _station_icon_key = key
     return image
+
+
+def _radar_marker(size: int, color: tuple[int, int, int]) -> pygame.Surface | None:
+    """Cached radar-sized station icon."""
+    global _radar_icon, _radar_icon_key
+    key = (size, color)
+    if _radar_icon is not None and _radar_icon_key == key:
+        return _radar_icon
+    _radar_icon = _tinted_station(size, color)
+    _radar_icon_key = key
+    return _radar_icon
+
+
+def _radar_icon_color(altitude_km: float | None) -> tuple[int, int, int]:
+    """Same accent an ordinary aircraft uses at this height."""
+    if settings.color_by_altitude() and altitude_km is not None:
+        from display.round_touch import altitude_color
+
+        return altitude_color.color_for_altitude(float(altitude_km) * 3280.839895)
+    custom = settings.target_color("aircraft")
+    return tuple(custom[:3]) if custom else tuple(theme.AIRCRAFT[:3])
+
+
+def _radar_icon_size() -> int:
+    """Match the full-size aircraft icon, not the rim dot."""
+    pct = settings.target_size_pct("aircraft") / 100.0
+    return max(8, int(round(theme.s(34) * pct)))
+
+
+def radar_screen_point(now: float | None = None) -> tuple[int, int] | None:
+    """Pixel for the station when it is inside the radar's visible disc."""
+    from display.round_touch import geo
+
+    fix = iss_feed.snapshot(time.time() if now is None else now)
+    if not fix.has_fix or iss_feed.is_no_link(fix):
+        return None
+    _dx, _dy, dist_km = geo.local_offset_km(fix.latitude, fix.longitude)
+    if dist_km > geo.inner_ring_max_km():
+        return None
+    x, y = geo.lat_lon_to_screen(fix.latitude, fix.longitude)
+    if not theme.in_visible_circle(x, y):
+        return None
+    return int(x), int(y)
+
+
+def draw_radar_blip(surface: pygame.Surface, now: float | None = None) -> None:
+    """Plot the station on the radar when it is overhead the visible area."""
+    point = radar_screen_point(now)
+    if point is None:
+        return
+    fix = iss_feed.snapshot(time.time() if now is None else now)
+    color = _radar_icon_color(fix.altitude_km)
+    icon = _radar_marker(_radar_icon_size(), color)
+    if icon is None:
+        pygame.draw.circle(surface, color, point, max(3, theme.s(4)))
+        return
+    surface.blit(icon, icon.get_rect(center=point))
 
 
 def _draw_marker(surface: pygame.Surface, x: int, y: int) -> None:

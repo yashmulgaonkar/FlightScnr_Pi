@@ -770,7 +770,7 @@ class HudSettingsRowTests(unittest.TestCase):
     def test_sound_toggles_share_the_volume_rows(self):
         from display.round_touch.screens import info
 
-        for action in ("hourly_chime", "traffic_sfx", "military_sfx", "earthquake_voice"):
+        for action in ("hourly_chime", "traffic_sfx", "military_sfx", "iss_sfx", "earthquake_voice"):
             self.assertNotIn(action, info.HUD_ACTIONS)
         for action in info._HUD_VOLUME_ACTIONS:
             self.assertIn(action, info.HUD_ACTIONS)
@@ -782,9 +782,10 @@ class HudSettingsRowTests(unittest.TestCase):
 
         surface = pygame.Surface((theme.SIZE, theme.SIZE))
         max_scroll = info.draw_info(surface, info.PAGE_HUD, 0, -1)
-        # Card rows are taller than the old text rows; the page may scroll
-        # by up to ~two rows, but never degenerate into a long crawl.
-        self.assertLessEqual(max_scroll, info._row_pitch() * 6)
+        # Card rows are taller than the old text rows. The sound rows
+        # (chime, tracked, military, ISS, quake) may sit about one row
+        # below the fold, but the page must not become a long crawl.
+        self.assertLessEqual(max_scroll, info._row_pitch() * 7)
 
     def test_switch_and_slider_hit_targets_do_not_overlap(self):
         from display.round_touch.screens import info
@@ -793,6 +794,7 @@ class HudSettingsRowTests(unittest.TestCase):
             "chime_volume": "hourly_chime",
             "traffic_sfx_volume": "traffic_sfx",
             "military_sfx_volume": "military_sfx",
+            "iss_sfx_volume": "iss_sfx",
             "earthquake_voice_volume": "earthquake_voice",
         }
         from display.round_touch import nav

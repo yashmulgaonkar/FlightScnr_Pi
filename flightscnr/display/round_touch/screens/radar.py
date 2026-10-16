@@ -1563,6 +1563,9 @@ def _draw_flights(surface, flights):
             if heli_icon_form and aircraft.target_category(flight) == "heli":
                 heli_any = True
             aircraft.draw_plane_icon(surface, x, y, heading, color, flight=flight)
+        from display.round_touch.screens import iss as iss_screen
+
+        iss_screen.draw_radar_blip(surface)
         _t = frame_debug.end("2r_f_icons", _t)
 
         blips = [(x, y) for _, _, (x, y) in inner_items]

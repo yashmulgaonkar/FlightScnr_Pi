@@ -706,6 +706,14 @@
             <input id="military_sfx_volume" type="range" min="0" max="100" step="1" value="80">
             <p class="hint">Plays once when a new military aircraft appears in radar range.</p>
             <div class="chk">
+                <label for="iss_sfx" data-i18n="portal.display.iss_sound.label">ISS sound</label>
+                <button class="btn btn-sm" id="btn-iss-sfx-preview" type="button" data-i18n="portal.language_region.preview">Preview</button>
+                <span class="switch"><input id="iss_sfx" type="checkbox" checked><span class="track"></span></span>
+            </div>
+            <label for="iss_sfx_volume"><span data-i18n="portal.display.iss_volume.label">ISS sound volume</span> <span id="iss_sfx_volume_label">80%</span></label>
+            <input id="iss_sfx_volume" type="range" min="0" max="100" step="1" value="80">
+            <p class="hint" data-i18n="portal.display.iss_sound.hint">Plays once when the ISS enters the radar.</p>
+            <div class="chk">
                 <label for="earthquake_voice">Earthquake alert</label>
                 <button class="btn btn-sm" id="btn-earthquake-voice-preview" type="button">Preview</button>
                 <span class="switch"><input id="earthquake_voice" type="checkbox"><span class="track"></span></span>
@@ -1833,6 +1841,11 @@ async function loadAll() {
         if ($("military_sfx_volume")) {
             $("military_sfx_volume").value = String(d.military_sfx_volume ?? 80);
         }
+        if ($("iss_sfx")) $("iss_sfx").checked = d.iss_sfx_enabled !== false;
+        if ($("iss_sfx_volume")) {
+            $("iss_sfx_volume").value = String(d.iss_sfx_volume ?? 80);
+            syncChimeVolumeLabel();
+        }
         if ($("earthquake_voice")) $("earthquake_voice").checked = !!d.earthquake_voice_enabled;
         if ($("earthquake_voice_volume")) {
             $("earthquake_voice_volume").value = String(d.earthquake_voice_volume ?? 80);
@@ -1983,6 +1996,8 @@ function syncChimeVolumeLabel() {
     if (tel && $("traffic_sfx_volume")) tel.textContent = `${$("traffic_sfx_volume").value}%`;
     const mel = $("military_sfx_volume_label");
     if (mel && $("military_sfx_volume")) mel.textContent = `${$("military_sfx_volume").value}%`;
+    const iel = $("iss_sfx_volume_label");
+    if (iel && $("iss_sfx_volume")) iel.textContent = `${$("iss_sfx_volume").value}%`;
     const qel = $("earthquake_voice_volume_label");
     if (qel && $("earthquake_voice_volume")) qel.textContent = `${$("earthquake_voice_volume").value}%`;
 }
@@ -2581,6 +2596,8 @@ async function saveAndReloadSettings(statusId) {
                 traffic_sfx_volume: $("traffic_sfx_volume") ? Number($("traffic_sfx_volume").value) : 80,
                 military_sfx_enabled: $("military_sfx") ? $("military_sfx").checked : true,
                 military_sfx_volume: $("military_sfx_volume") ? Number($("military_sfx_volume").value) : 80,
+                iss_sfx_enabled: $("iss_sfx") ? $("iss_sfx").checked : true,
+                iss_sfx_volume: $("iss_sfx_volume") ? Number($("iss_sfx_volume").value) : 80,
                 earthquake_voice_enabled: $("earthquake_voice") ? $("earthquake_voice").checked : false,
                 earthquake_voice_volume: $("earthquake_voice_volume") ? Number($("earthquake_voice_volume").value) : 80,
                 lofi_enabled: $("lofi_enabled") ? $("lofi_enabled").checked : false,
@@ -3723,6 +3740,7 @@ if ($("radar_hud_opacity")) $("radar_hud_opacity").addEventListener("input", syn
 if ($("hourly_chime_volume")) $("hourly_chime_volume").addEventListener("input", syncChimeVolumeLabel);
 if ($("traffic_sfx_volume")) $("traffic_sfx_volume").addEventListener("input", syncChimeVolumeLabel);
 if ($("military_sfx_volume")) $("military_sfx_volume").addEventListener("input", syncChimeVolumeLabel);
+if ($("iss_sfx_volume")) $("iss_sfx_volume").addEventListener("input", syncChimeVolumeLabel);
 if ($("earthquake_voice_volume")) $("earthquake_voice_volume").addEventListener("input", syncChimeVolumeLabel);
 if ($("btn-chime-preview")) {
     $("btn-chime-preview").addEventListener("click", async () => {
@@ -3786,6 +3804,30 @@ if ($("btn-military-sfx-preview")) {
                 i18nText(
                     "portal.display.preview_military",
                     "Playing military sound preview."
+                )
+            );
+        } catch (err) {
+            showStatus("display-status", err.message || String(err), true);
+        }
+    });
+}
+if ($("btn-iss-sfx-preview")) {
+    $("btn-iss-sfx-preview").addEventListener("click", async () => {
+        clearStatus("display-status");
+        try {
+            const volume = $("iss_sfx_volume")
+                ? Number($("iss_sfx_volume").value)
+                : 80;
+            const data = await jsonFetch("/display/iss-sfx-preview", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ iss_sfx_volume: volume }),
+            });
+            showStatus(
+                "display-status",
+                i18nText(
+                    "portal.display.preview_iss",
+                    "Playing ISS sound preview."
                 )
             );
         } catch (err) {

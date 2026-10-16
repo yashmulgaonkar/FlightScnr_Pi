@@ -31,6 +31,7 @@ _ATTENTION_HOLD_S = 20.0
 _rim_flash_military = False
 _rim_flash_watch = False
 _rim_flash_emergency = False
+_rim_flash_iss = False
 
 # ICAO types listed under military-* icon categories (e.g. Q9 → military-drone).
 _ICON_MAPPING_PATH = os.path.join(
@@ -734,9 +735,9 @@ def is_in_range(flight: dict) -> bool:
     return geo.local_offset_km(lat, lon)[2] <= geo.inner_ring_max_km()
 
 
-def start_rim_flash(*, military: bool = False, watch: bool = False, emergency: bool = False, duration: float | None = None) -> None:
+def start_rim_flash(*, military: bool = False, watch: bool = False, emergency: bool = False, iss: bool = False, duration: float | None = None) -> None:
     """Begin (or restart) the attention rim flash."""
-    global _rim_flash_until, _attention_until, _rim_flash_military, _rim_flash_watch, _rim_flash_emergency
+    global _rim_flash_until, _attention_until, _rim_flash_military, _rim_flash_watch, _rim_flash_emergency, _rim_flash_iss
     now = time.time()
     dur = _RIM_FLASH_S if duration is None else float(duration)
     _rim_flash_until = now + dur
@@ -744,6 +745,7 @@ def start_rim_flash(*, military: bool = False, watch: bool = False, emergency: b
     _rim_flash_military = bool(military)
     _rim_flash_watch = bool(watch)
     _rim_flash_emergency = bool(emergency)
+    _rim_flash_iss = bool(iss)
 
 
 def active_alert_flights(flights: list[dict]) -> list[dict]:
@@ -843,4 +845,6 @@ def rim_flash_color():
         return theme.ALERT_WATCH
     if _rim_flash_military:
         return theme.ALERT_MILITARY
+    if _rim_flash_iss:
+        return (255, 255, 255)
     return theme.ALERT_OTHER

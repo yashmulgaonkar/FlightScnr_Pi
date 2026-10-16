@@ -25,6 +25,7 @@ _ASSETS = os.path.abspath(
 )
 _TRAFFIC_PATH = os.path.join(_ASSETS, "traffic.mp3")
 _MILITARY_PATH = os.path.join(_ASSETS, "airbus_autopilot.mp3")
+_QUINDAR_PATH = os.path.join(_ASSETS, "quindar_tones.mp3")
 
 _SEEN_CAPACITY = 48
 _mil_seen: list[int] = []
@@ -33,6 +34,8 @@ _MIL_COOLDOWN_S = 3.0
 
 _tracked_id: str | None = None
 _tracked_was_in_range = False
+_iss_seen = False
+_iss_was_in = False
 
 
 def _silenced() -> bool:
@@ -94,6 +97,15 @@ def play_military_preview() -> None:
         _MILITARY_PATH,
         volume_pct=settings.military_sfx_volume(),
         thread_name="sfx-military-preview",
+        respect_off_hours=False,
+    )
+
+
+def play_iss_preview() -> None:
+    _play(
+        _QUINDAR_PATH,
+        volume_pct=settings.iss_sfx_volume(),
+        thread_name="sfx-iss-preview",
         respect_off_hours=False,
     )
 
@@ -205,7 +217,39 @@ def check_military_sightings(flights: list[dict]) -> bool:
     return fired
 
 
+def check_iss_enter() -> bool:
+    """Play Quindar tones and flash the rim white once per entry into the radar disc."""
+    global _iss_seen, _iss_was_in
+    from display.round_touch.screens import iss as iss_screen
+
+    now_in = iss_screen.radar_screen_point() is not None
+    if not _iss_seen:
+        _iss_seen = True
+        _iss_was_in = now_in
+        return False
+    entered = bool(now_in and not _iss_was_in)
+    _iss_was_in = now_in
+    if not entered:
+        return False
+    logger.info("ISS entered the radar disc")
+    aircraft_alert.start_rim_flash(iss=True)
+    if settings.iss_sfx_enabled():
+        _play(
+            _QUINDAR_PATH,
+            volume_pct=settings.iss_sfx_volume(),
+            thread_name="sfx-iss",
+        )
+    try:
+        from display.round_touch.screens import radar
+
+        radar.invalidate_frame_layer()
+    except Exception:
+        logger.debug("ISS rim invalidate failed", exc_info=True)
+    return True
+
+
 def tick(flights: list[dict], tracked_data: dict | None) -> None:
-    """Run enter-range + military SFX checks (call from the data poll)."""
+    """Run enter-range, military, and ISS SFX checks (call from the data poll)."""
     check_tracked_enter_range(tracked_data)
     check_military_sightings(flights)
+    check_iss_enter()

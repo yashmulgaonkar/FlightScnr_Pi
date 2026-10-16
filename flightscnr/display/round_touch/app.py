@@ -2003,6 +2003,7 @@ class RoundTouchDisplay:
             "chime_volume",
             "traffic_sfx_volume",
             "military_sfx_volume",
+            "iss_sfx_volume",
             "earthquake_voice_volume",
         ):
             # Switch and slider are hit-tested directly on the row.
@@ -2585,6 +2586,7 @@ class RoundTouchDisplay:
             "hourly_chime": "chime_volume",
             "traffic_sfx": "traffic_sfx_volume",
             "military_sfx": "military_sfx_volume",
+            "iss_sfx": "iss_sfx_volume",
             "earthquake_voice": "earthquake_voice_volume",
         }.get(action)
         if volume_action is None:
@@ -2594,6 +2596,10 @@ class RoundTouchDisplay:
             radar.invalidate_frame_layer()
         elif action == "traffic_sfx":
             settings.toggle_traffic_sfx_enabled()
+        elif action == "military_sfx":
+            settings.toggle_military_sfx_enabled()
+        elif action == "iss_sfx":
+            settings.toggle_iss_sfx_enabled()
         elif action == "earthquake_voice":
             settings.toggle_earthquake_voice_enabled()
             if settings.earthquake_voice_enabled():

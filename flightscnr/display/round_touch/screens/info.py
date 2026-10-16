@@ -103,6 +103,7 @@ HUD_ACTIONS = (
     "chime_volume",
     "traffic_sfx_volume",
     "military_sfx_volume",
+    "iss_sfx_volume",
     "earthquake_voice_volume",
     "flip_board_sound",
 )
@@ -2314,7 +2315,7 @@ def _chime_volume_slider_metrics() -> tuple[int, int, int, int]:
     # Widest HUD volume label so all SFX sliders share geometry.
     label_w = max(
         body_font.size(lbl)[0]
-        for lbl in ("Chime volume", "Tracked volume", "Military volume", "Quake volume")
+        for lbl in ("Chime volume", "Tracked volume", "Military volume", "ISS volume", "Quake volume")
     )
     value_w = body_font.size("100%")[0]
     # Shorter than the other sliders — each row also carries an on/off switch.
@@ -2327,6 +2328,7 @@ _HUD_VOLUME_ACTIONS = (
     "chime_volume",
     "traffic_sfx_volume",
     "military_sfx_volume",
+    "iss_sfx_volume",
     "earthquake_voice_volume",
 )
 # Volume row -> the sound toggle drawn as a switch at the head of that row.
@@ -2334,6 +2336,7 @@ _HUD_VOLUME_TOGGLES = {
     "chime_volume": "hourly_chime",
     "traffic_sfx_volume": "traffic_sfx",
     "military_sfx_volume": "military_sfx",
+    "iss_sfx_volume": "iss_sfx",
     "earthquake_voice_volume": "earthquake_voice",
 }
 
@@ -2358,6 +2361,12 @@ def _hud_volume_meta(action: str):
             settings.military_sfx_volume,
             settings.set_military_sfx_volume,
         )
+    if action == "iss_sfx_volume":
+        return (
+            tr("settings.vol.iss"),
+            settings.iss_sfx_volume,
+            settings.set_iss_sfx_volume,
+        )
     if action == "earthquake_voice_volume":
         return (
             tr("settings.vol.quake"),
@@ -2375,6 +2384,8 @@ def hud_sound_enabled(action: str) -> bool:
         return settings.traffic_sfx_enabled()
     if action == "military_sfx_volume":
         return settings.military_sfx_enabled()
+    if action == "iss_sfx_volume":
+        return settings.iss_sfx_enabled()
     if action == "earthquake_voice_volume":
         return settings.earthquake_voice_enabled()
     return True
@@ -3055,6 +3066,7 @@ def _hud_row_labels() -> list[str]:
         "",  # chime switch + volume slider
         "",  # traffic switch + volume slider
         "",  # military switch + volume slider
+        "",  # ISS switch + volume slider
         "",  # earthquake voice switch + volume slider
         tr("settings.row.board_flip_sound"),
     ]
@@ -3192,6 +3204,9 @@ def _draw_settings_rows(
     military_vol_idx = (
         hud_volume_row_index("military_sfx_volume") if draw_chime_volume_slider else -1
     )
+    iss_vol_idx = (
+        hud_volume_row_index("iss_sfx_volume") if draw_chime_volume_slider else -1
+    )
     quake_vol_idx = (
         hud_volume_row_index("earthquake_voice_volume") if draw_chime_volume_slider else -1
     )
@@ -3226,6 +3241,11 @@ def _draw_settings_rows(
             if draw_chime_volume_slider and i == military_vol_idx:
                 _draw_hud_volume_slider_row(
                     surface, int(ry), display_focus == i, "military_sfx_volume"
+                )
+                continue
+            if draw_chime_volume_slider and i == iss_vol_idx:
+                _draw_hud_volume_slider_row(
+                    surface, int(ry), display_focus == i, "iss_sfx_volume"
                 )
                 continue
             if draw_chime_volume_slider and i == quake_vol_idx:

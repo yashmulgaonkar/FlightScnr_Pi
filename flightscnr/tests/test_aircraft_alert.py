@@ -127,6 +127,8 @@ class TestRimFlashPriority(unittest.TestCase):
         self.assertEqual(aircraft_alert.rim_flash_color(), theme.ALERT_WATCH)
         aircraft_alert.start_rim_flash(emergency=False, watch=False, military=True)
         self.assertEqual(aircraft_alert.rim_flash_color(), theme.ALERT_MILITARY)
+        aircraft_alert.start_rim_flash(iss=True)
+        self.assertEqual(aircraft_alert.rim_flash_color(), (255, 255, 255))
 
     def test_reflash_respects_enabled_alert_kinds(self):
         """Rim color must follow enabled prefs, not raw squawk/military bits."""

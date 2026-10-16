@@ -16,7 +16,9 @@ import math
 import os
 import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
 
 os.environ.setdefault("FLIGHTSCNR_DATA_DIR", tempfile.mkdtemp(prefix="flightscnr-iss-"))
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -465,6 +467,79 @@ class TestDraw(unittest.TestCase):
         iss_screen.draw_iss(surface, now=0.0)
         red, green, blue, _alpha = surface.get_at(point)
         self.assertGreater(red + green + blue, 80)
+
+    def test_radar_plots_the_station_only_inside_the_disc(self):
+        from display.round_touch import geo
+
+        home_lat, home_lon = float(geo.LOCATION_HOME[0]), float(geo.LOCATION_HOME[1])
+        inject_fix_for_tests(
+            PositionSample(home_lat, home_lon, 420.0, 27600.0, 0.0), 0.0
+        )
+        point = iss_screen.radar_screen_point(0.0)
+        self.assertIsNotNone(point)
+        self.assertAlmostEqual(point[0], theme.CENTER_X, delta=theme.s(12))
+        self.assertAlmostEqual(point[1], theme.CENTER_Y, delta=theme.s(12))
+        surface = self._surface()
+        before = surface.get_at(point)
+        iss_screen.draw_radar_blip(surface, now=0.0)
+        self.assertNotEqual(surface.get_at(point), before)
+
+        far_lat = home_lat + 40.0
+        if far_lat > 85.0:
+            far_lat = home_lat - 40.0
+        inject_fix_for_tests(
+            PositionSample(far_lat, home_lon, 420.0, 27600.0, 0.0), 0.0
+        )
+        self.assertIsNone(iss_screen.radar_screen_point(0.0))
+
+    def test_entering_the_radar_disc_flashes_white_and_plays_once(self):
+        from display.round_touch import alert_sounds, geo, settings
+        from utilities import aircraft_alert
+
+        alert_sounds._iss_seen = True
+        alert_sounds._iss_was_in = False
+        home_lat, home_lon = float(geo.LOCATION_HOME[0]), float(geo.LOCATION_HOME[1])
+        now = time.time()
+        inject_fix_for_tests(
+            PositionSample(home_lat, home_lon, 420.0, 27600.0, now), now
+        )
+        with mock.patch.object(alert_sounds, "_play") as play, mock.patch.object(
+            aircraft_alert, "pulse_phase", return_value=True
+        ):
+            self.assertTrue(alert_sounds.check_iss_enter())
+            play.assert_called_once()
+            self.assertIn("quindar_tones.mp3", play.call_args.args[0])
+            self.assertEqual(
+                play.call_args.kwargs.get("volume_pct"),
+                settings.iss_sfx_volume(),
+            )
+            self.assertEqual(aircraft_alert.rim_flash_color(), (255, 255, 255))
+            play.reset_mock()
+            self.assertFalse(alert_sounds.check_iss_enter())
+            play.assert_not_called()
+
+    def test_iss_sound_off_still_flashes_the_rim(self):
+        from display.round_touch import alert_sounds, geo, settings
+        from utilities import aircraft_alert
+
+        alert_sounds._iss_seen = True
+        alert_sounds._iss_was_in = False
+        previous = settings._state.get("iss_sfx_enabled", True)
+        settings._state["iss_sfx_enabled"] = False
+        home_lat, home_lon = float(geo.LOCATION_HOME[0]), float(geo.LOCATION_HOME[1])
+        now = time.time()
+        inject_fix_for_tests(
+            PositionSample(home_lat, home_lon, 420.0, 27600.0, now), now
+        )
+        try:
+            with mock.patch.object(alert_sounds, "_play") as play, mock.patch.object(
+                aircraft_alert, "pulse_phase", return_value=True
+            ):
+                self.assertTrue(alert_sounds.check_iss_enter())
+                play.assert_not_called()
+                self.assertEqual(aircraft_alert.rim_flash_color(), (255, 255, 255))
+        finally:
+            settings._state["iss_sfx_enabled"] = previous
 
     def test_open_crew_list_shows_the_world_map_icon(self):
         surface = self._surface()
