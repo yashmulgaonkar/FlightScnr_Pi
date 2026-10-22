@@ -267,7 +267,7 @@
   "portal.display.timeout.seconds_20": "20 másodperc",
   "portal.display.timeout.seconds_30": "30 másodperc",
   "portal.display.clock_timeout.label": "Óra / előrejelzés időkorlátja",
-  "portal.display.idle_clock.label": "Visszatérés az órához, ha nincs látható repülőgép",
+  "portal.display.idle_clock.label": "Visszatérés az órához, ha nincs látható forgalom",
   "portal.display.clock_12hr.label": "12 órás időformátum (AM/PM)",
   "portal.display.clock_12hr.hint": "Mindenhol érvényes: radar HUD, óra képernyő és beállítások. Kikapcsolva = 24 órás formátum.",
   "portal.display.european_date.label": "Európai dátumformátum",

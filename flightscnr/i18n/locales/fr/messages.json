@@ -304,7 +304,7 @@
   "portal.display.timeout.seconds_20": "20 secondes",
   "portal.display.timeout.seconds_30": "30 secondes",
   "portal.display.clock_timeout.label": "Durée d’affichage de l’horloge et des prévisions",
-  "portal.display.idle_clock.label": "Retour à l'horloge lorsqu'aucun aéronef n'est visible",
+  "portal.display.idle_clock.label": "Retour à l'horloge lorsqu'aucun trafic n'est visible",
   "portal.display.clock_12hr.label": "Horloge en 12 heures (AM/PM)",
   "portal.display.clock_12hr.hint": "S'applique partout : HUD radar, écran horloge et paramètres. Désactivé = 24 heures.",
   "portal.display.european_date.label": "Format de date européen",

@@ -304,7 +304,7 @@
   "portal.display.timeout.seconds_20": "20 segundos",
   "portal.display.timeout.seconds_30": "30 segundos",
   "portal.display.clock_timeout.label": "Duración del reloj y el pronóstico",
-  "portal.display.idle_clock.label": "Volver al reloj cuando no hay aeronaves visibles",
+  "portal.display.idle_clock.label": "Volver al reloj cuando no hay tráfico visible",
   "portal.display.clock_12hr.label": "Reloj de 12 horas (AM/PM)",
   "portal.display.clock_12hr.hint": "Aplica en todas partes: HUD del radar, pantalla del reloj y configuración. Apagado = 24 horas.",
   "portal.display.european_date.label": "Formato europeo de fecha",

@@ -322,3 +322,126 @@ def test_auto_floor_zero_ft_idle_wakes_for_low_aircraft(monkeypatch):
     assert restored == [0]
     assert d._auto_floor_idle_at_zero is False
     assert d._returned == [True]
+
+
+def test_auto_floor_zero_ft_stays_for_visible_vessel(monkeypatch):
+    """AIS vessels on the radar must block Auto Idle even with AutoFloor on."""
+    _enable_auto_floor(monkeypatch)
+
+    monkeypatch.setattr(app_mod.time, "time", lambda: 100.0)
+    monkeypatch.setattr(settings, "min_height_ft", lambda: 0)
+    monkeypatch.setattr(settings, "configured_min_height_ft", lambda: 5000)
+    monkeypatch.setattr(
+        radar,
+        "visible_in_range_count_at_floor",
+        lambda flights, floor: 0,
+    )
+
+    opened = []
+    d = _display(app_mod.SCREEN_RADAR)
+    d._radar_visible_since = 90.0
+    d._auto_floor_probe_flights = lambda: []
+    d._auto_floor_standard_has_traffic = lambda flights: False
+    d._displayed_traffic_visible = lambda: True
+    d._open_preferred_clock = lambda: opened.append(True)
+
+    d._tick_auto_idle_clock()
+
+    assert opened == []
+    assert d._auto_idle_clock is False
+    assert d.screen == app_mod.SCREEN_RADAR
+
+
+def test_auto_floor_idle_wakes_for_visible_vessel(monkeypatch):
+    """A vessel alone must return from Auto Idle while AutoFloor is enabled."""
+    _enable_auto_floor(monkeypatch)
+
+    monkeypatch.setattr(app_mod.time, "time", lambda: 100.0)
+    monkeypatch.setattr(settings, "min_height_ft", lambda: 5000)
+    monkeypatch.setattr(settings, "configured_min_height_ft", lambda: 5000)
+    monkeypatch.setattr(
+        radar,
+        "visible_in_range_count_at_floor",
+        lambda flights, floor: 0,
+    )
+
+    d = _display(app_mod.SCREEN_CLOCK)
+    d._auto_idle_clock = True
+    d._auto_floor_idle_at_zero = True
+    d._auto_floor_probe_flights = lambda: []
+    d._auto_floor_standard_has_traffic = lambda flights: False
+    d._displayed_traffic_visible = lambda: True
+
+    restored = []
+    monkeypatch.setattr(
+        settings,
+        "set_runtime_min_height_ft",
+        lambda value: restored.append(value) or value,
+    )
+
+    d._tick_auto_idle_clock()
+
+    assert restored == [0]
+    assert d._returned == [True]
+
+
+def test_lightweight_idle_treats_vessel_as_traffic(monkeypatch):
+    """Without AutoFloor, in-range vessels keep / restore radar like aircraft."""
+    monkeypatch.setattr(settings, "auto_idle_clock_enabled", lambda: True)
+    monkeypatch.setattr(
+        settings, "auto_lower_altitude_floor_on_empty_enabled", lambda: False
+    )
+    monkeypatch.setattr(app_mod.time, "time", lambda: 100.0)
+
+    vessel = {
+        "kind": "vessel",
+        "callsign": "TEST BOAT",
+        "plane_latitude": 33.740,
+        "plane_longitude": -117.023,
+        "sog_kt": 12.0,
+        "ground_speed": 12,
+    }
+    monkeypatch.setattr(
+        radar,
+        "visible_in_range_count",
+        lambda flights: 1 if any(f.get("kind") == "vessel" for f in flights) else 0,
+    )
+
+    opened = []
+    d = _display(app_mod.SCREEN_RADAR)
+    d.flights = [vessel]
+    d._radar_visible_since = 90.0
+    d._open_preferred_clock = lambda: opened.append(True)
+
+    d._tick_auto_idle_clock()
+    assert opened == []
+    assert d._auto_idle_clock is False
+
+    d.flights = []
+    # Empty radar only idles after AUTO_IDLE_MIN_RADAR_S of continuous emptiness.
+    d._radar_visible_since = 90.0
+    d._tick_auto_idle_clock()
+    assert opened == [True]
+    assert d._auto_idle_clock is True
+
+    d.screen = app_mod.SCREEN_CLOCK
+    d.flights = [vessel]
+    d._tick_auto_idle_clock()
+    assert d._returned == [True]
+
+
+def test_visible_in_range_count_includes_vessels():
+    """Idle-clock occupancy must count AIS vessels the same as aircraft."""
+    vessel = {
+        "kind": "vessel",
+        "callsign": "TEST BOAT",
+        "mmsi": "123",
+        "plane_latitude": 33.740,
+        "plane_longitude": -117.023,
+        "altitude": None,
+        "sog_kt": 12.0,
+        "ground_speed": 12,
+        "stationary": False,
+    }
+    assert radar.visible_in_range_count([vessel]) == 1
+    assert radar.visible_in_range_count_at_floor([vessel], 5000) == 1

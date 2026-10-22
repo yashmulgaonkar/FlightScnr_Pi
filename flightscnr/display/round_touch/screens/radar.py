@@ -1586,7 +1586,7 @@ def _draw_flights(surface, flights):
 
 
 def visible_in_range_count(flights) -> int:
-    """In-range aircraft on radar (excludes rim blips), matching FlightScnr idle-clock logic."""
+    """In-range aircraft/vessels on radar (excludes rim blips), for Auto Idle Clock."""
     count = 0
     for flight in _visible_flights(flights):
         if not aircraft_alert.is_shown_on_radar(flight):

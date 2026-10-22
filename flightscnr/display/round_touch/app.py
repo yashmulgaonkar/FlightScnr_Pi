@@ -1728,13 +1728,22 @@ class RoundTouchDisplay:
         self._open_screen(self._preferred_clock_screen())
 
     def _idle_clock_holds_screen(self) -> bool:
-        """Auto-idle clock should keep clock up while no in-range aircraft."""
+        """Auto-idle clock should keep clock up while no in-range traffic."""
         return (
             self._auto_idle_clock
             and settings.auto_idle_clock_enabled()
             and self.screen in (SCREEN_CLOCK, SCREEN_ANALOG_CLOCK, SCREEN_ANALOG_NIGHT, SCREEN_FLIEGER_CLOCK, SCREEN_MOON, SCREEN_FLIP_BOARD, SCREEN_FORECAST)
-            and radar.visible_in_range_count(self.flights) == 0
+            and not self._displayed_traffic_visible()
         )
+
+    def _displayed_traffic_visible(self) -> bool:
+        """True when any in-range aircraft or vessel is shown for the current mode.
+
+        Uses ``self.flights`` (traffic_mode filtered: aircraft / marine / both) so
+        Auto Idle Clock treats AIS vessels the same as aircraft. Smart AutoFloor
+        altitude probes stay aircraft-only via ``_auto_floor_probe_flights``.
+        """
+        return radar.visible_in_range_count(self.flights) > 0
 
     def _radar_modal_active(self) -> bool:
         """Facing calibrate, map pan, or post-pan bookmark choice."""
@@ -5400,7 +5409,7 @@ class RoundTouchDisplay:
         # disabled. Lightweight display/test fakes therefore do not need the
         # unfiltered source, position smoother, or _radar_flights().
         if not auto_lower:
-            current_has_traffic = radar.visible_in_range_count(self.flights) > 0
+            current_has_traffic = self._displayed_traffic_visible()
 
             if self.screen == SCREEN_RADAR:
                 if not current_has_traffic:
@@ -5439,6 +5448,9 @@ class RoundTouchDisplay:
         probe_flights = self._auto_floor_probe_flights()
         current_floor = settings.min_height_ft()
         standard_floor = settings.configured_min_height_ft()
+        # Displayed AIS vessels must still block / reverse Auto Idle even though
+        # altitude-floor probes stay aircraft-only.
+        display_has_traffic = self._displayed_traffic_visible()
 
         # F1 has absolute priority. Any standard-floor traffic immediately
         # restores the persisted floor and stops adaptive lowering.
@@ -5492,6 +5504,9 @@ class RoundTouchDisplay:
                         radar.invalidate_frame_layer()
                         self._radar_visible_since = now
                         self._safe_draw()
+                    elif display_has_traffic:
+                        # Marine (or other shown) traffic keeps radar up at 0 ft.
+                        self._radar_visible_since = now
                     else:
                         self._auto_floor_idle_at_zero = True
                         settings.clear_min_height_override()
@@ -5530,7 +5545,7 @@ class RoundTouchDisplay:
                 SCREEN_MOON,
                 SCREEN_FORECAST,
             )
-            and current_has_traffic
+            and (current_has_traffic or display_has_traffic)
         ):
             if getattr(self, "_auto_floor_idle_at_zero", False):
                 settings.set_runtime_min_height_ft(0)

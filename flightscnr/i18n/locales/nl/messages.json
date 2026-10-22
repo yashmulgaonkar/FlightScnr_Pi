@@ -267,7 +267,7 @@
   "portal.display.timeout.seconds_20": "20 seconden",
   "portal.display.timeout.seconds_30": "30 seconden",
   "portal.display.clock_timeout.label": "Time-out van klok / verwachting",
-  "portal.display.idle_clock.label": "Terug naar klok wanneer geen vliegtuigen zichtbaar zijn",
+  "portal.display.idle_clock.label": "Terug naar klok wanneer geen verkeer zichtbaar is",
   "portal.display.clock_12hr.label": "12-uursklok (AM/PM)",
   "portal.display.clock_12hr.hint": "Geldt overal: radar-HUD, klokscherm en instellingen. Uit betekent 24-uursnotatie.",
   "portal.display.european_date.label": "Europese datumnotatie",

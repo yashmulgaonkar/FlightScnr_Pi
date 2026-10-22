@@ -304,7 +304,7 @@
   "portal.display.timeout.seconds_20": "20 Sekunden",
   "portal.display.timeout.seconds_30": "30 Sekunden",
   "portal.display.clock_timeout.label": "Zeitüberschreitung für Uhr/Wettervorhersage",
-  "portal.display.idle_clock.label": "Zurück zur Uhr, wenn keine Flugzeuge sichtbar sind",
+  "portal.display.idle_clock.label": "Zurück zur Uhr, wenn kein Verkehr sichtbar ist",
   "portal.display.clock_12hr.label": "12-Stunden-Uhr (Uhrzeit mit AM/PM)",
   "portal.display.clock_12hr.hint": "Gilt überall: Radar-HUD, Uhrenbildschirm und Einstellungen. Aus = 24-Stunden-Format.",
   "portal.display.european_date.label": "Europäisches Datumsformat",
