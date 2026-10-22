@@ -107,6 +107,12 @@ def _ensure_env_credentials() -> None:
 _ensure_env_credentials()
 
 from fr24 import FR24, BoundingBox  # noqa: E402
+import fr24.authentication as _fr24_auth  # noqa: E402
+
+from utilities.fr24_jwt import install_fr24_jwt_padding_fix  # noqa: E402
+
+# Chrome's accessToken has no '=' padding. fr24 treats that as anonymous.
+install_fr24_jwt_padding_fix(_fr24_auth)
 from fr24.proto._live_feed_pb2 import (  # noqa: E402
     LiveFeedRequest, LiveFeedResponse, LocationBoundaries,
     VisibilitySettings, Filter, AirportFilter,
