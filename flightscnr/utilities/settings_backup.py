@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+from i18n import tr
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -105,46 +106,46 @@ def parse_config_bytes(raw: bytes | str) -> dict[str, Any]:
     if isinstance(raw, bytes):
         if len(raw) > MAX_CONFIG_BYTES:
             raise SettingsConfigError(
-                f"Config file too large (max {MAX_CONFIG_BYTES // 1024} KiB)"
+                tr("portal.response.config_large", size=MAX_CONFIG_BYTES // 1024)
             )
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError as exc:
-            raise SettingsConfigError("Config file is not valid UTF-8") from exc
+            raise SettingsConfigError(tr("portal.config.utf8")) from exc
     else:
         text = raw
         if len(text.encode("utf-8")) > MAX_CONFIG_BYTES:
             raise SettingsConfigError(
-                f"Config file too large (max {MAX_CONFIG_BYTES // 1024} KiB)"
+                tr("portal.response.config_large", size=MAX_CONFIG_BYTES // 1024)
             )
     try:
         payload = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise SettingsConfigError(f"Config file is not valid JSON: {exc}") from exc
+        raise SettingsConfigError(tr("portal.config.json", error=exc)) from exc
     if not isinstance(payload, dict):
-        raise SettingsConfigError("Config root must be a JSON object")
+        raise SettingsConfigError(tr("portal.config.root"))
     if payload.get("format") != FORMAT_ID:
         raise SettingsConfigError(
-            f"Unrecognized config format (expected {FORMAT_ID!r})"
+            tr("portal.config.format", format=repr(FORMAT_ID))
         )
     try:
         version = int(payload.get("version"))
     except (TypeError, ValueError) as exc:
-        raise SettingsConfigError("Config version must be an integer") from exc
+        raise SettingsConfigError(tr("portal.config.version_integer")) from exc
     if version < 1 or version > FORMAT_VERSION:
         raise SettingsConfigError(
-            f"Unsupported config version {version} (supported 1–{FORMAT_VERSION})"
+            tr("portal.config.version_unsupported", version=version, maximum=FORMAT_VERSION)
         )
     settings = payload.get("settings")
     if not isinstance(settings, dict):
-        raise SettingsConfigError("Config missing settings object")
+        raise SettingsConfigError(tr("portal.config.settings_missing"))
     for key in settings:
         if key not in _SECTION_BY_KEY:
             continue
         value = settings[key]
         if value is not None and not isinstance(value, dict):
             raise SettingsConfigError(
-                f"settings.{key} must be a JSON object or null"
+                tr("portal.config.section_type", section=key)
             )
     return payload
 

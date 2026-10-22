@@ -16,14 +16,10 @@ import time
 
 import pygame
 
+from i18n import tr
+
 from display.round_touch import draw, radar_hud, theme
 
-_LABEL_AVAILABLE = "Update available — tap for notes"
-_LABEL_SCHEDULED = (
-    "Firmware will update tonight during off-hours",
-    "Close to skip auto-update",
-)
-_LABEL_PROGRESS = "Update in progress — do not turn off"
 _MODE_NONE = "none"
 _MODE_AVAILABLE = "available"
 _MODE_PROGRESS = "progress"
@@ -75,15 +71,15 @@ def bubble_bounds() -> pygame.Rect:
 
 def _label_lines(mode: str) -> tuple[str, ...]:
     if mode == _MODE_PROGRESS:
-        return (_LABEL_PROGRESS,)
+        return (tr("updates.bubble.progress"),)
     try:
         from utilities.updater import update_is_scheduled
 
         if update_is_scheduled():
-            return _LABEL_SCHEDULED
+            return (tr("updates.bubble.scheduled"), tr("updates.bubble.dismiss"))
     except Exception:
         pass
-    return (_LABEL_AVAILABLE,)
+    return (tr("updates.bubble.available"),)
 
 
 def _compose_label(

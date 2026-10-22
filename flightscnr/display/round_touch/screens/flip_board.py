@@ -945,7 +945,7 @@ def _draw_id_picker(surface: pygame.Surface) -> None:
     title_font = draw.load_font(theme.s(15), bold=True)
     body_font = draw.load_font(theme.s(13), bold=True)
     current = settings.flip_board_id()
-    title = title_font.render("Board ID", True, theme.LABEL)
+    title = title_font.render(tr("flip.board_id"), True, theme.LABEL)
 
     row_h = body_font.get_height() + theme.s(16)
     row_gap = theme.s(6)

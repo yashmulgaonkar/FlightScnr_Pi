@@ -1,7 +1,7 @@
 <!DOCTYPE html>
-<html>
+<html lang="{{ effective_language }}">
 <head>
-    <title>Daily Stats</title>
+    <title data-i18n="portal.stats.daily_title">{{ tr("portal.stats.daily_title") }}</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
@@ -22,43 +22,51 @@
         th { color: #888; font-size: 11px; text-transform: uppercase; }
         .scroll-table { max-height: 300px; overflow-y: auto; }
     </style>
+<script>
+const I18N_MESSAGES = {{ i18n_messages | tojson }};
+function i18nText(key) { return I18N_MESSAGES[key] || key; }
+function i18nFormat(key, values) {
+    return i18nText(key).replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g,
+        (match, name) => Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : match);
+}
+</script>
 </head>
 <body>
     <div>
-        <a class="back" href="/stats">← Stats</a>
-        <a class="back" href="/">← Dashboard</a>
+        <a class="back" href="/stats" data-i18n="portal.stats.back_stats">{{ tr("portal.stats.back_stats") }}</a>
+        <a class="back" href="/" data-i18n="portal.stats.back_dashboard">{{ tr("portal.stats.back_dashboard") }}</a>
     </div>
     <h1 id="page-title">—</h1>
     <div class="subtitle" id="page-sub"></div>
 
     <div class="cards">
-        <div class="card"><div class="label">Total Flights</div><div class="value" id="total">—</div></div>
-        <div class="card"><div class="label">Peak Hour</div><div class="value" id="peak-hour">—</div><div class="sub" id="peak-sub"></div></div>
-        <div class="card"><div class="label">First Seen</div><div class="value" id="first-val">—</div><div class="sub" id="first-sub"></div></div>
-        <div class="card"><div class="label">Last Seen</div><div class="value" id="last-val">—</div><div class="sub" id="last-sub"></div></div>
+        <div class="card"><div class="label" data-i18n="portal.stats.total">{{ tr("portal.stats.total") }}</div><div class="value" id="total">—</div></div>
+        <div class="card"><div class="label" data-i18n="portal.stats.peak_hour">{{ tr("portal.stats.peak_hour") }}</div><div class="value" id="peak-hour">—</div><div class="sub" id="peak-sub"></div></div>
+        <div class="card"><div class="label" data-i18n="portal.stats.first_seen">{{ tr("portal.stats.first_seen") }}</div><div class="value" id="first-val">—</div><div class="sub" id="first-sub"></div></div>
+        <div class="card"><div class="label" data-i18n="portal.stats.last_seen">{{ tr("portal.stats.last_seen") }}</div><div class="value" id="last-val">—</div><div class="sub" id="last-sub"></div></div>
     </div>
 
     <div class="chart-row">
         <div class="chart-box" style="flex:2;">
-            <h3>Flights by Hour</h3>
+            <h3 data-i18n="portal.stats.hourly">{{ tr("portal.stats.hourly") }}</h3>
             <canvas id="hourChart"></canvas>
         </div>
     </div>
 
     <div class="chart-row">
         <div class="chart-box">
-            <h3>Airline Breakdown</h3>
+            <h3 data-i18n="portal.stats.airlines">{{ tr("portal.stats.airlines") }}</h3>
             <canvas id="airlineChart"></canvas>
         </div>
         <div class="chart-box">
-            <h3>Local vs Flyover</h3>
+            <h3 data-i18n="portal.stats.local_flyover">{{ tr("portal.stats.local_flyover") }}</h3>
             <canvas id="localChart"></canvas>
         </div>
         <div class="chart-box">
-            <h3>All Flights</h3>
+            <h3 data-i18n="portal.stats.all_flights">{{ tr("portal.stats.all_flights") }}</h3>
             <div class="scroll-table">
                 <table>
-                    <thead><tr><th>#</th><th>Callsign</th><th>Route</th><th>Time</th></tr></thead>
+                    <thead><tr><th>#</th><th data-i18n="portal.stats.callsign">{{ tr("portal.stats.callsign") }}</th><th data-i18n="portal.stats.route">{{ tr("portal.stats.route") }}</th><th data-i18n="portal.stats.time">{{ tr("portal.stats.time") }}</th></tr></thead>
                     <tbody id="flights-body"></tbody>
                 </table>
             </div>
@@ -67,7 +75,7 @@
 
     <script>
         const COLOURS = ['#ffb300','#ff6b35','#69f0ae','#ffd54f','#ff69b4','#9b59b6','#1abc9c','#e74c3c','#3498db','#f39c12','#00b894','#fd79a8'];
-        const DOWS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+        const DOWS = ['sun','mon','tue','wed','thu','fri','sat'].map(day => i18nText('weekday.' + day + '.short'));
         const date = window.location.pathname.split('/').pop();
 
         async function loadDay() {
@@ -80,7 +88,7 @@
 
             const day = full[date];
             if (!day) {
-                document.getElementById('page-title').textContent = `No data for ${date}`;
+                document.getElementById('page-title').textContent = i18nFormat('portal.stats.no_date_data', { date });
                 return;
             }
 
@@ -97,7 +105,7 @@
             flights.forEach(f => byHour[f.hour || 0]++);
             const peakHour = byHour.indexOf(Math.max(...byHour));
             document.getElementById('peak-hour').textContent = `${peakHour}:00`;
-            document.getElementById('peak-sub').textContent = `${byHour[peakHour]} flights`;
+            document.getElementById('peak-sub').textContent = i18nFormat(byHour[peakHour] === 1 ? 'portal.stats.flight_count.one' : 'portal.stats.flight_count.other', { count: byHour[peakHour] });
 
             // First/last
             if (flights.length) {
@@ -161,7 +169,7 @@
             new Chart(document.getElementById('localChart'), {
                 type: 'doughnut',
                 data: {
-                    labels: ['Local', 'Flyover', 'Unknown'],
+                    labels: ['portal.stats.local', 'portal.stats.flyover', 'portal.stats.unknown'].map(i18nText),
                     datasets: [{ data: [local, flyover, unknown], backgroundColor: ['#69f0ae99','#ffb30099','#cccccc99'], borderColor: ['#69f0ae','#ffb300','#ccc'], borderWidth: 1 }]
                 },
                 options: { responsive: true, cutout: '60%', plugins: { legend: { position: 'right', labels: { font: { size: 11 } } } } }

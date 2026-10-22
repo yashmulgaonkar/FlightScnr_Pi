@@ -22,10 +22,10 @@ FOOTER_BUTTONS = ("prev", "next", "radar")
 FOOTER_EMPTY = ("radar",)
 
 _PAGER_LABELS = {
-    "green": "PAGER Green",
-    "yellow": "PAGER Yellow",
-    "orange": "PAGER Orange",
-    "red": "PAGER Red",
+    "green": "earthquake.pager.green",
+    "yellow": "earthquake.pager.yellow",
+    "orange": "earthquake.pager.orange",
+    "red": "earthquake.pager.red",
 }
 
 
@@ -106,7 +106,8 @@ def _quake_rows(
         pass
 
     alert = str(quake.get("alert") or "").strip().lower()
-    pager = _PAGER_LABELS.get(alert)
+    pager_key = _PAGER_LABELS.get(alert)
+    pager = tr(pager_key) if pager_key else None
     if pager:
         rows.append((pager, body_font, theme.LABEL))
 

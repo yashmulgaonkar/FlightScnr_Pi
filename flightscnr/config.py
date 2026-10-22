@@ -22,6 +22,7 @@ import json
 import logging
 import math
 import os
+from i18n import tr
 import socket
 
 logger = logging.getLogger(__name__)
@@ -211,13 +212,13 @@ def parse_lat_lon_pair(text: str) -> tuple[float, float]:
     """Parse 'lat, lon' (e.g. '37.639799, -122.368049')."""
     parts = [part.strip() for part in text.split(",")]
     if len(parts) != 2 or not parts[0] or not parts[1]:
-        raise ValueError("Enter coordinates as latitude, longitude")
+        raise ValueError(tr("portal.response.coordinates"))
     lat = float(parts[0])
     lon = float(parts[1])
     if not -90.0 <= lat <= 90.0:
-        raise ValueError("Latitude must be between -90 and 90")
+        raise ValueError(tr("portal.validation.latitude"))
     if not -180.0 <= lon <= 180.0:
-        raise ValueError("Longitude must be between -180 and 180")
+        raise ValueError(tr("portal.validation.longitude"))
     return lat, lon
 
 

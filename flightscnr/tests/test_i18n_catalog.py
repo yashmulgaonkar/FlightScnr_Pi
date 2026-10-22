@@ -39,6 +39,16 @@ from i18n import (  # noqa: E402
 
 
 class LocaleResolutionTests(unittest.TestCase):
+    def test_shipped_catalogs_are_complete_and_validate_without_fallback(self):
+        root = ROOT / "i18n" / "locales"
+        english = json.loads((root / "en/messages.json").read_text(encoding="utf-8"))
+        for path in root.glob("*/messages.json"):
+            messages = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(set(messages), set(english), path.parent.name)
+            selected = catalog_for(path.parent.name)
+            self.assertEqual(selected.effective_language, path.parent.name)
+            self.assertEqual(dict(selected.messages), messages, path.parent.name)
+
     def test_normalizes_common_posix_locale_forms(self):
         self.assertEqual(normalize_locale_tag("nl_NL.UTF-8"), "nl-NL")
         self.assertEqual(normalize_locale_tag("sr_Latn_RS.UTF-8"), "sr-Latn-RS")

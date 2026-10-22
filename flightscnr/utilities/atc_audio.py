@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+from i18n import tr
 import os
 import re
 import shutil
@@ -1311,7 +1312,7 @@ def _start_locked(
 
     if not settings.atc_enabled():
         with _lock:
-            _last_error = "ATC audio is disabled"
+            _last_error = tr("audio.error.disabled")
         return status()
 
     prefs = _prefs()
@@ -1319,7 +1320,7 @@ def _start_locked(
     feed = (mount or prefs["mount"] or "").strip()
     if not icao:
         with _lock:
-            _last_error = "No airport selected"
+            _last_error = tr("audio.error.no_airport")
         return status()
     if not feed:
         feeds = feeds_for_airport(icao)
@@ -1327,7 +1328,7 @@ def _start_locked(
             feed = feeds[0]["mount"]
         else:
             with _lock:
-                _last_error = "No LiveATC feed for airport"
+                _last_error = tr("audio.error.no_feed")
             return status()
 
     # A concurrent start (toggle + keepalive) already brought this exact
@@ -1339,18 +1340,18 @@ def _start_locked(
     known = {f["mount"] for f in feeds_for_airport(icao)}
     if known and feed not in known:
         with _lock:
-            _last_error = "Unknown channel for airport"
+            _last_error = tr("audio.error.channel")
         return status()
 
     quiet = in_quiet_hours()
     if quiet and not override:
         with _lock:
-            _last_error = "Quiet hours — enable ATC to override"
+            _last_error = tr("audio.error.quiet")
         return status()
 
     if shutil.which("mpv") is None:
         with _lock:
-            _last_error = "mpv not installed (sudo apt install mpv)"
+            _last_error = tr("audio.error.mpv_missing")
         return status()
 
     volume = _effective_atc_ui_volume(settings.atc_volume())
@@ -1365,7 +1366,7 @@ def _start_locked(
         settings.set_atc_quiet_override(bool(quiet and override))
         with _lock:
             _quiet_override = bool(quiet and override)
-            _last_error = "No USB or Bluetooth speaker connected"
+            _last_error = tr("audio.error.no_speaker")
         logger.info(
             "ATC deferred — no USB/Bluetooth speaker (airport=%s mount=%s)",
             icao,
@@ -1417,7 +1418,7 @@ def _start_locked(
     except OSError as exc:
         logger.warning("ATC mpv start failed: %s", exc)
         with _lock:
-            _last_error = f"Could not start mpv: {exc}"
+            _last_error = tr("audio.error.mpv_start", error=exc)
             _quiet_override = False
         return status()
 
@@ -1629,7 +1630,7 @@ def maybe_resume_after_boot(
 
     if not _speaker_ready():
         with _lock:
-            _last_error = "No USB or Bluetooth speaker connected"
+            _last_error = tr("audio.error.no_speaker")
         logger.info(
             "ATC resume deferred — no USB/Bluetooth speaker (airport=%s mount=%s)",
             settings.atc_airport(),
@@ -1742,13 +1743,13 @@ def retune_if_playing(
         if not feed:
             # Nothing to tune to — keep prior stream rather than going silent.
             with _lock:
-                _last_error = "No LiveATC feed for airport"
+                _last_error = tr("audio.error.no_feed")
             return status()
 
     known = {f["mount"] for f in feeds_for_airport(icao)}
     if known and feed not in known:
         with _lock:
-            _last_error = "Unknown channel for airport"
+            _last_error = tr("audio.error.channel")
         return status()
 
     settings.set_atc_airport(icao)

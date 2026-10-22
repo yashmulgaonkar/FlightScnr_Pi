@@ -29,6 +29,23 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Iterator, Literal
 
+from i18n import active_catalog, catalog_for
+
+
+def _ui_tr(key: str, **values) -> str:
+    # This utility also runs outside the display process. Read the language
+    # preference without importing pygame or the display application's startup.
+    language = active_catalog().requested_language
+    try:
+        with open(_SETTINGS_JSON_PATH, encoding="utf-8") as fh:
+            prefs = json.load(fh)
+        if isinstance(prefs, dict):
+            language = prefs.get("display_language", language)
+    except (OSError, ValueError):
+        pass
+    return catalog_for(language).translate(key, **values)
+
+
 logger = logging.getLogger("flightscnr.wifi_setup")
 
 # up = confirmed client/ethernet; down = confirmed offline; unknown = probe error
@@ -802,7 +819,7 @@ def ensure_setup_ap() -> ApCredentials:
                 pass
             return creds
 
-        _set_status("Starting setup Wi-Fi hotspot…")
+        _set_status(_ui_tr("wifi.hotspot_starting"))
         _write_captive_dns(creds.gateway)
 
         # Free the radio from any lingering client association (common after a drop).
@@ -853,7 +870,7 @@ def ensure_setup_ap() -> ApCredentials:
             proc = _nmcli("connection", "up", AP_CONNECTION_NAME, timeout=60.0)
             if proc.returncode != 0:
                 _set_error(
-                    (proc.stderr or proc.stdout or "Failed to start setup hotspot").strip()
+                    (proc.stderr or proc.stdout or _ui_tr("wifi.hotspot_failed")).strip()
                 )
                 raise RuntimeError(_last_error)
 
@@ -885,13 +902,13 @@ def ensure_setup_ap() -> ApCredentials:
                 )
 
         if not ap_radio_active():
-            msg = "Setup hotspot started but wlan is not in AP mode"
+            msg = _ui_tr("wifi.hotspot_not_ap")
             _set_error(msg)
             raise RuntimeError(msg)
 
         with _lock:
             _ap_active = True
-        _set_status(f"Setup hotspot ready: {creds.ssid}")
+        _set_status(_ui_tr("wifi.hotspot_ready", ssid=creds.ssid))
         return creds
 
 
@@ -904,7 +921,7 @@ def stop_setup_ap() -> None:
         _nmcli("connection", "delete", AP_CONNECTION_NAME, timeout=20.0)
         with _lock:
             _ap_active = False
-        _set_status("Setup hotspot stopped")
+        _set_status(_ui_tr("wifi.hotspot_stopped"))
 
 
 def try_saved_wifi(*, timeout_s: float | None = None) -> tuple[bool, str]:
@@ -916,15 +933,15 @@ def try_saved_wifi(*, timeout_s: float | None = None) -> tuple[bool, str]:
     global _try_saved_busy
     if link_up():
         mark_wifi_connected()
-        return True, "Already connected"
+        return True, _ui_tr("wifi.already_connected")
 
     names = saved_client_wifi_names()
     if not names:
-        return False, "No saved Wi-Fi networks yet — join one below"
+        return False, _ui_tr("wifi.no_saved")
 
     with _lock:
         if _try_saved_busy:
-            return False, "Already trying saved Wi-Fi…"
+            return False, _ui_tr("wifi.already_trying")
         _try_saved_busy = True
 
     wait_s = (
@@ -938,7 +955,7 @@ def try_saved_wifi(*, timeout_s: float | None = None) -> tuple[bool, str]:
     restore_ap = True
     mark_client_join_busy("try-saved")
     try:
-        _set_status("Trying saved Wi-Fi…")
+        _set_status(_ui_tr("wifi.trying_saved"))
         stop_setup_ap()
         time.sleep(1.0)
 
@@ -969,17 +986,17 @@ def try_saved_wifi(*, timeout_s: float | None = None) -> tuple[bool, str]:
             )
 
         if _wait_for_client_wifi(wait_s):
-            _set_status("Connected via saved Wi-Fi")
+            _set_status(_ui_tr("wifi.saved_connected"))
             mark_wifi_connected()
             restore_ap = False
-            return True, "Connected via saved Wi-Fi"
+            return True, _ui_tr("wifi.saved_connected")
 
-        msg = "Saved Wi-Fi not found — setup hotspot restored"
+        msg = _ui_tr("wifi.saved_restored")
         _set_error(msg)
         return False, msg
     except Exception as exc:
         logger.exception("try_saved_wifi failed")
-        msg = f"Saved Wi-Fi retry failed: {exc}"
+        msg = _ui_tr("wifi.saved_error", error=exc)
         _set_error(msg)
         return False, msg
     finally:
@@ -1002,7 +1019,7 @@ def list_wifi_networks(*, rescan: bool = True) -> list[dict]:
         args.extend(["--rescan", "yes"])
     proc = _nmcli(*args, timeout=45.0)
     if proc.returncode != 0:
-        _set_error((proc.stderr or "Wi-Fi scan failed").strip())
+        _set_error((proc.stderr or _ui_tr("portal.wifi.scan_failed")).strip())
         return []
     seen: set[str] = set()
     rows: list[dict] = []
@@ -1031,13 +1048,13 @@ def connect_to_wifi(ssid: str, password: str = "") -> tuple[bool, str]:
     """Leave setup AP and join the user's network. Returns (ok, message)."""
     ssid = (ssid or "").strip()
     if not ssid:
-        return False, "SSID is required"
+        return False, _ui_tr("wifi.ssid_required")
     password = password or ""
 
     if client_join_busy():
-        return False, "Another Wi-Fi join is already in progress — wait a moment"
+        return False, _ui_tr("wifi.join_busy")
 
-    _set_status(f"Connecting to “{ssid}”…")
+    _set_status(_ui_tr("wifi.connecting_network", ssid=ssid))
     mark_client_join_busy(f"connect:{ssid}")
     restore_ap = True
     con_name = ""
@@ -1089,7 +1106,7 @@ def connect_to_wifi(ssid: str, password: str = "") -> tuple[bool, str]:
             proc = _nmcli(*add_cmd, timeout=30.0)
             if proc.returncode != 0:
                 msg = (
-                    proc.stderr or proc.stdout or "Could not create Wi-Fi profile"
+                    proc.stderr or proc.stdout or _ui_tr("wifi.create_profile_error")
                 ).strip()
                 _set_error(msg)
                 return False, msg
@@ -1097,7 +1114,7 @@ def connect_to_wifi(ssid: str, password: str = "") -> tuple[bool, str]:
             proc = _nmcli("connection", "up", con_name, timeout=60.0)
             if proc.returncode != 0:
                 msg = (
-                    proc.stderr or proc.stdout or f"Could not join “{ssid}”"
+                    proc.stderr or proc.stdout or _ui_tr("wifi.join_failed", ssid=ssid)
                 ).strip()
                 _set_error(msg)
                 _nmcli("connection", "delete", con_name)
@@ -1119,17 +1136,17 @@ def connect_to_wifi(ssid: str, password: str = "") -> tuple[bool, str]:
                 *wifi_powersave_nmcli_args(),
                 timeout=15.0,
             )
-            _set_status(f"Connected to “{ssid}”")
+            _set_status(_ui_tr("wifi.connected_network", ssid=ssid))
             mark_wifi_connected(ssid)
             restore_ap = False
-            return True, f"Connected to “{ssid}”"
+            return True, _ui_tr("wifi.connected_network", ssid=ssid)
 
-        msg = f"Joined “{ssid}” but no IP yet — check the password and try again"
+        msg = _ui_tr("wifi.no_ip", ssid=ssid)
         _set_error(msg)
         return False, msg
     except Exception as exc:
         logger.exception("connect_to_wifi failed")
-        msg = f"Could not join “{ssid}”: {exc}"
+        msg = _ui_tr("wifi.join_error", ssid=ssid, error=exc)
         _set_error(msg)
         if con_name:
             _nmcli("connection", "delete", con_name)

@@ -2300,15 +2300,22 @@ def map_style() -> str:
 
 
 def map_style_option_label(style: str) -> str:
-    """Picker / row label. New styles go through the catalog; older ones stay literal."""
-    if style == "seamap":
-        try:
-            from i18n.catalog import tr
-
-            return tr("settings.opt.map.seamap")
-        except Exception:
-            return MAP_STYLE_LABELS.get(style, style)
-    return MAP_STYLE_LABELS.get(style, style)
+    """Resolve picker / row labels in the currently selected language."""
+    keys = {
+        "dark": "portal.radar.map_style.dark_carto",
+        "osm": "portal.radar.map_style.dark_osm",
+        "stadia_dark": "portal.radar.map_style.dark_stadia",
+        "black": "portal.radar.map_style.dark_flat",
+        "light": "portal.radar.map_style.light_carto",
+        "toner": "portal.radar.map_style.light_toner",
+        "vfr": "settings.opt.map.vfr",
+        "seamap": "settings.opt.map.seamap",
+        "streets": "portal.radar.map_style.street_esri",
+        "voyager": "settings.opt.map.voyager",
+        "satellite": "portal.radar.map_style.satellite_esri",
+    }
+    key = keys.get(style)
+    return tr(key) if key else style
 
 
 def map_style_label() -> str:

@@ -142,8 +142,23 @@ def _vessel_rows(f: dict, title_font, body_font, detail_font) -> list[tuple[str,
     mmsi = f.get("mmsi") or ""
     flag = f.get("flag_country") or tr("flight.flag_unknown")
     category = f.get("plane") or tr("flight.vessel_default")
+    category_key = {
+        "Cargo": "vessel.category.cargo", "Tanker": "vessel.category.tanker",
+        "Passenger": "vessel.category.passenger", "High-speed": "vessel.category.high_speed",
+        "Fishing": "vessel.category.fishing", "Sailing": "vessel.category.sailing",
+        "Service": "vessel.category.service", "Vessel": "flight.vessel_default",
+    }.get(category)
+    if category_key:
+        category = tr(category_key)
     dest = (f.get("destination") or "").strip()
     nav_name = f.get("nav_status_name") or ""
+    nav_status = f.get("nav_status")
+    if nav_status is not None:
+        nav_status = int(nav_status)
+        if nav_status == 14:
+            nav_name = "SART"
+        else:
+            nav_name = tr(f"vessel.nav.{nav_status}" if nav_status in range(9) else "vessel.nav.15")
 
     telemetry: list[str] = []
     # SOG is knots from AIS; convert with the same global unit preset as aircraft.
@@ -172,7 +187,7 @@ def _vessel_rows(f: dict, title_font, body_font, detail_font) -> list[tuple[str,
         (category, detail_font, theme.MUTED),
     ]
     if dest:
-        rows.append((f"Dest {dest}", body_font, theme.ROUTE))
+        rows.append((tr("flight.destination_short", destination=dest), body_font, theme.ROUTE))
     if telemetry:
         rows.append((" · ".join(telemetry), detail_font, theme.LABEL))
     length_m = int(f.get("length_m") or 0)
