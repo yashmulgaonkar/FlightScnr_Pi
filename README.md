@@ -272,6 +272,8 @@ dtoverlay=vc4-kms-v3d
 
 Use only one panel overlay. On **4-DSI-TOUCH-C**, connect the display **power cable** — it is required (the panel will not run from the DSI ribbon alone). On Pi 5 / CM, if the screen stays blank, try the DSI0 form of the same overlay (see [Software Setup](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Software-Setup)). Thanks to [@Matzebhv](https://github.com/Matzebhv) for the newer-panel overlay in [#207](https://github.com/yashmulgaonkar/FlightScnr_Pi/issues/207).
 
+The Waveshare **7″ 1080×1080 HDMI** panel does not use a DSI overlay. Follow [Waveshare 7 inch HDMI](#waveshare-7-inch-hdmi) instead of the table above.
+
 Then:
 
 ```bash
@@ -285,6 +287,44 @@ The installer forces the desktop to **X11** (needed for pinch-to-zoom) and **reb
 3. Open the web portal at `http://<hostname>.local` and add API keys.
 
 Step-by-step instructions: [Software Setup](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Software-Setup).
+
+---
+
+## Waveshare 7 inch HDMI
+
+This path is for a Raspberry Pi 5 and the [Waveshare 7inch 1080×1080 HDMI LCD](https://docs.waveshare.com/7inch_1080x1080_LCD/User-Guide-Rpi) (HDMI video, USB touch). The 4″ DSI install above is unchanged. Plug the panel into the micro-HDMI port nearest the Pi USB-C power connector (HDMI-A-1). Cooling is a Pi 5 active cooler on the dedicated 4-pin fan header.
+
+Do these boot edits before the first boot of that card. On the Pi the files are `/boot/firmware/config.txt` and `/boot/firmware/cmdline.txt`. With the card in a Mac, they are on the small `bootfs` volume.
+
+In `config.txt`, under `[all]`:
+
+```text
+hdmi_force_hotplug=1
+hdmi_group=2
+hdmi_mode=87
+hdmi_pixel_freq_limit=200000000
+hdmi_timings=1080 0 80 20 80 1080 0 10 10 14 0 0 0 60 0 84210000 0
+```
+
+`cmdline.txt` is one line. At the end, after a space, add:
+
+```text
+video=HDMI-A-1:1080x1080@60
+```
+
+Do not add a 4″ DSI panel overlay, and do not add `dtoverlay=gpio-fan`.
+
+Before `sudo bash install-pi.sh`, set these three lines in `.env.example` (or in `.env` if you keep one). If `/etc/flightscnr.env` already exists, change them there instead — the installer keeps that file.
+
+```text
+DISPLAY_WIDTH=1080
+DISPLAY_HEIGHT=1080
+DISPLAY_ROTATION=180
+```
+
+`180` starts the picture with the Pi USB-C port at the bottom. Touch uses the same angle. After the first run the angle is stored on the device and can be changed in Settings or the web portal.
+
+When both dimensions are 1080, the installer skips the 720×720 DSI mode and the GPIO 14 fan overlay. The HDMI timings themselves stay in the two boot files above.
 
 ---
 

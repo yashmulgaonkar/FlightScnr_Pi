@@ -283,9 +283,35 @@ resolve_boot_paths() {
     fi
 }
 
+# True when this install is for the Waveshare 7″ 1080×1080 HDMI panel.
+# Display setup runs before setup_env_file, so a first install is detected
+# from the repo file that will be copied into /etc/flightscnr.env.
+# The 4″ DSI panel stays 720×720 and still gets the GPIO 14 case fan.
+waveshare_7_hdmi_selected() {
+    local env_file="" width="" height=""
+    if [ -f "$ENV_DEST" ]; then
+        env_file="$ENV_DEST"
+    elif [ -f "$REPO_ROOT/.env" ]; then
+        env_file="$REPO_ROOT/.env"
+    elif [ -f "$REPO_ROOT/.env.example" ]; then
+        env_file="$REPO_ROOT/.env.example"
+    else
+        return 1
+    fi
+    width=$(sed -n 's/^[[:space:]]*DISPLAY_WIDTH=//p' "$env_file" | tail -n 1 | tr -d '[:space:]"'"'"'' || true)
+    height=$(sed -n 's/^[[:space:]]*DISPLAY_HEIGHT=//p' "$env_file" | tail -n 1 | tr -d '[:space:]"'"'"'' || true)
+    [ "$width" = "1080" ] && [ "$height" = "1080" ]
+}
+
 configure_display_720x720() {
     # Waveshare 4″ DSI (C) is natively 720×720. Persist that mode for labwc
     # (kanshi) and X11 (dispsetup.sh). Never abort install if outputs differ.
+    # The 7″ HDMI panel is already timed in config.txt and cmdline.txt.
+    if waveshare_7_hdmi_selected; then
+        log_step "Display resolution"
+        log_ok "Skipped 720×720 DSI mode — Waveshare 7″ 1080×1080 HDMI (see README boot steps)"
+        return 0
+    fi
     local mode="720x720"
     local kanshi_body
     local dispsetup
@@ -372,6 +398,12 @@ install_gpio_fan() {
     # Matches the official Pi case-fan wiring (GPIO 14). temp is millidegrees C.
     # Writes must not abort portal OTA under set -e (vfat remount-ro / full boot
     # partition) — same class of guard as Bluetooth panel edits (5fdb6d4).
+    # The 7″ HDMI build uses the Pi 5 active cooler on the 4-pin fan header.
+    if waveshare_7_hdmi_selected; then
+        log_step "Case fan (gpio-fan overlay)"
+        log_ok "Skipped gpio-fan — Waveshare 7″ HDMI uses the Pi 5 4-pin cooler, not GPIO 14"
+        return 0
+    fi
     local fan_line="dtoverlay=gpio-fan,gpiopin=14,temp=60000"
 
     log_step "Case fan (gpio-fan overlay)"
@@ -1634,7 +1666,12 @@ cmd_install() {
     else
         echo "  Reboot:    starts automatically (systemctl is-enabled flightscnr)"
     fi
-    echo "  Fan:       gpio-fan on GPIO 14 @ 60°C (reboot once if this install just added it)"
+    if waveshare_7_hdmi_selected; then
+        echo "  Fan:       skipped (7″ HDMI — Pi 5 4-pin cooler, no GPIO 14 overlay)"
+        echo "  Panel:     1080×1080 HDMI (boot timings stay in config.txt and cmdline.txt)"
+    else
+        echo "  Fan:       gpio-fan on GPIO 14 @ 60°C (reboot once if this install just added it)"
+    fi
     echo "  Update:    bash $REPO_ROOT/install-pi.sh update"
     echo ""
 }
