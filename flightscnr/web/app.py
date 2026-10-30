@@ -1626,6 +1626,8 @@ def radar_json():
             "ais_enabled": settings.ais_enabled(),
             "vessel_min_speed_kt": settings.vessel_min_speed_kt(),
             "aircraft_min_speed_kt": settings.aircraft_min_speed_kt(),
+            "airline_filter": settings.airline_filter_blob(),
+            "airline_filter_enabled": settings.airline_filter_enabled(),
             "map_style": settings.map_style(),
             "map_style_options": list(settings.MAP_STYLES),
             "vfr_map_opacity": settings.vfr_map_opacity(),
@@ -1889,6 +1891,10 @@ def radar_save():
             settings.set_aircraft_min_speed_kt(data.get("aircraft_min_speed_kt"))
         except (TypeError, ValueError):
             return jsonify({"ok": False, "message": "aircraft_min_speed_kt must be a number"}), 400
+    if "airline_filter" in data:
+        settings.set_airline_filter(data.get("airline_filter") or "")
+    if "airline_filter_enabled" in data:
+        settings.set_airline_filter_enabled(bool(data.get("airline_filter_enabled")))
     if "dump1090_enabled" in data or "dump1090_url" in data:
         from secrets_store import save_secrets_from_portal
 

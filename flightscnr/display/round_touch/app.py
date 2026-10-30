@@ -1973,6 +1973,9 @@ class RoundTouchDisplay:
             settings.toggle_flip_board_sound_enabled()
         elif action == "ground_vehicles":
             settings.toggle_show_ground_vehicles()
+        elif action == "airline_filter":
+            settings.toggle_airline_filter_enabled()
+            radar.invalidate_frame_layer()
         elif action == "map_style":
             self._open_atc_picker("map_style")
         elif action == "vfr_opacity":

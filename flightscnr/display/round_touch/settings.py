@@ -12,6 +12,7 @@
 import json
 import logging
 import os
+import re
 
 from display.round_touch import color_presets, theme
 from i18n import tr
@@ -387,6 +388,10 @@ _defaults = {
     "vessel_min_speed_kt": 0,
     # Hide aircraft at or below this ground speed (knots). 0 = show all speeds.
     "aircraft_min_speed_kt": 0,
+    # Comma-separated airline codes (ICAO SWA / IATA WN) the radar may show.
+    # The list is edited in the portal; the switch below is also on the device.
+    "airline_filter": "",
+    "airline_filter_enabled": False,
     "scale_index": 1,
     "theme_index": color_presets.DEFAULT_THEME_INDEX,
     "theme_custom": True,
@@ -604,6 +609,28 @@ def _snap_aircraft_min_speed(value) -> int:
     if v in AIRCRAFT_MIN_SPEED_OPTIONS:
         return v
     return min(AIRCRAFT_MIN_SPEED_OPTIONS, key=lambda opt: abs(opt - v))
+
+
+# Airline filter: at most this many codes, each a 2-letter/digit IATA code
+# (WN, B6) or a 3-letter ICAO code (SWA, JBU). Longer tokens are dropped.
+AIRLINE_FILTER_MAX = 16
+_AIRLINE_CODE_RE = re.compile(r"^(?:[A-Z0-9]{2}|[A-Z]{3})$")
+
+
+def _parse_airline_filter(blob) -> list[str]:
+    """Normalise a portal blob ("wn, swa; ual") to unique upper-case codes."""
+    out: list[str] = []
+    if blob is None:
+        return out
+    if isinstance(blob, (list, tuple, set)):
+        blob = ",".join(str(x) for x in blob)
+    for raw in str(blob).replace(";", ",").replace("\n", ",").split(","):
+        token = "".join(raw.upper().split())
+        if not token or not _AIRLINE_CODE_RE.match(token):
+            continue
+        if token not in out and len(out) < AIRLINE_FILTER_MAX:
+            out.append(token)
+    return out
 
 
 def _snap_max_height(value) -> int:
@@ -1017,6 +1044,18 @@ def _load():
         state["aircraft_min_speed_kt"] = _snap_aircraft_min_speed(
             state.get("aircraft_min_speed_kt", 0)
         )
+    if "airline_filter" not in data:
+        state["airline_filter"] = ""
+        migrated = True
+    else:
+        state["airline_filter"] = ",".join(
+            _parse_airline_filter(state.get("airline_filter", ""))
+        )
+    if "airline_filter_enabled" not in data:
+        state["airline_filter_enabled"] = False
+        migrated = True
+    else:
+        state["airline_filter_enabled"] = bool(state.get("airline_filter_enabled"))
     if "radar_hud_enabled" not in data:
         state["radar_hud_enabled"] = True
         migrated = True
@@ -1335,6 +1374,8 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("show_ground_vehicles"),
         state.get("vessel_min_speed_kt"),
         state.get("aircraft_min_speed_kt"),
+        str(state.get("airline_filter") or ""),
+        bool(state.get("airline_filter_enabled", False)),
         state.get("min_height_ft"),
         state.get("max_height_ft"),
         state.get("brightness_percent"),
@@ -2330,6 +2371,79 @@ def cycle_airport_basemap() -> str:
     current = airport_basemap()
     nxt = AIRPORT_BASEMAPS[(AIRPORT_BASEMAPS.index(current) + 1) % len(AIRPORT_BASEMAPS)]
     return set_airport_basemap(nxt)
+
+
+# --- Airline filter -----------------------------------------------------------
+# (blob, keys) cache so the per-flight radar check never re-parses the list.
+_airline_filter_cache: tuple[str, frozenset[str]] = ("", frozenset())
+
+
+def airline_filter_codes() -> list[str]:
+    """Configured airline codes in portal order (e.g. ["SWA", "WN"])."""
+    return _parse_airline_filter(_state.get("airline_filter", ""))
+
+
+def airline_filter_blob() -> str:
+    """Comma-separated codes as shown in the portal text box."""
+    return ", ".join(airline_filter_codes())
+
+
+def airline_filter_enabled() -> bool:
+    """The on/off switch, independent of whether any codes are configured."""
+    return bool(_state.get("airline_filter_enabled", False))
+
+
+def airline_filter_active() -> bool:
+    """True when the radar should hide aircraft not flown by a listed airline."""
+    return airline_filter_enabled() and bool(airline_filter_codes())
+
+
+def airline_filter_keys() -> frozenset[str]:
+    """Match keys for the configured codes, with IATA↔ICAO aliases expanded.
+
+    "WN" and "SWA" both expand to {"WN", "SWA"} so either spelling matches a
+    Southwest callsign (SWA1234) or marketing flight number (WN1234).
+    """
+    global _airline_filter_cache
+    blob = ",".join(airline_filter_codes())
+    cached_blob, cached_keys = _airline_filter_cache
+    if blob == cached_blob and (cached_keys or not blob):
+        return cached_keys
+    from utilities.airline_branding import airline_code_aliases
+
+    keys: set[str] = set()
+    for code in blob.split(","):
+        if code:
+            keys |= airline_code_aliases(code)
+    _airline_filter_cache = (blob, frozenset(keys))
+    return _airline_filter_cache[1]
+
+
+def airline_filter_label() -> str:
+    """Short value for the settings row: "SWA, WN" or "SWA, UAL +2"."""
+    codes = airline_filter_codes()
+    if not codes:
+        return tr("settings.value.airline_filter_none")
+    if len(codes) <= 2:
+        return ", ".join(codes)
+    return f"{codes[0]}, {codes[1]} +{len(codes) - 2}"
+
+
+def toggle_airline_filter_enabled() -> bool:
+    _state["airline_filter_enabled"] = not airline_filter_enabled()
+    _save(_state)
+    return _state["airline_filter_enabled"]
+
+
+def set_airline_filter_enabled(enabled: bool) -> None:
+    _state["airline_filter_enabled"] = bool(enabled)
+    _save(_state)
+
+
+def set_airline_filter(blob) -> None:
+    """Store a normalised code list; invalid tokens are silently dropped."""
+    _state["airline_filter"] = ",".join(_parse_airline_filter(blob))
+    _save(_state)
 
 
 def map_style() -> str:

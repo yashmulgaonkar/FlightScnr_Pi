@@ -117,6 +117,7 @@ OPTIONS_ACTIONS = (
     "max_height",
     "aircraft_min_speed",
     "vessel_min_speed",
+    "airline_filter",
     "map_style",
     "vfr_opacity",
 )
@@ -3109,6 +3110,7 @@ def _options_row_labels() -> list[str]:
         tr("settings.row.max_altitude", value=settings.max_height_ft()),
         tr("settings.row.min_aircraft_speed", value=settings.aircraft_min_speed_label()),
         tr("settings.row.min_vessel_speed", value=settings.vessel_min_speed_label()),
+        tr("settings.row.airline_filter", value=settings.airline_filter_label()),
         tr("settings.row.basemap", value=settings.map_style_label()),
         "",  # VFR opacity slider
     ]
@@ -3166,6 +3168,7 @@ _TOGGLE_ROW_STATE = {
     "airport_icons": settings.show_airport_icons,
     "flip_board_sound": settings.flip_board_sound_enabled,
     "ground_vehicles": settings.show_ground_vehicles,
+    "airline_filter": settings.airline_filter_enabled,
     "idle_clock": settings.auto_idle_clock_enabled,
     "auto_floor": settings.auto_lower_altitude_floor_on_empty_enabled,
     "alert_military": alert_prefs.military_enabled,

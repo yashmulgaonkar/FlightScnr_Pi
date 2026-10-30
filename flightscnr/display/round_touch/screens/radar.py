@@ -943,6 +943,11 @@ def _above_min_height(flight, *, min_height_ft: int | None = None) -> bool:
                     return False
             except (TypeError, ValueError):
                 return False
+        if settings.airline_filter_active():
+            from utilities.airline_branding import matches_airline_filter
+
+            if not matches_airline_filter(flight, settings.airline_filter_keys()):
+                return False
     except Exception:
         pass
 

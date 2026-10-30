@@ -314,3 +314,65 @@ def resolve_logo_icao(
         return operator
 
     return "default"
+
+
+# --- Airline filter ------------------------------------------------------------
+
+
+def airline_code_aliases(code: str) -> frozenset[str]:
+    """All spellings of one airline code: {"WN", "SWA"} for either input.
+
+    Only the marketing table above is consulted, so an unknown code matches
+    itself only (still useful for operators like SKW or cargo carriers).
+    """
+    c = _normalize(code)
+    if not c:
+        return frozenset()
+    keys = {c}
+    icao = IATA_TO_ICAO.get(c)
+    if icao:
+        keys.add(icao)
+    iata = ICAO_TO_IATA.get(c)
+    if iata:
+        keys.add(iata)
+    return frozenset(keys)
+
+
+def flight_airline_keys(flight: dict) -> frozenset[str]:
+    """Every airline code a flight record can be attributed to.
+
+    Includes the resolved marketing brand (``airline_icao``: UAL for a SkyWest
+    UA5599), the operator from the ADS-B callsign (SKW), the IATA prefix of
+    the flight number (UA) and the FR24 owner codes. GA tails and tactical
+    callsigns yield nothing, so they never match a filter.
+    """
+    keys: set[str] = set()
+    for field in ("airline_icao", "owner_icao", "owner_iata"):
+        value = _normalize(flight.get(field) or "")
+        if value and value not in ("N/A", "DEFAULT", "GA", "HELI"):
+            keys.add(value)
+    for field in ("callsign", "flight_number", "number"):
+        fid = _normalize(flight.get(field) or "")
+        if not fid or _is_tactical_callsign(fid):
+            continue
+        icao = _icao_prefix(fid)
+        if icao:
+            keys.add(icao)
+        iata = _iata_prefix(fid)
+        if iata:
+            keys.add(iata)
+    expanded: set[str] = set()
+    for key in keys:
+        expanded |= airline_code_aliases(key)
+    return frozenset(expanded)
+
+
+def matches_airline_filter(flight: dict, filter_keys) -> bool:
+    """True when the flight belongs to one of the airlines in ``filter_keys``.
+
+    ``filter_keys`` is the alias-expanded set from settings.airline_filter_keys().
+    An empty filter matches everything (no filter configured).
+    """
+    if not filter_keys:
+        return True
+    return bool(flight_airline_keys(flight) & frozenset(filter_keys))
