@@ -950,8 +950,12 @@ class RoundTouchDisplay:
                 show_sweep = settings.show_sweep_line()
                 # Build icons first, then sample the beam, so a slow icon
                 # frame cannot freeze the angle the wedge is drawn at.
+                if FRAME_DEBUG:
+                    _t = time.perf_counter()
                 live_icons = radar.live_icon_frame()
                 live_connectors = radar.live_trail_connectors()
+                if FRAME_DEBUG:
+                    self._stage("4L_live_frame", time.perf_counter() - _t)
                 sweep_angle = radar.current_sweep_angle()
                 if FRAME_DEBUG:
                     _t = time.perf_counter()
@@ -1580,7 +1584,9 @@ class RoundTouchDisplay:
             airports = airport_overlay.in_view_airports()
             if not airports:
                 return
+            _lt = time.perf_counter()
             events = flip_board_data.tracker().observe(flights, airports, now)
+            self._loop_stage("flip_observe", _lt)
             identity_changed = bool(flip_board_data.tracker().identity_changed)
             if self.screen == SCREEN_FLIP_BOARD and (events or identity_changed):
                 # New rows, or older tail-only rows that just got a callsign
@@ -1598,7 +1604,9 @@ class RoundTouchDisplay:
                 or now - self._flip_board_saved_at >= self._FLIP_BOARD_TRACK_SAVE_S
             ):
                 self._flip_board_saved_at = now
+                _lt = time.perf_counter()
                 flip_board_data.save()
+                self._loop_stage("flip_save", _lt)
         except Exception:
             logger.debug("Flip board update failed", exc_info=True)
 
@@ -3801,6 +3809,13 @@ class RoundTouchDisplay:
 
     def _radar_flights(self) -> list:
         """Flights with dead-reckoned positions for radar draw / tap hit-testing."""
+        if FRAME_DEBUG:
+            _lt = time.perf_counter()
+            try:
+                return self._position_smoother.apply(self.flights)
+            finally:
+                frame_debug.count("smooth_apply")
+                self._loop_stage("smooth_apply", _lt)
         return self._position_smoother.apply(self.flights)
 
     def _airport_flights(self) -> list:
@@ -5690,7 +5705,13 @@ class RoundTouchDisplay:
         if now - last_probe < 1.0:
             return
         self._last_auto_floor_probe = now
+        _lt = time.perf_counter()
+        try:
+            self._auto_floor_probe_step(now)
+        finally:
+            self._loop_stage("loop_autofloor", _lt)
 
+    def _auto_floor_probe_step(self, now: float) -> None:
         probe_flights = self._auto_floor_probe_flights()
         current_floor = settings.min_height_ft()
         standard_floor = settings.configured_min_height_ft()

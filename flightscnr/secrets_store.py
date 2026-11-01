@@ -163,14 +163,37 @@ def load_secrets_json() -> dict[str, str]:
     return out
 
 
+# secrets.json is parsed on hot paths (api_enabled() runs from the radar
+# frame via the basemap key lookups, about 30 times a second on the device).
+# Cache the parsed document keyed by the file's stat signature so the portal's
+# rewrites still show up on the next read without a JSON parse per frame.
+_secrets_cache_sig: tuple | None = None
+_secrets_cache_doc: dict = {}
+
+
 def _load_secrets_file_raw() -> dict:
     """Full secrets.json document (keys + toggles + source settings)."""
+    global _secrets_cache_sig, _secrets_cache_doc
+    try:
+        st = os.stat(SECRETS_JSON_PATH)
+        sig = (st.st_mtime_ns, st.st_size, st.st_ino)
+    except OSError:
+        _secrets_cache_sig = None
+        _secrets_cache_doc = {}
+        return {}
+    if sig == _secrets_cache_sig:
+        return _secrets_cache_doc
     try:
         with open(SECRETS_JSON_PATH, encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, json.JSONDecodeError, TypeError):
+        _secrets_cache_sig = None
+        _secrets_cache_doc = {}
         return {}
-    return data if isinstance(data, dict) else {}
+    doc = data if isinstance(data, dict) else {}
+    _secrets_cache_sig = sig
+    _secrets_cache_doc = doc
+    return doc
 
 
 def load_toggles() -> dict[str, bool]:
@@ -187,12 +210,8 @@ def load_toggles() -> dict[str, bool]:
         "USE_STADIA_MAPS": True,
         "USE_CARTO_BASEMAPS": True,
     }
-    try:
-        with open(SECRETS_JSON_PATH, encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, json.JSONDecodeError, TypeError):
-        return defaults
-    if not isinstance(data, dict):
+    data = _load_secrets_file_raw()
+    if not data:
         return defaults
     out = dict(defaults)
     for key in TOGGLE_KEYS:

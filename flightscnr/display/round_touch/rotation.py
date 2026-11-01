@@ -261,6 +261,8 @@ def present_radar_sweep(
             _upload_y = None
             full_refresh = True
     else:
+        if frame_debug.ENABLED:
+            _t = time.perf_counter()
         if display.get_size() != _rot_base.get_size():
             origin_off = _center_offset(display, _rot_base)
         # Erase the previous wedge by restoring that rect from the static base.
@@ -360,6 +362,12 @@ def present_radar_sweep(
             )
             display.blit(_rot_base, r.topleft, src)
 
+    if frame_debug.ENABLED:
+        if not swap_in and not full_refresh:
+            frame_debug.stage("4p_erase", time.perf_counter() - _t)
+        frame_debug.count("live_icons", len(live_icons or ()))
+        frame_debug.count("live_conns", len(live_connectors or ()))
+        _t = time.perf_counter()
     old_rect = _prev_sweep_rect
     old_hud = _prev_hud_rect
     old_bubble = _prev_bubble_rect
@@ -376,6 +384,9 @@ def present_radar_sweep(
     icon_rects = _blit_live_icons(display, origin_off, rotation, live_icons)
     new_icons = conn_rects + icon_rects
     _prev_icon_rects = new_icons
+    if frame_debug.ENABLED:
+        frame_debug.stage("4p_live", time.perf_counter() - _t)
+        _t = time.perf_counter()
     new_rect = None
     if draw_sweep:
         # present() rotates the frame by -rotation; a logical tip at angle θ lands
@@ -392,6 +403,9 @@ def present_radar_sweep(
             radius=float(theme.SWEEP_RADIUS),
         )
     _prev_sweep_rect = new_rect
+    if frame_debug.ENABLED:
+        frame_debug.stage("4p_sweep", time.perf_counter() - _t)
+        _t = time.perf_counter()
 
     # Curved frosted pill on top of the sweep (SRCALPHA — no rectangular hole).
     hud_dirty = _blit_hud_overlay(display, origin_off, rotation)
@@ -419,6 +433,8 @@ def present_radar_sweep(
     # Radial target menu is modal — topmost.
     radial_dirty = _blit_radial_menu(display, origin_off, rotation)
     _prev_radial_rect = radial_dirty
+    if frame_debug.ENABLED:
+        frame_debug.stage("4p_overlays", time.perf_counter() - _t)
 
     _t = time.perf_counter()
     if full_refresh:
