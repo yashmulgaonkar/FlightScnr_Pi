@@ -467,6 +467,14 @@
                 <option value="200">&gt; 200 kt</option>
             </select>
             <p class="hint">Hide aircraft at or below this ground speed. Use to declutter taxiing/parked traffic while keeping airborne movers. Options follow the Distance units setting above.</p>
+            <label for="airline_filter" data-i18n="portal.radar.airline_filter.label">Airline filter (airline codes)</label>
+            <input id="airline_filter" type="text" autocomplete="off" placeholder="SWA, WN, UAL">
+            <p class="hint" data-i18n="portal.radar.airline_filter.hint">Show only these airlines on the radar. Enter ICAO (SWA, UAL) or IATA (WN, UA) airline codes, comma-separated. Regional partners flying a listed brand's flight number (SkyWest as UA5599) count as that brand. Marine traffic is not affected. Clear and Save to remove the list.</p>
+            <div class="chk">
+                <label for="airline_filter_enabled" data-i18n="portal.radar.airline_filter_enabled.label">Only show listed airlines</label>
+                <span class="switch"><input id="airline_filter_enabled" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint" data-i18n="portal.radar.airline_filter_enabled.hint">Turn the filter on or off without retyping the list. The same switch is on the device under Settings › Options.</p>
             <button class="btn btn-primary" id="btn-radar" style="margin-top:.7rem" type="button">Save radar settings</button>
             <div id="radar-status" class="status"></div>
         </div>
@@ -1822,6 +1830,8 @@ async function loadAll() {
         $("traffic_mode").value = r.traffic_mode || (r.ais_enabled ? "both" : "aircraft");
         if ($("vessel_min_speed")) $("vessel_min_speed").value = String(r.vessel_min_speed_kt ?? 0);
         if ($("aircraft_min_speed")) $("aircraft_min_speed").value = String(r.aircraft_min_speed_kt ?? 0);
+        if ($("airline_filter")) $("airline_filter").value = r.airline_filter || "";
+        if ($("airline_filter_enabled")) $("airline_filter_enabled").checked = !!r.airline_filter_enabled;
     } catch (_) {}
 
     try {
@@ -2301,6 +2311,8 @@ async function saveRadar() {
                 traffic_mode: $("traffic_mode").value,
                 vessel_min_speed_kt: Number($("vessel_min_speed") ? $("vessel_min_speed").value : 0),
                 aircraft_min_speed_kt: Number($("aircraft_min_speed") ? $("aircraft_min_speed").value : 0),
+                airline_filter: $("airline_filter") ? $("airline_filter").value.trim().toUpperCase() : "",
+                airline_filter_enabled: $("airline_filter_enabled") ? $("airline_filter_enabled").checked : false,
             }),
         });
         showStatus("radar-status", i18nText("portal.radar.saved", "Radar settings saved."));
@@ -2606,6 +2618,8 @@ async function saveAndReloadSettings(statusId) {
                 traffic_mode: $("traffic_mode").value,
                 vessel_min_speed_kt: Number($("vessel_min_speed") ? $("vessel_min_speed").value : 0),
                 aircraft_min_speed_kt: Number($("aircraft_min_speed") ? $("aircraft_min_speed").value : 0),
+                airline_filter: $("airline_filter") ? $("airline_filter").value.trim().toUpperCase() : "",
+                airline_filter_enabled: $("airline_filter_enabled") ? $("airline_filter_enabled").checked : false,
             }),
         });
         await jsonFetch("/display", {

@@ -17,7 +17,7 @@ A round **4″ touch display** flight and marine tracker for Raspberry Pi. Dark 
 
 ## Features
 
-Live aircraft (and optional marine traffic) on a circular radar, with rich detail screens when you tap. Powered by **FR24**, **[adsb.fi](https://adsb.fi)**, optional local dump1090/readsb, **Tomorrow.io** weather, optional precipitation from **[LibreWXR](https://librewxr.net/)** (RainViewer fallback), optional route enrichment, **USGS earthquakes**, and wildfire layers (CAL FIRE / NIFC / NASA FIRMS). Configure everything from the web portal. Full detail: [Features wiki](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Features).
+Live aircraft (and optional marine traffic) on a circular radar, with rich detail screens when you tap. Powered by **FR24**, **[adsb.fi](https://adsb.fi)**, optional local dump1090/readsb, **Tomorrow.io** weather, optional precipitation from **[LibreWXR](https://librewxr.net/)** (RainViewer fallback), optional route enrichment, **USGS earthquakes**, and wildfire layers (CAL FIRE / NIFC / NASA FIRMS). Filter the radar by altitude, ground speed, or **airline** (for example, show only Southwest). Configure everything from the web portal. Full detail: [Features wiki](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Features).
 
 Current release: **2026.10.1.1** on `main`.
 
