@@ -276,3 +276,192 @@ class TestHelicopterRotor(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRotatedSpriteCache(unittest.TestCase):
+    """draw_icon rotates through a quantized cache instead of per call."""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        import pygame
+
+        pygame.init()
+        try:
+            pygame.display.set_mode((1, 1))
+        except pygame.error:
+            pass
+
+    def setUp(self):
+        from display.round_touch import aircraft_type_icons
+
+        aircraft_type_icons.clear_rotor_cache()
+
+    def tearDown(self):
+        from display.round_touch import aircraft_type_icons
+
+        aircraft_type_icons.clear_rotor_cache()
+
+    def test_heading_step_quantizes_and_wraps(self):
+        from display.round_touch import aircraft_type_icons as m
+
+        self.assertEqual(m.heading_step(0.0), 0)
+        self.assertEqual(m.heading_step(0.9), 0)
+        self.assertEqual(m.heading_step(1.1), 1)
+        self.assertEqual(m.heading_step(359.5), 0)
+        self.assertEqual(m.heading_step(-2.0), 179)
+        self.assertEqual(m.heading_step(90.0), 45)
+
+    def test_same_bucket_returns_cached_surface(self):
+        import pygame
+        from unittest import mock
+        from display.round_touch import aircraft_type_icons as m
+
+        base = pygame.Surface((20, 20), pygame.SRCALPHA)
+        with mock.patch.object(
+            pygame.transform, "rotate", wraps=pygame.transform.rotate
+        ) as rot:
+            a = m.rotated_sprite(base, 90.4)
+            b = m.rotated_sprite(base, 89.7)
+            self.assertIs(a, b)
+            self.assertEqual(rot.call_count, 1)
+            c = m.rotated_sprite(base, 92.0)
+            self.assertIsNot(a, c)
+            self.assertEqual(rot.call_count, 2)
+        # Heading 0 is the base sprite itself: no rotate, no copy.
+        self.assertIs(m.rotated_sprite(base, 0.0), base)
+        self.assertIs(m.rotated_sprite(base, 360.0), base)
+
+    def test_cache_is_bounded(self):
+        import pygame
+        from display.round_touch import aircraft_type_icons as m
+
+        base = pygame.Surface((4, 4), pygame.SRCALPHA)
+        for step in range(1, m._ROTATED_CACHE_MAX + 5):
+            m.rotated_sprite(base, step * m._ROT_STEP_DEG)
+        self.assertLessEqual(len(m._rotated_cache), m._ROTATED_CACHE_MAX)
+
+    def test_draw_icon_rotates_once_per_heading_bucket(self):
+        import pygame
+        from unittest import mock
+        from display.round_touch import aircraft_type_icons as m
+
+        if not m.assets_available():
+            self.skipTest("aircraft PNGs not installed")
+        flight = {"plane": "B738"}
+        color = (0, 220, 80)
+        surf = pygame.Surface((80, 80), pygame.SRCALPHA)
+        with mock.patch.object(
+            pygame.transform, "rotate", wraps=pygame.transform.rotate
+        ) as rot:
+            for heading in (44.0, 44.9, 43.2, 44.6):
+                self.assertTrue(m.draw_icon(surf, flight, (40, 40), heading, color, size=48))
+            self.assertEqual(rot.call_count, 1)
+            m.draw_icon(surf, flight, (40, 40), 47.0, color, size=48)
+            self.assertEqual(rot.call_count, 2)
+
+    def test_draw_icon_output_matches_uncached_rotation(self):
+        import pygame
+        from display.round_touch import aircraft_type_icons as m
+
+        if not m.assets_available():
+            self.skipTest("aircraft PNGs not installed")
+        flight = {"plane": "B738"}
+        color = (0, 220, 80)
+        heading = 120.0  # on a 2 degree step, so the quantized angle is exact
+        got = pygame.Surface((80, 80), pygame.SRCALPHA)
+        m.draw_icon(got, flight, (40, 40), heading, color, size=48)
+        want = pygame.Surface((80, 80), pygame.SRCALPHA)
+        icon = m.get_icon_surface(m.icon_category(flight), 48, color)
+        rotated = pygame.transform.rotate(icon, -heading)
+        want.blit(rotated, rotated.get_rect(center=(40, 40)))
+        self.assertEqual(
+            pygame.image.tostring(got, "RGBA"), pygame.image.tostring(want, "RGBA")
+        )
+
+    def test_rotor_overlay_uses_the_cache(self):
+        import pygame
+        from unittest import mock
+        from display.round_touch import aircraft_type_icons as m
+
+        if not m.assets_available():
+            self.skipTest("helicopter PNG not installed")
+        flight = {"plane": "R44"}
+        color = (0, 220, 80)
+        surf = pygame.Surface((80, 80), pygame.SRCALPHA)
+        with mock.patch.object(m, "rotor_phase", return_value=0), mock.patch.object(
+            pygame.transform, "rotate", wraps=pygame.transform.rotate
+        ) as rot:
+            m.draw_icon(surf, flight, (40, 40), 30.0, color, size=48)
+            first = rot.call_count  # body + rotor disc
+            m.draw_icon(surf, flight, (40, 40), 30.5, color, size=48)
+            self.assertEqual(rot.call_count, first)
+
+
+class TestPreparedIconCache(unittest.TestCase):
+    """A new tint never reloads the PNG; the tinted cache evicts, not clears."""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        import pygame
+
+        pygame.init()
+        try:
+            pygame.display.set_mode((1, 1))
+        except pygame.error:
+            pass
+
+    def setUp(self):
+        from display.round_touch import aircraft_type_icons as m
+
+        m._base_cache.clear()
+        m._surface_cache.clear()
+        m.clear_rotor_cache()
+
+    def test_second_colour_does_not_reload_png(self):
+        import pygame
+        from unittest import mock
+        from display.round_touch import aircraft_type_icons as m
+
+        if not m.assets_available():
+            self.skipTest("aircraft PNGs not installed")
+        with mock.patch.object(pygame.image, "load", wraps=pygame.image.load) as load:
+            a = m.get_icon_surface("business-jet", 34, (255, 0, 0))
+            b = m.get_icon_surface("business-jet", 34, (0, 255, 0))
+            c = m.get_icon_surface("business-jet", 34, (255, 0, 0))
+            self.assertIsNotNone(a)
+            self.assertEqual(load.call_count, 1)
+        self.assertIsNot(a, b)
+        self.assertIs(a, c)
+        self.assertEqual(a.get_size(), b.get_size())
+
+    def test_tinted_cache_evicts_oldest_without_clearing(self):
+        from display.round_touch import aircraft_type_icons as m
+
+        if not m.assets_available():
+            self.skipTest("aircraft PNGs not installed")
+        n = m._SURFACE_CACHE_MAX
+        for i in range(n + 3):
+            m.get_icon_surface("business-jet", 34, (i % 256, (i // 256) % 256, 7))
+        self.assertEqual(len(m._surface_cache), n)
+        # The newest entries survive; the first three were evicted.
+        side = next(iter(m._base_cache))[1]
+        self.assertIn(("business-jet", side, (n % 256, (n // 256) % 256, 7)), m._surface_cache)
+        self.assertNotIn(("business-jet", side, (0, 0, 7)), m._surface_cache)
+
+
+class TestAltitudeColourSnapping(unittest.TestCase):
+    def test_icon_colour_snaps_altitude_to_100ft(self):
+        from unittest import mock
+        from display.round_touch import settings
+        from display.round_touch.screens import radar
+
+        with mock.patch.object(settings, "color_by_altitude", return_value=True), mock.patch.object(
+            radar, "_is_tracked", return_value=False
+        ), mock.patch.object(radar.aircraft_alert, "is_highlighted", return_value=False):
+            a = radar._flight_icon_color({"altitude": 10020, "plane": "B738"}, compact=False)
+            b = radar._flight_icon_color({"altitude": 10049, "plane": "B738"}, compact=False)
+            c = radar._flight_icon_color({"altitude": 10260, "plane": "B738"}, compact=False)
+        self.assertEqual(a, b)
+        self.assertNotEqual(a, c)

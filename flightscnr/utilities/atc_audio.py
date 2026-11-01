@@ -1075,9 +1075,18 @@ def quiet_override_end_label(*, active: bool | None = None) -> str:
     return format_hhmm_12h(_prefs()["quiet_end"])
 
 
+# The orphan check walks every /proc/<pid>/cmdline. is_playing() is polled from
+# the radar HUD and the OTA tick, so with ATC idle that walk ran about twice a
+# second on the render thread. Remember a negative result briefly; start()
+# clears it so a fresh mpv is seen at once.
+_ORPHAN_SCAN_INTERVAL_S = 1.0
+_orphan_scan_clear_at = 0.0
+
+
 def _mpv_alive() -> bool:
     """True if this process owns a live mpv, or another process's mpv IPC responds."""
     global _proc, _playing_mount, _playing_airport, _quiet_override
+    global _orphan_scan_clear_at
     if _proc is not None:
         code = _proc.poll()
         if code is None:
@@ -1095,7 +1104,13 @@ def _mpv_alive() -> bool:
     if _ipc_responsive():
         return True
     # Orphan: socket was unlinked (or never reachable) but mpv still streams.
-    return bool(_atc_mpv_pids())
+    now = time.monotonic()
+    if now - _orphan_scan_clear_at < _ORPHAN_SCAN_INTERVAL_S:
+        return False
+    if _atc_mpv_pids():
+        return True
+    _orphan_scan_clear_at = now
+    return False
 
 
 def _atc_mpv_marker() -> str:
@@ -1524,6 +1539,8 @@ def _start_locked(
             start_new_session=True,
             close_fds=True,
         )
+        global _orphan_scan_clear_at
+        _orphan_scan_clear_at = 0.0
     except OSError as exc:
         logger.warning("ATC mpv start failed: %s", exc)
         with _lock:
@@ -2112,8 +2129,9 @@ def reset_runtime_for_tests() -> None:
     global _proc, _playing_mount, _playing_airport, _quiet_override, _last_error
     global _seed_cache, _seed_mtime, _index_cache, _index_mtime
     global _discovered, _discover_thread
-    global _keepalive_next_at, _keepalive_failures
+    global _keepalive_next_at, _keepalive_failures, _orphan_scan_clear_at
     with _lock:
+        _orphan_scan_clear_at = 0.0
         _proc = None
         _playing_mount = None
         _playing_airport = None

@@ -218,6 +218,7 @@ def invalidate_frame_layer() -> None:
     """Force the fire/aircraft layer to rebuild on the next radar frame."""
     global _frame_layer, _frame_layer_key, _frame_layer_at, _frame_layer_gen
     global _rim_baked_in_layer
+    frame_debug.count("layer_invalidate")
     _frame_layer = None
     _frame_layer_key = None
     _frame_layer_at = 0.0
@@ -519,10 +520,13 @@ def _ensure_frame_layer(backdrop, flights, offset) -> pygame.Surface | None:
         if _frame_layer is not None and _frame_layer.get_size() == (theme.SIZE, theme.SIZE):
             return _frame_layer
         _rebuild_counts["layer"] += 1
+        frame_debug.count("layer_inline")
         # Never paint into the published surface — present/rim-flash may still
         # be blitting it. Same spare→publish→cool path as prewarm_frame_layer.
         build = _take_build_surface()
+        _lt = frame_debug.mark("2_inline_rebuild")
         rim_baked = _build_frame_layer(build, backdrop, flights, offset)
+        frame_debug.end("2_inline_rebuild", _lt)
         return _publish_frame_layer(build, key, rim_baked=rim_baked)
     finally:
         _layer_lock.release()
@@ -1994,7 +1998,16 @@ def _flight_icon_color(flight, *, compact: bool):
     if settings.color_by_altitude():
         from display.round_touch import altitude_color
 
-        return altitude_color.color_for_altitude(flight.get("altitude"))
+        # Icons are tinted sprites cached by colour. The gradient moves about
+        # one hue degree per 300 ft, so snapping the altitude to 100 ft steps
+        # is invisible but keeps a climbing target on one sprite instead of
+        # minting a new tint (and cache entry) every position report.
+        alt = flight.get("altitude")
+        try:
+            alt = round(float(alt) / 100.0) * 100.0
+        except (TypeError, ValueError):
+            pass
+        return altitude_color.color_for_altitude(alt)
     # Targets page: per-category accent replaces only the single default
     # color — altitude coloring and alert pulses keep priority above.
     custom = settings.target_color(aircraft.target_category(flight))

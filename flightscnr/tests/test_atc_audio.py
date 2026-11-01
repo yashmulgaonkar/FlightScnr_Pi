@@ -1163,3 +1163,49 @@ class VisibleAirportsRadiusTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OrphanScanCacheTests(unittest.TestCase):
+    """With no mpv anywhere, the /proc walk runs at most once a second."""
+
+    def setUp(self):
+        from utilities import atc_audio
+
+        atc_audio.reset_runtime_for_tests()
+
+    def test_negative_scan_is_cached(self):
+        from unittest import mock
+        from utilities import atc_audio
+
+        with mock.patch.object(atc_audio, "_ipc_responsive", return_value=False), mock.patch.object(
+            atc_audio, "_atc_mpv_pids", return_value=[]
+        ) as pids:
+            for _ in range(5):
+                self.assertFalse(atc_audio._mpv_alive())
+            self.assertEqual(pids.call_count, 1)
+
+    def test_cache_expires_and_reset_clears_it(self):
+        from unittest import mock
+        from utilities import atc_audio
+
+        with mock.patch.object(atc_audio, "_ipc_responsive", return_value=False), mock.patch.object(
+            atc_audio, "_atc_mpv_pids", return_value=[]
+        ) as pids:
+            self.assertFalse(atc_audio._mpv_alive())
+            atc_audio._orphan_scan_clear_at -= atc_audio._ORPHAN_SCAN_INTERVAL_S + 1
+            self.assertFalse(atc_audio._mpv_alive())
+            self.assertEqual(pids.call_count, 2)
+            atc_audio.reset_runtime_for_tests()
+            self.assertFalse(atc_audio._mpv_alive())
+            self.assertEqual(pids.call_count, 3)
+
+    def test_positive_scan_is_not_cached(self):
+        from unittest import mock
+        from utilities import atc_audio
+
+        with mock.patch.object(atc_audio, "_ipc_responsive", return_value=False), mock.patch.object(
+            atc_audio, "_atc_mpv_pids", side_effect=[[], [77]]
+        ):
+            self.assertFalse(atc_audio._mpv_alive())
+            atc_audio._orphan_scan_clear_at = 0.0
+            self.assertTrue(atc_audio._mpv_alive())
