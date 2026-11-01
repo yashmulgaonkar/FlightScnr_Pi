@@ -506,6 +506,9 @@ _defaults = {
     "alarm_snooze_minutes": 9,
     "alarm_snooze_until": "",
     "alarm_dismissed_key": "",
+    # One-time card for a Pi sold with 2 GB or less. The live low-memory
+    # card is not remembered across boots.
+    "low_ram_board_dismissed": False,
     "traffic_sfx_enabled": True,
     "traffic_sfx_volume": 80,
     "military_sfx_enabled": True,
@@ -1454,6 +1457,7 @@ def _settings_snapshot(state: dict) -> tuple:
         int(state.get("alarm_snooze_minutes", 9) or 9),
         str(state.get("alarm_snooze_until") or ""),
         str(state.get("alarm_dismissed_key") or ""),
+        bool(state.get("low_ram_board_dismissed", False)),
         bool(state.get("traffic_sfx_enabled", True)),
         clamp_sfx_volume(state.get("traffic_sfx_volume", 80)),
         bool(state.get("military_sfx_enabled", True)),
@@ -3889,6 +3893,15 @@ def alarm_enabled() -> bool:
 
 def set_alarm_enabled(enabled: bool) -> None:
     _rmw_save({"alarm_enabled": bool(enabled)})
+
+
+def low_ram_board_dismissed() -> bool:
+    """True after the user taps OK on the 2 GB-or-less board card."""
+    return bool(_state.get("low_ram_board_dismissed", False))
+
+
+def set_low_ram_board_dismissed(dismissed: bool = True) -> None:
+    _rmw_save({"low_ram_board_dismissed": bool(dismissed)})
 
 
 def alarm_time() -> str:

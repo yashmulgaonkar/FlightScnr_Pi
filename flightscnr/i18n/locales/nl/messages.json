@@ -1074,5 +1074,10 @@
   "alarm.volume": "Volume",
   "alarm.snooze": "Sluimeren",
   "alarm.snooze_value": "{minutes} min",
-  "alarm.enabled": "Alarm"
+  "alarm.enabled": "Alarm",
+  "ram.board.title": "Weinig geheugen",
+  "ram.board.body": "Deze Pi heeft 2 GB RAM of minder. Soepele beweging, neerslag en satellietkaarten gebruiken het meeste geheugen.",
+  "ram.pressure.title": "Weinig vrij geheugen",
+  "ram.pressure.body": "Minder dan 200 MB is vrij. Soepele beweging, neerslag en satellietkaarten gebruiken het meeste geheugen.",
+  "ram.notice.ok": "OK"
 }

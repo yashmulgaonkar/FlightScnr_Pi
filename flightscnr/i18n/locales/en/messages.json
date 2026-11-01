@@ -1074,5 +1074,10 @@
   "alarm.volume": "Volume",
   "alarm.snooze": "Snooze",
   "alarm.snooze_value": "{minutes} min",
-  "alarm.enabled": "Alarm"
+  "alarm.enabled": "Alarm",
+  "ram.board.title": "Low memory board",
+  "ram.board.body": "This Pi has 2 GB of RAM or less. Smooth motion, precipitation, and satellite maps use the most memory.",
+  "ram.pressure.title": "Low memory",
+  "ram.pressure.body": "Less than 200 MB is free. Smooth motion, precipitation, and satellite maps use the most memory.",
+  "ram.notice.ok": "OK"
 }
