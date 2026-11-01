@@ -1074,5 +1074,10 @@
   "alarm.volume": "Hangerő",
   "alarm.snooze": "Szundi",
   "alarm.snooze_value": "{minutes} perc",
-  "alarm.enabled": "Ébresztő"
+  "alarm.enabled": "Ébresztő",
+  "ram.board.title": "Kevés memória",
+  "ram.board.body": "Ezen a Pi-n 2 GB vagy kevesebb RAM van. A folyamatos mozgás, a csapadék és a műholdas térkép használja a legtöbb memóriát.",
+  "ram.pressure.title": "Kevés szabad memória",
+  "ram.pressure.body": "Kevesebb mint 200 MB szabad. A folyamatos mozgás, a csapadék és a műholdas térkép használja a legtöbb memóriát.",
+  "ram.notice.ok": "OK"
 }

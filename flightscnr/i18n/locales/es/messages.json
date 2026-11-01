@@ -1074,5 +1074,10 @@
   "alarm.volume": "Volumen",
   "alarm.snooze": "Posponer",
   "alarm.snooze_value": "{minutes} min",
-  "alarm.enabled": "Alarma"
+  "alarm.enabled": "Alarma",
+  "ram.board.title": "Poca memoria",
+  "ram.board.body": "Este Pi tiene 2 GB de RAM o menos. El movimiento suave, la precipitación y los mapas satélite usan más memoria.",
+  "ram.pressure.title": "Memoria baja",
+  "ram.pressure.body": "Quedan menos de 200 MB libres. El movimiento suave, la precipitación y los mapas satélite usan más memoria.",
+  "ram.notice.ok": "OK"
 }

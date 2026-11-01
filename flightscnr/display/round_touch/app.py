@@ -203,6 +203,12 @@ class RoundTouchDisplay:
         self._follow_confirm = None
         # Auto-clear notice after Follow/Tracked loses the flight.
         self._tracking_cleared_popup = False
+        # RAM card: "board" (2 GB or less, remembered) or "pressure" (this boot).
+        from utilities.ram_notice import PressureMonitor
+
+        self._ram_pressure = PressureMonitor()
+        self._ram_kind: str | None = None
+        self._ram_check_at = 0.0
         # Stable identity for the open detail page (index alone drifts as traffic changes).
         self._selected_flight_id: str | None = None
         self.fire_index = 0
@@ -939,6 +945,7 @@ class RoundTouchDisplay:
         if (
             self.screen == SCREEN_RADAR
             and not self._alarm_overlay_active()
+            and not self._ram_notice_active()
             and not self._calibrating_facing
             and not self._panning_map
             and not self._pan_commit_choice
@@ -1037,7 +1044,7 @@ class RoundTouchDisplay:
             )
             # The sweep present path never shows this buffer. While the alarm
             # is up, paint the radar layer here so the popup sits on top of it.
-            if self._alarm_overlay_active():
+            if self._alarm_overlay_active() or self._ram_notice_active():
                 layer, _layer_gen = radar.frame_layer_snapshot()
                 if layer is not None:
                     try:
@@ -1182,6 +1189,7 @@ class RoundTouchDisplay:
         else:
             power_menu.clear_icon()
         self._draw_alarm_overlay()
+        self._draw_ram_notice()
         remaining = self._timeout_remaining_fraction()
         if remaining is not None:
             # Snapshot content+bezel (no ring) and a pre-rotated display base so
@@ -4675,6 +4683,9 @@ class RoundTouchDisplay:
         if alarm_clock.is_ringing() or alarm_ui.editor_open():
             self._handle_alarm_input()
             return
+        if self._ram_notice_active():
+            self._handle_ram_notice_input()
+            return
 
         self._handle_scroll_drag()
 
@@ -5473,7 +5484,7 @@ class RoundTouchDisplay:
             self._last_static_draw = now
             self._safe_draw()
             return
-        if self._alarm_overlay_active():
+        if self._alarm_overlay_active() or self._ram_notice_active():
             return
         if self._timeout_remaining_fraction() is None:
             return
@@ -5558,6 +5569,73 @@ class RoundTouchDisplay:
             return
         if alarm_ui.editor_open() and alarm_ui.tick_scroll():
             self._safe_draw()
+
+    def _ram_notice_active(self) -> bool:
+        if not self._session_unlocked or self._ram_kind is None:
+            return False
+        if self.screen in (SCREEN_DISCLAIMER, SCREEN_WIFI_SETUP):
+            return False
+        if self._alarm_overlay_active() or self._tracking_cleared_popup:
+            return False
+        from utilities import system_control
+
+        if system_control.reboot_progress_copy() is not None:
+            return False
+        return True
+
+    def _draw_ram_notice(self) -> None:
+        from display.round_touch.screens import ram_notice
+
+        if not self._ram_notice_active():
+            ram_notice.clear_notice()
+            return
+        ram_notice.draw_notice(self.surface, self._ram_kind or "pressure")
+
+    def _handle_ram_notice_input(self) -> None:
+        from display.round_touch.screens import ram_notice
+
+        gesture = self.input.consume_gesture()
+        if not gesture or gesture[0] != "tap":
+            if gesture:
+                self._note_activity()
+            return
+        pos = gesture[1]
+        if pos is None or not ram_notice.ok_hit(pos[0], pos[1]):
+            self._note_activity()
+            return
+        if self._ram_kind == "board":
+            settings.set_low_ram_board_dismissed(True)
+            self._ram_kind = "pressure" if self._ram_pressure.showing() else None
+        else:
+            self._ram_pressure.dismiss()
+            self._ram_kind = None
+        ram_notice.clear_notice()
+        self._note_activity()
+        self._safe_draw()
+
+    def _tick_ram_notice(self) -> None:
+        """Sample about once a minute. The board card can appear on the first sample."""
+        now = time.monotonic()
+        if self._ram_check_at and now - self._ram_check_at < 60.0:
+            return
+        self._ram_check_at = now
+        from utilities import ram_notice as ram_logic
+        from utilities.system_stats import ram_stats
+
+        _pct, used_mb, total_mb = ram_stats()
+        available = None
+        if used_mb is not None and total_mb is not None:
+            available = total_mb - used_mb
+        self._ram_pressure.sample(available)
+        kind = ram_logic.active_kind(
+            small_board=ram_logic.this_board_is_small(total_mb),
+            hardware_dismissed=settings.low_ram_board_dismissed(),
+            pressure=self._ram_pressure.showing(),
+        )
+        if kind == self._ram_kind:
+            return
+        self._ram_kind = kind
+        self._safe_draw()
 
     def _tick_clock(self):
         if self.screen not in (SCREEN_CLOCK, SCREEN_ANALOG_CLOCK, SCREEN_ANALOG_NIGHT, SCREEN_FLIEGER_CLOCK, SCREEN_MOON, SCREEN_FLIP_BOARD, SCREEN_FORECAST):
@@ -6879,6 +6957,7 @@ class RoundTouchDisplay:
                     ring_on = (
                         self._timeout_remaining_fraction() is not None
                         and not self._alarm_overlay_active()
+                        and not self._ram_notice_active()
                     )
                     if ring_on:
                         # Never timer-refresh content while the ring is crawling —
@@ -6937,6 +7016,7 @@ class RoundTouchDisplay:
                         logger.debug("Audio tick failed", exc_info=True)
                     hourly_chime.tick()
                     self._tick_alarm()
+                    self._tick_ram_notice()
                     self._tick_hourly_weather_refresh()
                     self._tick_manual_weather_refresh()
                     self._tick_off_hours_clock()

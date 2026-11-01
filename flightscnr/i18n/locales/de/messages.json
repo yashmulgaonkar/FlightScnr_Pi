@@ -1074,5 +1074,10 @@
   "alarm.volume": "Lautstärke",
   "alarm.snooze": "Schlummern",
   "alarm.snooze_value": "{minutes} Min.",
-  "alarm.enabled": "Alarm"
+  "alarm.enabled": "Alarm",
+  "ram.board.title": "Wenig Arbeitsspeicher",
+  "ram.board.body": "Dieser Pi hat 2 GB RAM oder weniger. Sanfte Bewegung, Niederschlag und Satellitenkarten brauchen am meisten Speicher.",
+  "ram.pressure.title": "Wenig freier Speicher",
+  "ram.pressure.body": "Weniger als 200 MB sind frei. Sanfte Bewegung, Niederschlag und Satellitenkarten brauchen am meisten Speicher.",
+  "ram.notice.ok": "OK"
 }
