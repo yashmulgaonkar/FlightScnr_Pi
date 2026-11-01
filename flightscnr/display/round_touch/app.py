@@ -938,6 +938,7 @@ class RoundTouchDisplay:
         # is hidden so aircraft keep updating via the prewarmed layer.
         if (
             self.screen == SCREEN_RADAR
+            and not self._alarm_overlay_active()
             and not self._calibrating_facing
             and not self._panning_map
             and not self._pan_commit_choice
@@ -1030,6 +1031,18 @@ class RoundTouchDisplay:
                 pan_release_to_save=self._long_press_pan.from_long_press,
                 pan_commit_choice=self._pan_commit_choice,
             )
+            # The sweep present path never shows this buffer. While the alarm
+            # is up, paint the radar layer here so the popup sits on top of it.
+            if self._alarm_overlay_active():
+                layer, _layer_gen = radar.frame_layer_snapshot()
+                if layer is not None:
+                    try:
+                        self.surface.blit(layer, (0, 0))
+                    except pygame.error as exc:
+                        if "locked" not in str(exc).lower():
+                            raise
+                    radar.draw_live_icons(self.surface)
+                bezel_applied = False
             if FRAME_DEBUG:
                 self._stage("2_radar", time.perf_counter() - _t)
         elif self.screen == SCREEN_FLIGHT:
@@ -1164,6 +1177,7 @@ class RoundTouchDisplay:
             power_menu.draw_icon(self.surface, *nav.curved_footer_bottom_center())
         else:
             power_menu.clear_icon()
+        self._draw_alarm_overlay()
         remaining = self._timeout_remaining_fraction()
         if remaining is not None:
             # Snapshot content+bezel (no ring) and a pre-rotated display base so
@@ -3418,6 +3432,15 @@ class RoundTouchDisplay:
 
         # Manual "Screen off" from the power menu wins over every schedule
         # until the next touch clears the flag (see _handle_power_menu).
+        from display.round_touch import alarm_clock
+
+        # The alarm lights the panel at the daytime level through quiet dim,
+        # off-hours, and a manual screen-off.
+        if alarm_clock.is_ringing():
+            day_pct = settings.brightness_percent()
+            backlight.apply_percent(day_pct if day_pct > 0 else 100)
+            return
+
         if self._manual_screen_off:
             backlight.apply_percent(0)
             return
@@ -4628,6 +4651,13 @@ class RoundTouchDisplay:
                     return
             return
 
+        from display.round_touch import alarm_clock
+        from display.round_touch.screens import alarm as alarm_ui
+
+        if alarm_clock.is_ringing() or alarm_ui.editor_open():
+            self._handle_alarm_input()
+            return
+
         self._handle_scroll_drag()
 
         gesture = self.input.consume_gesture()
@@ -5147,8 +5177,14 @@ class RoundTouchDisplay:
             # Full-screen face — no footer; navigation is swipe-only.
             self._note_activity()
         elif tap and self.screen == SCREEN_CLOCK:
+            from display.round_touch.screens import alarm as alarm_ui
+
             action = clock.tap_footer_action(tap[0], tap[1])
-            if action == "radar":
+            if alarm_ui.clock_icon_hit(tap[0], tap[1]):
+                alarm_ui.open_editor()
+                self._note_activity()
+                self._safe_draw()
+            elif action == "radar":
                 self._return_to_radar()
                 self._safe_draw()
             elif clock.tap_on_time(tap[0], tap[1]):
@@ -5364,6 +5400,11 @@ class RoundTouchDisplay:
             return
         if self.screen in (SCREEN_WIFI_SETUP, SCREEN_DISCLAIMER):
             return
+        from display.round_touch import alarm_clock
+        from display.round_touch.screens import alarm as alarm_ui
+
+        if alarm_clock.is_ringing() or alarm_ui.editor_open():
+            return
         from display.round_touch import off_hours
 
         # In off-hours clock mode, keep clock/forecast screens stable instead of
@@ -5414,11 +5455,91 @@ class RoundTouchDisplay:
             self._last_static_draw = now
             self._safe_draw()
             return
+        if self._alarm_overlay_active():
+            return
         if self._timeout_remaining_fraction() is None:
             return
         if (now - self._last_static_draw) >= (theme.SWEEP_FRAME_MS / 1000.0):
             self._last_static_draw = now
             self._redraw_timeout_ring_only()
+
+    def _alarm_overlay_active(self) -> bool:
+        from display.round_touch import alarm_clock
+        from display.round_touch.screens import alarm as alarm_ui
+
+        return alarm_clock.is_ringing() or alarm_ui.editor_open()
+
+    def _draw_alarm_overlay(self) -> None:
+        from display.round_touch import alarm_clock
+        from display.round_touch.screens import alarm as alarm_ui
+
+        if alarm_clock.is_ringing():
+            alarm_ui.draw_ringing(self.surface)
+        elif alarm_ui.editor_open():
+            alarm_ui.draw_editor(self.surface)
+
+    def _handle_alarm_input(self) -> None:
+        from display.round_touch import alarm_clock
+        from display.round_touch.screens import alarm as alarm_ui
+
+        if alarm_ui.editor_open():
+            if self.input.is_dragging():
+                pos = self.input.drag_pos()
+                if pos is not None and alarm_ui.editor_drag(
+                    pos[0], pos[1], self.input.max_travel()
+                ):
+                    self.input.suppress_finish_result()
+                    self._note_activity()
+                    self._safe_draw()
+            else:
+                alarm_ui.editor_drag_end()
+
+        gesture = self.input.consume_gesture()
+        if not gesture or gesture[0] != "tap":
+            return
+        pos = gesture[1]
+        if pos is None:
+            return
+        x, y = pos
+        if alarm_clock.is_ringing():
+            action = alarm_ui.ringing_hit(x, y)
+            if action == "stop":
+                alarm_clock.stop()
+                self._apply_brightness()
+            elif action == "snooze":
+                alarm_clock.snooze()
+                self._apply_brightness()
+            self._note_activity()
+            self._safe_draw()
+            return
+        action = alarm_ui.editor_tap(x, y)
+        if action == "save":
+            alarm_ui.save_editor()
+        elif action == "cancel":
+            alarm_ui.close_editor()
+        if action:
+            self._note_activity()
+            self._safe_draw()
+
+    def _tick_alarm(self) -> None:
+        from display.round_touch import alarm_clock
+        from display.round_touch.screens import alarm as alarm_ui
+
+        if alarm_clock.tick() == "start":
+            alarm_ui.close_editor()
+            self._apply_brightness()
+            self._safe_draw()
+            self._last_alarm_draw = time.time()
+            return
+        if alarm_clock.is_ringing() and (
+            time.time() - getattr(self, "_last_alarm_draw", 0.0)
+        ) >= 1.0:
+            self._last_alarm_draw = time.time()
+            self._apply_brightness()
+            self._safe_draw()
+            return
+        if alarm_ui.editor_open() and alarm_ui.tick_scroll():
+            self._safe_draw()
 
     def _tick_clock(self):
         if self.screen not in (SCREEN_CLOCK, SCREEN_ANALOG_CLOCK, SCREEN_ANALOG_NIGHT, SCREEN_FLIEGER_CLOCK, SCREEN_MOON, SCREEN_FLIP_BOARD, SCREEN_FORECAST):
@@ -5510,6 +5631,11 @@ class RoundTouchDisplay:
         ) > 0
 
     def _tick_auto_idle_clock(self):
+        from display.round_touch import alarm_clock
+        from display.round_touch.screens import alarm as alarm_ui
+
+        if alarm_clock.is_ringing() or alarm_ui.editor_open():
+            return
         if self._radar_modal_active() or radial_menu.is_open():
             return
         if not settings.auto_idle_clock_enabled():
@@ -6726,7 +6852,10 @@ class RoundTouchDisplay:
                     SCREEN_DETAILS,
                     SCREEN_UPDATE_NOTES,
                 ):
-                    ring_on = self._timeout_remaining_fraction() is not None
+                    ring_on = (
+                        self._timeout_remaining_fraction() is not None
+                        and not self._alarm_overlay_active()
+                    )
                     if ring_on:
                         # Never timer-refresh content while the ring is crawling —
                         # a full ATC layout blocks the UI thread and the tip jumps.
@@ -6783,6 +6912,7 @@ class RoundTouchDisplay:
                     except Exception:
                         logger.debug("Audio tick failed", exc_info=True)
                     hourly_chime.tick()
+                    self._tick_alarm()
                     self._tick_hourly_weather_refresh()
                     self._tick_manual_weather_refresh()
                     self._tick_off_hours_clock()

@@ -1058,5 +1058,15 @@
   "portal.radar.hud_tap_labels.hint": "Ein Tippen auf die freie Fläche der Radar-HUD wechselt die Beschriftung zwischen deinem normalen Modus und „Nur bei Antippen“. Aus lässt die HUD wie bisher.",
   "portal.radar.smooth_motion.label": "Sanfte Flugzeugbewegung",
   "portal.radar.smooth_motion.hint": "Icons gleiten zwischen den Radar-Updates, statt zu springen. Aus behält die üblichen fest gezeichneten Icons. Weich ein-/ausfliegen braucht diese Option.",
-  "settings.row.smooth_motion": "Sanfte Bewegung"
+  "settings.row.smooth_motion": "Sanfte Bewegung",
+  "alarm.editor.title": "Alarm",
+  "alarm.ringing.morning": "Guten Morgen",
+  "alarm.ringing.afternoon": "Guten Tag",
+  "alarm.ringing.evening": "Guten Abend",
+  "alarm.ringing.stop": "Stopp",
+  "alarm.ringing.snooze": "Schlummern",
+  "alarm.volume": "Lautstärke",
+  "alarm.snooze": "Schlummern",
+  "alarm.snooze_value": "{minutes} Min.",
+  "alarm.enabled": "Alarm"
 }

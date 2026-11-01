@@ -88,6 +88,13 @@ def _clock_start_y() -> int:
     return nav.content_top_y() - theme.s(28)
 
 
+def _time_block_y() -> int:
+    """Time sits under the alarm bell."""
+    from display.round_touch.screens import alarm
+
+    return _clock_start_y() + alarm.icon_block_height()
+
+
 def _draw_time_block(surface, y: int) -> int:
     time_font = draw.load_font(theme.FONT_CLOCK, bold=True)
     ampm_font = draw.load_font(theme.FONT_CLOCK_AMPM, bold=True)
@@ -254,7 +261,7 @@ def _draw_moon_row(surface, y: int, detail_font) -> int:
 def time_tap_rect() -> pygame.Rect:
     time_font = draw.load_font(theme.FONT_CLOCK, bold=True)
     ampm_font = draw.load_font(theme.FONT_CLOCK_AMPM, bold=True)
-    y = _clock_start_y()
+    y = _time_block_y()
 
     time_str, ampm = _time_strings()
     if ampm:
@@ -291,7 +298,11 @@ def draw_clock(surface):
     detail_font = draw.load_font(theme.FONT_DETAIL)
     limit_y = _footer_limit_y()
 
+    from display.round_touch.screens import alarm
+
     y = _clock_start_y()
+    alarm.draw_clock_icon(surface, y)
+    y = _time_block_y()
     y = _draw_time_block(surface, y)
     y += _AFTER_TIME()
     y = _center_line(surface, y, date_str, body_font, theme.LABEL)

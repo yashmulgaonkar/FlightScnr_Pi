@@ -1058,5 +1058,15 @@
   "portal.radar.hud_tap_labels.hint": "Een tik op het vrije deel van de radar-HUD schakelt de labels tussen je normale modus en „Alleen bij aantikken”. Uit laat de HUD zoals voorheen.",
   "portal.radar.smooth_motion.label": "Soepele vliegtuigbeweging",
   "portal.radar.smooth_motion.hint": "Iconen glijden tussen radarupdates in plaats van te verspringen. Uit houdt de gewone iconen. Soepel in-/uitvliegen heeft dit aan nodig.",
-  "settings.row.smooth_motion": "Soepele beweging"
+  "settings.row.smooth_motion": "Soepele beweging",
+  "alarm.editor.title": "Alarm",
+  "alarm.ringing.morning": "Goedemorgen",
+  "alarm.ringing.afternoon": "Goedemiddag",
+  "alarm.ringing.evening": "Goedenavond",
+  "alarm.ringing.stop": "Stop",
+  "alarm.ringing.snooze": "Sluimeren",
+  "alarm.volume": "Volume",
+  "alarm.snooze": "Sluimeren",
+  "alarm.snooze_value": "{minutes} min",
+  "alarm.enabled": "Alarm"
 }

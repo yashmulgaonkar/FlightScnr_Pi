@@ -265,7 +265,14 @@ def _clock_bits(color: tuple[int, int, int]) -> tuple[int, pygame.Surface, pygam
         t_img = font.render(time_str, True, color)
         a_img = ampm_font.render(ampm, True, color)
         gap = theme.s(4)
-        return t_img.get_width() + gap + a_img.get_width(), t_img, a_img
+        side_w = a_img.get_width()
+        if settings.alarm_enabled():
+            from display.round_touch.screens import alarm as alarm_ui
+
+            glyph = alarm_ui.hud_glyph(ampm_font.get_height())
+            if glyph is not None:
+                side_w = max(side_w, glyph.get_width())
+        return t_img.get_width() + gap + side_w, t_img, a_img
     font = draw_mod.load_font(theme.s(18), bold=True)
     t_img = font.render(time_str, True, color)
     return t_img.get_width(), t_img, None
@@ -968,9 +975,29 @@ def _draw_clock_cluster(
     color: tuple[int, int, int],
 ) -> None:
     w, t_img, a_img = _clock_bits(color)
-    block_h = t_img.get_height() if a_img is None else max(t_img.get_height(), a_img.get_height())
+    from display.round_touch.screens import alarm as alarm_ui
+
+    glyph = alarm_ui.hud_glyph(_ampm_font().get_height()) if a_img is not None else None
+    if glyph is not None and a_img is not None:
+        stack_h = glyph.get_height() + theme.s(1) + a_img.get_height()
+        block_h = max(t_img.get_height(), stack_h)
+    else:
+        block_h = t_img.get_height() if a_img is None else max(t_img.get_height(), a_img.get_height())
     x = center[0] - w // 2
     y = center[1] - block_h // 2
+    if glyph is not None and a_img is not None:
+        # Time and AM/PM share a baseline. The alarm art sits above AM/PM.
+        surface.blit(t_img, (x, y + block_h - t_img.get_height()))
+        gap = theme.s(4)
+        col_w = max(a_img.get_width(), glyph.get_width())
+        col_cx = x + t_img.get_width() + gap + col_w // 2
+        ampm_bottom = y + block_h
+        surface.blit(a_img, a_img.get_rect(midbottom=(col_cx, ampm_bottom)))
+        surface.blit(
+            glyph,
+            glyph.get_rect(midbottom=(col_cx, ampm_bottom - a_img.get_height() - theme.s(1))),
+        )
+        return
     surface.blit(t_img, (x, y + (block_h - t_img.get_height()) // 2))
     if a_img is not None:
         gap = theme.s(4)
@@ -1536,6 +1563,7 @@ def _overlay_signature() -> tuple:
         settings.use_12hr_clock(),
         settings.master_sound_enabled(),
         settings.hourly_chime_enabled(),
+        settings.alarm_enabled(),
         settings.alert_sfx_enabled(),
         settings.atc_enabled(),
         settings.atc_volume(),

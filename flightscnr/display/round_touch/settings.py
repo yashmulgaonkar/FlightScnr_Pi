@@ -494,6 +494,13 @@ _defaults = {
     "radar_hud_layout_bottom": copy_radar_hud_layout_bottom_default(),
     "hourly_chime_enabled": False,
     "hourly_chime_volume": 80,
+    # Daily alarm. Quiet hours and off-hours do not silence or hide it.
+    "alarm_enabled": False,
+    "alarm_time": "06:30",
+    "alarm_volume": 80,
+    "alarm_snooze_minutes": 9,
+    "alarm_snooze_until": "",
+    "alarm_dismissed_key": "",
     "traffic_sfx_enabled": True,
     "traffic_sfx_volume": 80,
     "military_sfx_enabled": True,
@@ -1400,6 +1407,12 @@ def _settings_snapshot(state: dict) -> tuple:
         ),
         bool(state.get("hourly_chime_enabled", False)),
         clamp_hourly_chime_volume(state.get("hourly_chime_volume", 80)),
+        bool(state.get("alarm_enabled", False)),
+        str(state.get("alarm_time") or "06:30"),
+        clamp_hourly_chime_volume(state.get("alarm_volume", 80)),
+        int(state.get("alarm_snooze_minutes", 9) or 9),
+        str(state.get("alarm_snooze_until") or ""),
+        str(state.get("alarm_dismissed_key") or ""),
         bool(state.get("traffic_sfx_enabled", True)),
         clamp_sfx_volume(state.get("traffic_sfx_volume", 80)),
         bool(state.get("military_sfx_enabled", True)),
@@ -3754,6 +3767,86 @@ def reset_radar_hud_layout() -> None:
         reset_radar_hud_layout_bottom()
     else:
         reset_radar_hud_layout_top()
+
+
+def alarm_enabled() -> bool:
+    return bool(_state.get("alarm_enabled", False))
+
+
+def set_alarm_enabled(enabled: bool) -> None:
+    _rmw_save({"alarm_enabled": bool(enabled)})
+
+
+def alarm_time() -> str:
+    hour, minute = (6, 30)
+    raw = str(_state.get("alarm_time") or "06:30")
+    try:
+        hour_s, minute_s = raw.split(":", 1)
+        hour, minute = int(hour_s), int(minute_s)
+    except (TypeError, ValueError):
+        hour, minute = 6, 30
+    hour = min(23, max(0, hour))
+    minute = min(59, max(0, minute))
+    return f"{hour:02d}:{minute:02d}"
+
+
+def set_alarm_time(value: str) -> str:
+    hour, minute = (6, 30)
+    try:
+        hour_s, minute_s = str(value or "").split(":", 1)
+        hour, minute = int(hour_s), int(minute_s)
+    except (TypeError, ValueError):
+        hour, minute = 6, 30
+    text = f"{min(23, max(0, hour)):02d}:{min(59, max(0, minute)):02d}"
+    _rmw_save({"alarm_time": text})
+    return text
+
+
+def alarm_volume() -> int:
+    return clamp_hourly_chime_volume(_state.get("alarm_volume", 80))
+
+
+def set_alarm_volume(value: int) -> int:
+    vol = clamp_hourly_chime_volume(value)
+    _rmw_save({"alarm_volume": vol})
+    return vol
+
+
+def alarm_snooze_minutes() -> int:
+    try:
+        minutes = int(_state.get("alarm_snooze_minutes", 9))
+    except (TypeError, ValueError):
+        minutes = 9
+    if minutes not in (1, 5, 9, 10, 15, 30):
+        return 9
+    return minutes
+
+
+def set_alarm_snooze_minutes(value: int) -> int:
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError):
+        minutes = 9
+    if minutes not in (1, 5, 9, 10, 15, 30):
+        minutes = 9
+    _rmw_save({"alarm_snooze_minutes": minutes})
+    return minutes
+
+
+def alarm_snooze_until() -> str:
+    return str(_state.get("alarm_snooze_until") or "").strip()
+
+
+def set_alarm_snooze_until(value: str) -> None:
+    _rmw_save({"alarm_snooze_until": str(value or "").strip()})
+
+
+def alarm_dismissed_key() -> str:
+    return str(_state.get("alarm_dismissed_key") or "").strip()
+
+
+def set_alarm_dismissed_key(value: str) -> None:
+    _rmw_save({"alarm_dismissed_key": str(value or "").strip()})
 
 
 def hourly_chime_enabled() -> bool:

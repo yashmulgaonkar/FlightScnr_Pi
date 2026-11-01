@@ -1058,5 +1058,15 @@
   "portal.radar.hud_tap_labels.hint": "Tocar la zona libre del HUD del radar alterna las etiquetas entre tu modo normal y «Solo al tocar». Desactivado mantiene el HUD como antes.",
   "portal.radar.smooth_motion.label": "Movimiento suave de aeronaves",
   "portal.radar.smooth_motion.hint": "Los iconos se deslizan entre actualizaciones del radar en lugar de saltar. Desactivado mantiene los iconos habituales. La entrada/salida suave necesita esto activado.",
-  "settings.row.smooth_motion": "Movimiento suave"
+  "settings.row.smooth_motion": "Movimiento suave",
+  "alarm.editor.title": "Alarma",
+  "alarm.ringing.morning": "Buenos días",
+  "alarm.ringing.afternoon": "Buenas tardes",
+  "alarm.ringing.evening": "Buenas noches",
+  "alarm.ringing.stop": "Detener",
+  "alarm.ringing.snooze": "Posponer",
+  "alarm.volume": "Volumen",
+  "alarm.snooze": "Posponer",
+  "alarm.snooze_value": "{minutes} min",
+  "alarm.enabled": "Alarma"
 }

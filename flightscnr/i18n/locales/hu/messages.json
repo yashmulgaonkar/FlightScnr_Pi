@@ -1058,5 +1058,15 @@
   "portal.radar.hud_tap_labels.hint": "A radar HUD-jának üres területére koppintva a forgalmi címkék a szokásos megjelenítés és a „Csak érintésre” mód között válthatók. Kikapcsolva a HUD érintése változatlanul működik.",
   "portal.radar.smooth_motion.label": "Folyamatos repülőgépmozgás",
   "portal.radar.smooth_motion.hint": "A repülőgépikonok a radarfrissítések között folyamatosan siklanak ahelyett, hogy ugrásszerűen változtatnának helyet. Kikapcsolva a megszokott, nem animált ikonok jelennek meg. A folyamatos be- és kirepüléshez be kell kapcsolni.",
-  "settings.row.smooth_motion": "Folyamatos mozgás"
+  "settings.row.smooth_motion": "Folyamatos mozgás",
+  "alarm.editor.title": "Ébresztő",
+  "alarm.ringing.morning": "Jó reggelt",
+  "alarm.ringing.afternoon": "Jó napot",
+  "alarm.ringing.evening": "Jó estét",
+  "alarm.ringing.stop": "Leállítás",
+  "alarm.ringing.snooze": "Szundi",
+  "alarm.volume": "Hangerő",
+  "alarm.snooze": "Szundi",
+  "alarm.snooze_value": "{minutes} perc",
+  "alarm.enabled": "Ébresztő"
 }

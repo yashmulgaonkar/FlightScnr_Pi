@@ -1058,5 +1058,15 @@
   "portal.radar.hud_tap_labels.hint": "Un toucher sur la zone libre du HUD radar bascule les étiquettes entre votre mode normal et « Seulement au toucher ». Désactivé garde le HUD comme avant.",
   "portal.radar.smooth_motion.label": "Mouvement fluide des aéronefs",
   "portal.radar.smooth_motion.hint": "Les icônes glissent entre les mises à jour du radar au lieu de sauter. Désactivé conserve les icônes habituelles. L'entrée/sortie fluide nécessite cette option.",
-  "settings.row.smooth_motion": "Mouvement fluide"
+  "settings.row.smooth_motion": "Mouvement fluide",
+  "alarm.editor.title": "Alarme",
+  "alarm.ringing.morning": "Bonjour",
+  "alarm.ringing.afternoon": "Bon après-midi",
+  "alarm.ringing.evening": "Bonsoir",
+  "alarm.ringing.stop": "Arrêt",
+  "alarm.ringing.snooze": "Rappel",
+  "alarm.volume": "Volume",
+  "alarm.snooze": "Rappel",
+  "alarm.snooze_value": "{minutes} min",
+  "alarm.enabled": "Alarme"
 }

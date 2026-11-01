@@ -1058,5 +1058,15 @@
   "portal.radar.hud_tap_labels.hint": "A tap on the free area of the radar HUD pill flips the traffic labels between your normal mode and \"Only when tapped\". Off keeps the HUD taps as before.",
   "portal.radar.smooth_motion.label": "Smooth aircraft motion",
   "portal.radar.smooth_motion.hint": "Glide icons between radar updates instead of stepping them. Off keeps the usual baked icons. Fly smoothly in/out needs this on.",
-  "settings.row.smooth_motion": "Smooth motion"
+  "settings.row.smooth_motion": "Smooth motion",
+  "alarm.editor.title": "Alarm",
+  "alarm.ringing.morning": "GOOD MORNING",
+  "alarm.ringing.afternoon": "Good afternoon",
+  "alarm.ringing.evening": "Good evening",
+  "alarm.ringing.stop": "Stop",
+  "alarm.ringing.snooze": "Snooze",
+  "alarm.volume": "Volume",
+  "alarm.snooze": "Snooze",
+  "alarm.snooze_value": "{minutes} min",
+  "alarm.enabled": "Alarm"
 }
