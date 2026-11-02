@@ -2577,7 +2577,7 @@ def _draw_map_attribution(surface):
         return
     text = " · ".join(parts)
     font = draw.load_font(theme.s(8))
-    rendered = font.render(text, True, theme.HINT)
+    rendered = draw.render_text_cached(font, text, theme.HINT)
     # Sit near the bottom rim (was ~0.52·R — mid-lower and too prominent).
     y = theme.CENTER_Y + theme.VISIBLE_RADIUS - theme.s(22) - rendered.get_height()
     half = draw.circle_half_width_at_row(y, rendered.get_height())

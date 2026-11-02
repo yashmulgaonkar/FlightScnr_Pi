@@ -1010,6 +1010,17 @@ def _draw_clock_cluster(
         )
 
 
+# Rasterized pills keyed by geometry and colour. Each pill is 146 anti-aliased
+# discs at 2x plus a smoothscale, about 8 ms on a Pi 4B; the zoom pill alone
+# was most of the radar layer rebuild and the LoFi pill is stamped per frame.
+_pill_cache: dict[tuple, tuple[pygame.Surface, pygame.Rect]] = {}
+_PILL_CACHE_MAX = 48
+
+
+def invalidate_pill_cache() -> None:
+    _pill_cache.clear()
+
+
 def _draw_curved_white_pill(
     surface: pygame.Surface,
     cx: int,
@@ -1059,6 +1070,22 @@ def _draw_curved_white_pill(
     bottom = int(max(ys) + pad)
     bounds = pygame.Rect(left, top, right - left, bottom - top)
 
+    key = (
+        theme.SIZE,
+        cx,
+        cy,
+        r_mid,
+        round(a0, 6),
+        round(a1, 6),
+        band,
+        tuple(fill_rgba),
+    )
+    cached = _pill_cache.get(key)
+    if cached is not None:
+        lo, rect = cached
+        surface.blit(lo, rect.topleft)
+        return rect.copy()
+
     hi = pygame.Surface((bounds.w * scale, bounds.h * scale), pygame.SRCALPHA)
     # Soft shadow first (slightly larger / offset discs).
     shadow_col = (0, 0, 0, 55)
@@ -1075,6 +1102,9 @@ def _draw_curved_white_pill(
         pygame.draw.circle(hi, fill_rgba, (int(x), int(y)), r_disc * scale)
 
     lo = pygame.transform.smoothscale(hi, bounds.size)
+    if len(_pill_cache) >= _PILL_CACHE_MAX:
+        _pill_cache.clear()
+    _pill_cache[key] = (lo, bounds.copy())
     surface.blit(lo, bounds.topleft)
     return bounds
 
