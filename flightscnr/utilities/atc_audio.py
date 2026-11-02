@@ -29,6 +29,8 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from utilities import run_as_user
+
 logger = logging.getLogger("flightscnr.atc")
 
 STREAM_BASE = "https://d.liveatc.net/"
@@ -163,9 +165,6 @@ def _ensure_system_output_volume(fraction: float = 1.0) -> None:
         "timeout": 2.0,
         "check": False,
     }
-    if run_uid is not None and os.geteuid() == 0 and run_uid != 0:
-        run_kwargs["user"] = run_uid
-
     tries = [
         ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "0"],
         ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{fraction:.2f}"],
@@ -173,8 +172,10 @@ def _ensure_system_output_volume(fraction: float = 1.0) -> None:
         ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{int(round(fraction * 100))}%"],
     ]
     for cmd in tries:
+        # setpriv instead of ``user=`` so the spawn can vfork (run_as_user.py).
+        argv, extra = run_as_user.as_user(cmd, run_uid)
         try:
-            subprocess.run(cmd, **run_kwargs)
+            subprocess.run(argv, **run_kwargs, **extra)
         except (OSError, subprocess.TimeoutExpired, PermissionError, ValueError):
             continue
     try:
