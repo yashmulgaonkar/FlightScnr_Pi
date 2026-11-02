@@ -1671,6 +1671,21 @@ class RoundTouchDisplay:
                 self._present()
             except Exception:
                 logger.exception("Could not render error screen")
+        except RuntimeError as exc:
+            # Radar caches are published by a worker. Snapshotting protects the
+            # known paths, but another shared cache should never turn one
+            # transient mutation race into a permanent fatal-error screen.
+            if "dictionary changed size during iteration" in str(exc).lower():
+                logger.warning("Display draw skipped (concurrent cache update): %s", exc)
+                return
+            self._fatal_error = str(exc)
+            logger.exception("Display draw failed")
+            try:
+                draw.draw_error(self.surface, self._fatal_error)
+                draw.apply_round_bezel(self.surface)
+                self._present()
+            except Exception:
+                logger.exception("Could not render error screen")
         except Exception as exc:
             self._fatal_error = str(exc)
             logger.exception("Display draw failed")

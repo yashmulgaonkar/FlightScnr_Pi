@@ -1416,7 +1416,10 @@ def _publish_live_specs() -> None:
         _live_icons, _live_labels, _live_heads = _live_pending
         keep = {st["id"] for st in _live_icons}
         for cache in (_live_frame_cache, _live_label_frame_cache):
-            for key in [key for key in cache if key not in keep]:
+            # The display thread can update/clear these while the layer worker
+            # publishes. A shallow copy is atomic under the GIL and gives this
+            # worker a stable set of keys to prune.
+            for key in [key for key in cache.copy() if key not in keep]:
                 cache.pop(key, None)
         if _live_icons:
             _live_frame_cursor %= len(_live_icons)
@@ -1667,9 +1670,13 @@ def live_icon_frame(now: float | None = None) -> list:
         processed_ids.append(ident)
         _live_frame_cursor = (index_by_id[ident] + 1) % count
 
+    # The layer-prewarm worker prunes this cache when it publishes a new target
+    # set. Iterating the shared dict directly can raise "dictionary changed
+    # size during iteration" and latch the display into its fatal-error screen.
+    frame_cache_snapshot = _live_frame_cache.copy()
     live_pos = {
         ident: cached[0]
-        for ident, cached in _live_frame_cache.items()
+        for ident, cached in frame_cache_snapshot.items()
         if ident in by_id
     }
     for ident, (fx, fy) in live_pos.items():
