@@ -130,6 +130,7 @@ _overlay_gen = 0
 # layer (a few times a second) held the GIL and stepped the sweep. The stamp
 # only changes with the clock minute, weather, or a HUD toggle.
 _overlay_sig: tuple | None = None
+_overlay_rotated: tuple[pygame.Surface, int, int] | None = None
 # Layout arrange: hit rects + base centers (before top offsets) for drag math.
 _layout_hit: dict[str, pygame.Rect] = {}
 _layout_base: dict[str, tuple[int, int]] = {}
@@ -213,7 +214,7 @@ def _weather_bits(
     temp_img = None
     if temp is not None:
         try:
-            temp_img = font.render(f"{int(round(temp))}°{unit}", True, color)
+            temp_img = draw_mod.render_text_cached(font, f"{int(round(temp))}°{unit}", color)
         except (TypeError, ValueError):
             temp_img = None
     icon_w = icon_px if code is not None else 0
@@ -262,8 +263,8 @@ def _clock_bits(color: tuple[int, int, int]) -> tuple[int, pygame.Surface, pygam
     if ampm:
         font = draw_mod.load_font(theme.s(16), bold=True)
         ampm_font = _ampm_font()
-        t_img = font.render(time_str, True, color)
-        a_img = ampm_font.render(ampm, True, color)
+        t_img = draw_mod.render_text_cached(font, time_str, color)
+        a_img = draw_mod.render_text_cached(ampm_font, ampm, color)
         gap = theme.s(4)
         side_w = a_img.get_width()
         if settings.alarm_enabled():
@@ -274,7 +275,7 @@ def _clock_bits(color: tuple[int, int, int]) -> tuple[int, pygame.Surface, pygam
                 side_w = max(side_w, glyph.get_width())
         return t_img.get_width() + gap + side_w, t_img, a_img
     font = draw_mod.load_font(theme.s(18), bold=True)
-    t_img = font.render(time_str, True, color)
+    t_img = draw_mod.render_text_cached(font, time_str, color)
     return t_img.get_width(), t_img, None
 
 
@@ -300,8 +301,8 @@ def _aqi_bits(
     font = _ampm_font()
     # Match wind-speed unit size for the "AQI" caption; number stays HUD body size.
     label_font = draw_mod.load_font(max(7, theme.s(8)), bold=True)
-    label_img = label_font.render("AQI", True, color)
-    value_img = font.render(str(aqi), True, value_rgb)
+    label_img = draw_mod.render_text_cached(label_font, "AQI", color)
+    value_img = draw_mod.render_text_cached(font, str(aqi), value_rgb)
     w = max(label_img.get_width(), value_img.get_width())
     return w, label_img, value_img, value_rgb
 
@@ -321,8 +322,8 @@ def _floor_bits(
         return 0, None, None
     label_font = draw_mod.load_font(max(7, theme.s(8)), bold=True)
     value_font = _ampm_font()
-    label_img = label_font.render(tr("radar_hud.floor"), True, color)
-    value_img = value_font.render(f"{floor_ft} ft", True, color)
+    label_img = draw_mod.render_text_cached(label_font, tr("radar_hud.floor"), color)
+    value_img = draw_mod.render_text_cached(value_font, f"{floor_ft} ft", color)
     return max(label_img.get_width(), value_img.get_width()), label_img, value_img
 
 
@@ -767,8 +768,8 @@ def _render_wind_speed(
         return None
     num_font = _ampm_font()
     unit_font = draw_mod.load_font(max(7, theme.s(8)), bold=True)
-    num_img = num_font.render(num, True, color)
-    unit_img = unit_font.render(unit_txt, True, color)
+    num_img = draw_mod.render_text_cached(num_font, num, color)
+    unit_img = draw_mod.render_text_cached(unit_font, unit_txt, color)
     gap = max(1, theme.s(2))
     w = num_img.get_width() + gap + unit_img.get_width()
     h = max(num_img.get_height(), unit_img.get_height())
@@ -1610,26 +1611,60 @@ def rebuild_overlay() -> int:
     The overlay is blitted *after* the sweep so only frosted pixels occlude it.
     Unchanged inputs keep the previous stamp — the pill does not depend on traffic.
     """
-    global _overlay, _overlay_gen, _overlay_sig
+    global _overlay, _overlay_gen, _overlay_sig, _overlay_rotated
     sig = _overlay_signature()
     if sig == _overlay_sig and (not settings.radar_hud_enabled() or _overlay is not None):
         return _overlay_gen
     _overlay_sig = sig
     if not settings.radar_hud_enabled():
         _overlay = None
+        _overlay_rotated = None
         _overlay_gen += 1
         return _overlay_gen
     size = (theme.SIZE, theme.SIZE)
     draft = pygame.Surface(size, pygame.SRCALPHA)
     draw_hud(draft, include_popover=False, draw_pill=True)
+    # Rotating a full-size SRCALPHA surface costs about 25 ms on a Pi 4B.
+    # Do it here, on the layer rebuild thread, so the present path only blits.
+    gen = _overlay_gen + 1
+    deg = _display_rotation()
+    try:
+        rotated = draft if deg == 0 else pygame.transform.rotate(draft, -deg)
+    except pygame.error:
+        rotated = None
     _overlay = draft  # atomic publish for the present thread
-    _overlay_gen += 1
+    _overlay_rotated = (rotated, deg, gen) if rotated is not None else None
+    _overlay_gen = gen
     return _overlay_gen
+
+
+def _display_rotation() -> int:
+    try:
+        from display.round_touch import rotation
+
+        return int(rotation.rotation_degrees()) % 360
+    except Exception:
+        return 0
 
 
 def overlay_snapshot() -> tuple[pygame.Surface | None, int]:
     """Return (logical SRCALPHA overlay, generation)."""
     return _overlay, _overlay_gen
+
+
+def rotated_overlay_snapshot(rotation: int) -> tuple[pygame.Surface | None, int]:
+    """Return the pre-rotated overlay for ``rotation`` and its generation.
+
+    The surface is None when the overlay was built for another rotation; the
+    present path then rotates the logical overlay itself.
+    """
+    pack = _overlay_rotated
+    if pack is None:
+        return None, _overlay_gen
+    surf, deg, gen = pack
+    if deg != int(rotation) % 360:
+        return None, gen
+    return surf, gen
 
 
 def volume_at_x(x: int) -> int | None:

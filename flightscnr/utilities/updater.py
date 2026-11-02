@@ -727,11 +727,8 @@ def _running_status_is_stale(status: dict, *, now: float | None = None) -> bool:
     return (ts - updated) > _STALE_RUNNING_S
 
 
-def recover_stale_update_state() -> bool:
-    """Clear orphaned ``running`` status. Returns True if a stale state was cleared."""
-    if _lock_held():
-        return False
-    status = _read_status()
+def _clear_stale_running(status: dict) -> bool:
+    """Clear ``status`` if it says running with no live worker. True if cleared."""
     if not _running_status_is_stale(status):
         return False
     logger.warning(
@@ -745,12 +742,21 @@ def recover_stale_update_state() -> bool:
     return True
 
 
+def recover_stale_update_state() -> bool:
+    """Clear orphaned ``running`` status. Returns True if a stale state was cleared."""
+    if _lock_held():
+        return False
+    return _clear_stale_running(_read_status())
+
+
 def update_running() -> bool:
     if _lock_held():
         return True
-    if recover_stale_update_state():
-        return False
+    # One status read serves both the stale check and the answer; the radar
+    # bubble asks this a couple of times a second.
     status = _read_status()
+    if _clear_stale_running(status):
+        return False
     return status.get("state") == "running"
 
 
