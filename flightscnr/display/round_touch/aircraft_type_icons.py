@@ -578,7 +578,7 @@ def rotated_sprite(sprite: pygame.Surface, heading_deg: float) -> pygame.Surface
     if cached is not None:
         return cached
     if len(_rotated_cache) >= _ROTATED_CACHE_MAX:
-        _rotated_cache.clear()
+        _rotated_cache.pop(next(iter(_rotated_cache)))
     rotated = pygame.transform.rotate(sprite, -(step * _ROT_STEP_DEG))
     _rotated_cache[key] = rotated
     return rotated
@@ -594,7 +594,7 @@ def _spinning_rotor_surface(radius: int, color, phase: int) -> pygame.Surface:
     if cached is not None:
         return cached
     if len(_rotor_cache) >= _ROTOR_CACHE_MAX:
-        _rotor_cache.clear()
+        _rotor_cache.pop(next(iter(_rotor_cache)))
     side = radius * 2 + 3
     surf = pygame.Surface((side, side), pygame.SRCALPHA)
     oc = side // 2

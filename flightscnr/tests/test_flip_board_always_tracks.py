@@ -16,8 +16,10 @@ checkpoint about every 15s so a restart does not drop aircraft on final.
 """
 
 import os
+import queue
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -47,8 +49,19 @@ def _display():
     d.screen = app_mod.SCREEN_RADAR
     d._flip_board_sampled_at = 0.0
     d._flip_board_saved_at = 0.0
+    d._flip_board_worker = None
+    d._flip_board_results = queue.SimpleQueue()
     d._safe_draw = lambda: None
     return d
+
+
+def _wait_for(predicate, timeout=1.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.005)
+    return bool(predicate())
 
 
 @pytest.fixture
@@ -76,7 +89,7 @@ def watched(monkeypatch):
 class TestTrackingAlwaysRuns:
     def test_it_tracks_on_radar(self, watched):
         _display()._update_flip_board([{"icao_hex": "A1B2C3"}])
-        assert watched["observe"]
+        assert _wait_for(lambda: watched["observe"])
 
     def test_collection_does_not_check_a_board_toggle(self):
         import inspect
@@ -98,6 +111,7 @@ class TestItStaysCheap:
         display = _display()
         for _ in range(20):
             display._update_flip_board([{"icao_hex": "A1B2C3"}])
+        assert _wait_for(lambda: watched["observe"])
         assert len(watched["observe"]) == 1, f"sampled {len(watched['observe'])} times in one burst"
 
     def test_no_airports_in_view_does_no_work(self, monkeypatch, watched):
@@ -112,4 +126,4 @@ class TestItStaysCheap:
         display = _display()
         display._flip_board_saved_at = 0.0
         display._update_flip_board([{"icao_hex": "A1B2C3"}])
-        assert watched["saved"], "in-progress tracks were not written"
+        assert _wait_for(lambda: watched["saved"]), "in-progress tracks were not written"

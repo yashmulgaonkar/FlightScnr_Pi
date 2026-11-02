@@ -169,7 +169,21 @@ def draw_trail(
         return
     xy: list[list] = []   # [(x, y) | None, speed, new_segment, age]
     for lat, lon, spd, _alt, t, seg in pts:
-        xy.append([project(lat, lon), spd, seg, max(0.0, now - t)])
+        projected = project(lat, lon)
+        item = [projected, spd, seg, max(0.0, now - t)]
+        if projected is None:
+            if not xy or xy[-1][0] is not None:
+                xy.append(item)
+            continue
+        # A wide radar range can collapse dozens of 30 m fixes onto the same
+        # framebuffer pixel. Drawing every one held the GIL for hundreds of
+        # milliseconds without changing the visible trail. Keep the newest
+        # sample in each pixel-sized run while preserving segment boundaries.
+        if xy and not seg and xy[-1][0] is not None:
+            px, py = xy[-1][0]
+            if (projected[0] - px) ** 2 + (projected[1] - py) ** 2 < 3.0 ** 2:
+                continue
+        xy.append(item)
 
     if head_xy is not None:
         hx, hy = head_xy
@@ -214,8 +228,10 @@ def draw_trail(
                     pygame.draw.circle(surface, (*light, alpha), p, dot_radius)
                     last_dot = p
                     draws += 1
-        # A full trail bake holds the draw lock; let the sweep thread run.
-        if draws >= 24:
+        # pygame's many short draw calls retain the GIL. Yield a real sweep
+        # slice while a dense history is baking instead of monopolizing the
+        # interpreter until the complete trail layer is done.
+        if draws >= 12:
             draws = 0
-            time.sleep(0)
+            time.sleep(0.002)
         prev = (p, spd, alpha)

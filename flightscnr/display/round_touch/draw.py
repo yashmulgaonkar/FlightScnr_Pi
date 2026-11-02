@@ -407,7 +407,7 @@ def soft_glow_surface(radius: int, color, peak_alpha: int) -> pygame.Surface:
     if cached is not None:
         return cached
     if len(_glow_cache) >= _GLOW_CACHE_MAX:
-        _glow_cache.clear()
+        _glow_cache.pop(next(iter(_glow_cache)))
     side = radius * 2 + 2
     surf = pygame.Surface((side, side), pygame.SRCALPHA)
     cx = cy = radius + 1

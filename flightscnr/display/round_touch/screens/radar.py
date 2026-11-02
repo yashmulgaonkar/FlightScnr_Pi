@@ -1392,6 +1392,14 @@ _live_heads: dict = {}
 _live_connectors: list = []
 _icon_state: dict = {}
 _label_state: dict = {}
+# Dense traffic can make positioning, clipping, and sub-pixel sprite selection
+# for every target consume an entire sweep frame. Keep the last prepared frame
+# and refresh it in bounded batches; the beam remains fluid while each target
+# still receives a fresh smoothed position every few frames.
+_live_frame_cache: dict[str, tuple] = {}
+_live_label_frame_cache: dict[str, tuple] = {}
+_live_frame_cursor = 0
+_LIVE_FRAME_BUDGET_S = 0.006
 
 
 def _set_pending_live_specs(icons, labels) -> None:
@@ -1403,9 +1411,17 @@ def _set_pending_live_specs(icons, labels) -> None:
 
 
 def _publish_live_specs() -> None:
-    global _live_icons, _live_labels, _live_heads
+    global _live_icons, _live_labels, _live_heads, _live_frame_cursor
     if _live_pending is not None:
         _live_icons, _live_labels, _live_heads = _live_pending
+        keep = {st["id"] for st in _live_icons}
+        for cache in (_live_frame_cache, _live_label_frame_cache):
+            for key in [key for key in cache if key not in keep]:
+                cache.pop(key, None)
+        if _live_icons:
+            _live_frame_cursor %= len(_live_icons)
+        else:
+            _live_frame_cursor = 0
 
 
 def _prune_live_state(icons: list) -> None:
@@ -1584,21 +1600,42 @@ def live_trail_connectors() -> list:
 
 def live_icon_frame(now: float | None = None) -> list:
     """Per-frame ``[(sprite, x, y), ...]`` for icons then tags (logical coords)."""
-    global _phase_left, _live_connectors
+    global _phase_left, _live_connectors, _live_frame_cursor
     _live_connectors = []
     icons = _live_icons
     if not icons:
         _label_hits.clear()
+        _live_frame_cache.clear()
+        _live_label_frame_cache.clear()
         return []
     from display.round_touch import position_smooth
 
     _phase_left = _PHASE_BUDGET
     smoother = position_smooth.active()
     now = time.time() if now is None else now
-    out = []
-    glows: list = []
-    live_pos: dict = {}
-    for st in icons:
+    started = time.perf_counter()
+    count = len(icons)
+    by_id = {st["id"]: st for st in icons}
+    index_by_id = {st["id"]: idx for idx, st in enumerate(icons)}
+
+    # New targets are prepared first. Existing targets advance in a round-robin
+    # bounded by wall time, spreading dense-scene work over frames.
+    update_ids = [st["id"] for st in icons if st["id"] not in _live_frame_cache]
+    seen = set(update_ids)
+    for offset in range(count):
+        st = icons[(_live_frame_cursor + offset) % count]
+        ident = st["id"]
+        if ident not in seen:
+            update_ids.append(ident)
+            seen.add(ident)
+
+    processed_ids = []
+    for ident in update_ids:
+        if processed_ids and time.perf_counter() - started >= _LIVE_FRAME_BUDGET_S:
+            break
+        st = by_id.get(ident)
+        if st is None:
+            continue
         fx, fy = st["xy"]
         heading = st["flight"].get("heading") or 0
         pos = smoother.current(st["id"], now) if smoother is not None else None
@@ -1610,39 +1647,93 @@ def live_icon_frame(now: float | None = None) -> list:
                 pass
             if hs is not None:
                 heading = hs
-        live_pos[st["id"]] = (fx, fy)
         st["color"] = _flight_icon_color(st["flight"], compact=False)
         glow = _live_glow_sprite(st["flight"], st.get("color"))
-        if glow is not None:
-            glows.append(_clip_to_display(glow, int(round(fx)), int(round(fy))))
-        head = _live_heads.get(st["id"])
-        if head is not None:
-            (bx, by), rgb, width = head
-            if math.hypot(fx - bx, fy - by) >= 0.75:
-                _live_connectors.append((
-                    float(bx), float(by), float(fx), float(fy),
-                    (*tuple(rgb[:3]), _TRAIL_ALPHA),
-                    int(max(1, width)),
-                ))
+        glow_item = (
+            _clip_to_display(glow, int(round(fx)), int(round(fy)))
+            if glow is not None
+            else None
+        )
         try:
             vis = _icon_vis(st, geo.screen_heading(heading))
             sprite, ix, iy = _place_sprite(vis, fx, fy)
         except Exception:
             continue
-        out.append(_clip_to_display(sprite, ix, iy))
+        _live_frame_cache[ident] = (
+            (float(fx), float(fy)),
+            _clip_to_display(sprite, ix, iy),
+            glow_item,
+        )
+        processed_ids.append(ident)
+        _live_frame_cursor = (index_by_id[ident] + 1) % count
+
+    live_pos = {
+        ident: cached[0]
+        for ident, cached in _live_frame_cache.items()
+        if ident in by_id
+    }
+    for ident, (fx, fy) in live_pos.items():
+        head = _live_heads.get(ident)
+        if head is None:
+            continue
+        (bx, by), rgb, width = head
+        if math.hypot(fx - bx, fy - by) >= 0.75:
+            _live_connectors.append((
+                float(bx), float(by), float(fx), float(fy),
+                (*tuple(rgb[:3]), _TRAIL_ALPHA),
+                int(max(1, width)),
+            ))
+
+    label_by_id = {lb["id"]: lb for lb in _live_labels}
+    for ident in processed_ids:
+        lb = label_by_id.get(ident)
+        base = live_pos.get(ident)
+        vis = lb.get("vis") if lb is not None else None
+        if base is None or vis is None:
+            _live_label_frame_cache.pop(ident, None)
+            continue
+        try:
+            sprite, ix, iy = _place_sprite(
+                vis, base[0] + lb["off"][0], base[1] + lb["off"][1]
+            )
+        except Exception:
+            continue
+        _live_label_frame_cache[ident] = (vis, sprite, ix, iy)
+
+    # A layer publish may replace a label sprite between that target's turns.
+    # Refresh only those changed labels immediately; unchanged ones stay cheap.
+    for ident, lb in label_by_id.items():
+        cached = _live_label_frame_cache.get(ident)
+        vis = lb.get("vis")
+        base = live_pos.get(ident)
+        if base is None or vis is None or (cached is not None and cached[0] is vis):
+            continue
+        try:
+            sprite, ix, iy = _place_sprite(
+                vis, base[0] + lb["off"][0], base[1] + lb["off"][1]
+            )
+        except Exception:
+            continue
+        _live_label_frame_cache[ident] = (vis, sprite, ix, iy)
+
+    glows = []
+    out = []
+    for st in icons:
+        cached = _live_frame_cache.get(st["id"])
+        if cached is None:
+            continue
+        if cached[2] is not None:
+            glows.append(cached[2])
+        out.append(cached[1])
     # Halo, then icon. Trail tips are lines (see live_trail_connectors), and
     # the sweep is stamped above both.
     out[0:0] = glows
     _label_hits.clear()
     for lb in _live_labels:
-        base = live_pos.get(lb["id"])
-        vis = lb.get("vis")
-        if base is None or vis is None:
+        cached = _live_label_frame_cache.get(lb["id"])
+        if cached is None:
             continue
-        try:
-            sprite, ix, iy = _place_sprite(vis, base[0] + lb["off"][0], base[1] + lb["off"][1])
-        except Exception:
-            continue
+        _vis_id, sprite, ix, iy = cached
         out.append((sprite, ix, iy))
         _label_hits.append((
             lb["id"],
