@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import time
+from functools import lru_cache
 
 from display.round_touch import alert_prefs, geo
 from utilities.adsb_client import normalize_squawk
@@ -91,29 +92,59 @@ def _normalize_callsign(value) -> str:
     return "".join(str(value).upper().split())
 
 
+def _airline_code_maps() -> tuple[dict[str, str], dict[str, str]]:
+    """(IATA→ICAO, ICAO→IATA) airline prefix maps, built once."""
+    global _airline_maps
+    if _airline_maps is None:
+        try:
+            from utilities.airline_branding import IATA_TO_ICAO
+        except ImportError:
+            IATA_TO_ICAO = {}
+        icao_to_iata: dict[str, str] = {}
+        for iata, icao in IATA_TO_ICAO.items():
+            icao_to_iata.setdefault(icao, iata)
+        _airline_maps = (dict(IATA_TO_ICAO), icao_to_iata)
+    return _airline_maps
+
+
+_airline_maps: tuple[dict[str, str], dict[str, str]] | None = None
+
+# The key helpers below are pure functions of a few strings and run for every
+# flight pair the dedupe grid probes (tens of thousands of calls per grab
+# cycle on a busy radar), so they are memoised on their string inputs.
+_KEY_CACHE_SIZE = 4096
+
+
+@lru_cache(maxsize=_KEY_CACHE_SIZE)
+def _callsign_match_keys_cached(cs: str) -> frozenset[str]:
+    keys = {cs}
+    iata_to_icao, icao_to_iata = _airline_code_maps()
+    # IATA → ICAO (UA123 → UAL123)
+    if len(cs) >= 3 and cs[:2].isalpha() and cs[2].isdigit():
+        icao = iata_to_icao.get(cs[:2])
+        if icao:
+            keys.add(icao + cs[2:])
+    # ICAO → IATA (UAL123 → UA123; UAE51N → EK51N)
+    if len(cs) >= 4 and cs[:3].isalpha() and cs[3].isdigit():
+        iata = icao_to_iata.get(cs[:3])
+        if iata:
+            keys.add(iata + cs[3:])
+    return frozenset(keys)
+
+
 def callsign_match_keys(callsign: str) -> frozenset[str]:
     """Callsign aliases for matching FR24 entries to ADS-B (e.g. UA123 → UAL123)."""
     cs = _normalize_callsign(callsign)
     if not cs:
         return frozenset()
-    keys = {cs}
-    try:
-        from utilities.airline_branding import IATA_TO_ICAO
-    except ImportError:
-        IATA_TO_ICAO = {}
-    # IATA → ICAO (UA123 → UAL123)
-    if len(cs) >= 3 and cs[:2].isalpha() and cs[2].isdigit():
-        icao = IATA_TO_ICAO.get(cs[:2])
-        if icao:
-            keys.add(icao + cs[2:])
-    # ICAO → IATA (UAL123 → UA123; UAE51N → EK51N)
-    if len(cs) >= 4 and cs[:3].isalpha() and cs[3].isdigit():
-        icao_prefix = cs[:3]
-        for iata, icao in IATA_TO_ICAO.items():
-            if icao == icao_prefix:
-                keys.add(iata + cs[3:])
-                break
-    return frozenset(keys)
+    return _callsign_match_keys_cached(cs)
+
+
+def _hashable_field(value) -> str | None:
+    """Normalise a flight field to a cache-key friendly value."""
+    if value is None or isinstance(value, str):
+        return value
+    return str(value)
 
 
 def _normalize_registration(value) -> str:
@@ -161,24 +192,41 @@ def registration_lookup_variants(value: str) -> list[str]:
     return out
 
 
-def flight_identity_keys(flight: dict) -> frozenset[str]:
-    """Stable identity keys for FR24 ↔ ADS-B merge (hex, registration, callsign)."""
+@lru_cache(maxsize=_KEY_CACHE_SIZE)
+def _identity_keys_cached(
+    hex_raw: str | None,
+    reg_raw: str | None,
+    callsign: str | None,
+    flight_number: str | None,
+    number: str | None,
+) -> frozenset[str]:
     keys: set[str] = set()
-    hx = (flight.get("icao_hex") or flight.get("hex") or "").strip().upper().replace("0X", "")
+    hx = (hex_raw or "").strip().upper().replace("0X", "")
     if len(hx) >= 6:
         keys.add(f"hex:{hx}")
-    reg = _normalize_registration(flight.get("registration"))
+    reg = _normalize_registration(reg_raw)
     if reg:
         keys.add(f"reg:{reg}")
         for cs in callsign_match_keys(reg):
             keys.add(f"cs:{cs}")
-    for field in ("callsign", "flight_number", "number"):
-        for cs in callsign_match_keys(flight.get(field)):
+    for value in (callsign, flight_number, number):
+        for cs in callsign_match_keys(value):
             keys.add(f"cs:{cs}")
             # ADS-B often puts the N-number in the flight/callsign field.
             if len(cs) >= 2 and cs[0] == "N" and cs[1].isdigit():
                 keys.add(f"reg:{cs}")
     return frozenset(keys)
+
+
+def flight_identity_keys(flight: dict) -> frozenset[str]:
+    """Stable identity keys for FR24 ↔ ADS-B merge (hex, registration, callsign)."""
+    return _identity_keys_cached(
+        _hashable_field(flight.get("icao_hex") or flight.get("hex")),
+        _hashable_field(flight.get("registration")),
+        _hashable_field(flight.get("callsign")),
+        _hashable_field(flight.get("flight_number")),
+        _hashable_field(flight.get("number")),
+    )
 
 
 def flights_share_identity(a: dict, b: dict) -> bool:
@@ -207,13 +255,20 @@ def is_cross_feed_pair(a: dict, b: dict) -> bool:
     return {_source_kind(a), _source_kind(b)} == {"fr24", "adsb"}
 
 
+@lru_cache(maxsize=_KEY_CACHE_SIZE)
+def _hard_identity_groups(keys: frozenset[str]) -> tuple[frozenset[str], frozenset[str]]:
+    """(hex keys, registration keys) subsets of an identity key set."""
+    return (
+        frozenset(k for k in keys if k.startswith("hex:")),
+        frozenset(k for k in keys if k.startswith("reg:")),
+    )
+
+
 def identity_hard_conflict(a: dict, b: dict) -> bool:
     """True when both sides assert incompatible hex or registration."""
-    left = flight_identity_keys(a)
-    right = flight_identity_keys(b)
-    for prefix in ("hex:", "reg:"):
-        group_a = {k for k in left if k.startswith(prefix)}
-        group_b = {k for k in right if k.startswith(prefix)}
+    left = _hard_identity_groups(flight_identity_keys(a))
+    right = _hard_identity_groups(flight_identity_keys(b))
+    for group_a, group_b in zip(left, right):
         if group_a and group_b and group_a.isdisjoint(group_b):
             return True
     return False
@@ -234,22 +289,30 @@ def _altitudes_match(a: dict, b: dict, *, tol_ft: float = _ALT_MATCH_FT) -> bool
     return abs(alt_a - alt_b) <= tol_ft
 
 
-def _callsign_keys(flight: dict) -> frozenset[str]:
+@lru_cache(maxsize=_KEY_CACHE_SIZE)
+def _callsign_keys_cached(
+    callsign: str | None, flight_number: str | None, number: str | None
+) -> frozenset[str]:
     keys: set[str] = set()
-    for field in ("callsign", "flight_number", "number"):
-        keys |= set(callsign_match_keys(flight.get(field)))
+    for value in (callsign, flight_number, number):
+        keys |= set(callsign_match_keys(value))
     return frozenset(keys)
 
 
+def _callsign_keys(flight: dict) -> frozenset[str]:
+    return _callsign_keys_cached(
+        _hashable_field(flight.get("callsign")),
+        _hashable_field(flight.get("flight_number")),
+        _hashable_field(flight.get("number")),
+    )
+
+
+@lru_cache(maxsize=_KEY_CACHE_SIZE)
 def _airline_codes_from_callsign_keys(keys: frozenset[str]) -> frozenset[str]:
     """IATA + ICAO airline codes present in callsign/flight-number keys."""
     if not keys:
         return frozenset()
-    try:
-        from utilities.airline_branding import IATA_TO_ICAO
-    except ImportError:
-        IATA_TO_ICAO = {}
-    icao_to_iata = {icao: iata for iata, icao in IATA_TO_ICAO.items()}
+    IATA_TO_ICAO, icao_to_iata = _airline_code_maps()
     codes: set[str] = set()
     for cs in keys:
         if looks_like_registration(cs):
