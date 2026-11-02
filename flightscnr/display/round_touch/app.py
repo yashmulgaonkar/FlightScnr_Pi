@@ -126,6 +126,25 @@ FRAME_DEBUG = os.environ.get("FLIGHTSCNR_FRAME_DEBUG", "").lower() in ("1", "tru
 # Always-on hitch probe (no journald): one line per visible sweep stall.
 _HITCH_LOG = os.environ.get("FLIGHTSCNR_HITCH_LOG", "/tmp/flightscnr-hitch.log")
 _HITCH_GAP_S = float(os.environ.get("FLIGHTSCNR_HITCH_GAP_MS", "48")) / 1000.0
+# Longest input-poll sleep between sweep frames; the loop sleeps less when the
+# next frame is due sooner (see sweep_poll_sleep_s and the end of the main loop).
+_SWEEP_POLL_SLEEP_S = 0.004
+
+
+def sweep_poll_sleep_s(
+    last_draw: float,
+    now: float,
+    frame_s: float,
+    poll_s: float = _SWEEP_POLL_SLEEP_S,
+) -> float:
+    """Sleep length for the main loop between sweep frames.
+
+    Returns the time left until the next frame is due, capped at the input-poll
+    sleep and never negative, so an iteration that already passed the deadline
+    yields once and draws on the next pass.
+    """
+    remaining = frame_s - (now - last_draw)
+    return min(poll_s, max(0.0, remaining))
 BOOT_SPLASH_S = 3
 DISCLAIMER_AUTO_CONTINUE_S = 8
 AUTO_IDLE_MIN_RADAR_S = 5
@@ -7069,11 +7088,27 @@ class RoundTouchDisplay:
                 # 4ms still polls input at 250Hz for a quarter of the spin.
                 _sleep_t = time.perf_counter()
                 ring_animating = self._timeout_remaining_fraction() is not None
-                requested = (
-                    0.004
-                    if self.screen in (SCREEN_RADAR, SCREEN_AIRPORT) or ring_animating
-                    else 0.01
-                )
+                if self.screen in (SCREEN_RADAR, SCREEN_AIRPORT):
+                    # The sweep draw is decided once per iteration, and on a Pi
+                    # an iteration is ~7ms of ticks plus this sleep (which the
+                    # GIL stretches to ~17ms). A fixed sleep therefore lands
+                    # the 33ms frame at 36 to 38ms, and any iteration that
+                    # overruns the deadline costs a whole extra iteration: the
+                    # 55 to 60ms hitch mode in the frame-debug hitch log. Sleep
+                    # only until the next frame is due, so a late frame draws on
+                    # the very next pass instead of after another full sleep.
+                    last_draw = (
+                        self._last_radar_draw
+                        if self.screen == SCREEN_RADAR
+                        else self._last_static_draw
+                    )
+                    requested = sweep_poll_sleep_s(
+                        last_draw, time.time(), theme.SWEEP_FRAME_MS / 1000.0
+                    )
+                elif ring_animating:
+                    requested = _SWEEP_POLL_SLEEP_S
+                else:
+                    requested = 0.01
                 time.sleep(requested)
                 if FRAME_DEBUG:
                     # Overrun beyond the requested sleep = GIL / OS preemption.
