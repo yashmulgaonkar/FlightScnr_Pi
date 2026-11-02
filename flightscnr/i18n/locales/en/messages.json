@@ -143,6 +143,8 @@
   "portal.radar.aircraft_id.hint": "Top line of each aircraft tag: marketing flight number (e.g. UA5796), ATC callsign (e.g. SKW5796), tail / registration (e.g. N12345), or alternate through whichever of those differ.",
   "portal.radar.tag_leaders.label": "Show tag leaders",
   "portal.radar.tag_leaders.hint": "Hockey-stick underline and diagonal from each callsign tag to its aircraft or vessel. Same color as the blip. Only drawn when traffic labels are on.",
+  "portal.radar.tag_text_shadow.label": "Tag text shadow",
+  "portal.radar.tag_text_shadow.hint": "Thin drop shadow under the callsign, type and altitude text so tags stay readable over map roads, water and other tags. Light text gets a dark shadow; dark text on light maps gets a light one.",
   "portal.radar.rim_targets.label": "Out-of-range rim targets",
   "portal.radar.rim_targets.aircraft": "Aircraft icon",
   "portal.radar.rim_targets.dot": "Dot blip",

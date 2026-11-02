@@ -180,6 +180,8 @@
   "portal.radar.aircraft_id.hint": "Top line of each aircraft tag: marketing flight number (e.g. UA5796), ATC callsign (e.g. SKW5796), tail / registration (e.g. N12345), or alternate through whichever of those differ.",
   "portal.radar.tag_leaders.label": "Mostrar líneas de unión de las etiquetas",
   "portal.radar.tag_leaders.hint": "Un subrayado corto y una línea diagonal unen cada etiqueta de indicativo con su aeronave o embarcación. Usan el mismo color que el eco del radar y solo se dibujan cuando las etiquetas de tráfico están activadas.",
+  "portal.radar.tag_text_shadow.label": "Sombra del texto de etiquetas",
+  "portal.radar.tag_text_shadow.hint": "Sombra fina bajo el indicativo, el tipo y la altitud para que las etiquetas sigan siendo legibles sobre carreteras, agua y otras etiquetas. El texto claro recibe una sombra oscura; el texto oscuro en mapas claros, una sombra clara.",
   "portal.radar.rim_targets.label": "Objetivos fuera de alcance en el borde",
   "portal.radar.rim_targets.aircraft": "Icono de aeronave",
   "portal.radar.rim_targets.dot": "Eco de radar",

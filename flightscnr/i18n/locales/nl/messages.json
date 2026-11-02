@@ -143,6 +143,8 @@
   "portal.radar.aircraft_id.hint": "Bovenste regel van elk vliegtuiglabel: commercieel vluchtnummer (bijv. UA5796), ATC-callsign (bijv. SKW5796), registratie (bijv. N12345), of afwisselend door de waarden die verschillen.",
   "portal.radar.tag_leaders.label": "Aanwijslijnen bij labels tonen",
   "portal.radar.tag_leaders.hint": "Hockeystick-onderstreping en diagonale lijn van ieder callsignlabel naar het vliegtuig of vaartuig. Heeft dezelfde kleur als het radarpunt. Wordt alleen getekend wanneer verkeerslabels aanstaan.",
+  "portal.radar.tag_text_shadow.label": "Schaduw onder labeltekst",
+  "portal.radar.tag_text_shadow.hint": "Dunne slagschaduw onder callsign, type en hoogte zodat labels leesbaar blijven boven wegen, water en andere labels. Lichte tekst krijgt een donkere schaduw; donkere tekst op lichte kaarten een lichte.",
   "portal.radar.rim_targets.label": "Doelen buiten bereik aan de rand",
   "portal.radar.rim_targets.aircraft": "Vliegtuigpictogram",
   "portal.radar.rim_targets.dot": "Radarpunt",

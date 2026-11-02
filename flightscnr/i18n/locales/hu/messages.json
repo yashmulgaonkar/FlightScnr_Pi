@@ -143,6 +143,8 @@
   "portal.radar.aircraft_id.hint": "A repülőgépcímke felső sora: kereskedelmi járatszám (pl. UA5796), ATC-hívójel (pl. SKW5796), lajstromjel (pl. N12345), vagy az eltérő azonosítók váltakozó megjelenítése.",
   "portal.radar.tag_leaders.label": "Címkevezető vonalak megjelenítése",
   "portal.radar.tag_leaders.hint": "Hokiütő alakú aláhúzás és átlós vonal köti össze a hívójel címkéjét a repülőgéppel vagy hajóval. Színe megegyezik a céljelével. Csak bekapcsolt forgalmi címkéknél jelenik meg.",
+  "portal.radar.tag_text_shadow.label": "Címkeszöveg árnyéka",
+  "portal.radar.tag_text_shadow.hint": "Vékony vetett árnyék a hívójel, a típus és a magasság alatt, hogy a címkék utak, vízfelületek és más címkék fölött is olvashatók maradjanak. A világos szöveg sötét, a világos térképen lévő sötét szöveg világos árnyékot kap.",
   "portal.radar.rim_targets.label": "Hatótávon kívüli célpontok a peremen",
   "portal.radar.rim_targets.aircraft": "Repülőgép ikon",
   "portal.radar.rim_targets.dot": "Pontjel",
