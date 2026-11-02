@@ -12,6 +12,7 @@
 import logging
 import math
 import os
+import queue
 import signal
 import time
 from threading import Thread
@@ -233,6 +234,8 @@ class RoundTouchDisplay:
         self._last_clock_minute = -1
         self._flip_board_sampled_at = 0.0
         self._flip_board_saved_at = 0.0
+        self._flip_board_worker: Thread | None = None
+        self._flip_board_results: queue.SimpleQueue = queue.SimpleQueue()
         self._last_clock_draw = 0.0
         self._last_radar_draw = 0
         self._last_static_draw = 0
@@ -1029,7 +1032,19 @@ class RoundTouchDisplay:
             )
         elif self.screen == SCREEN_RADAR:
             _t = time.perf_counter()
-            radar_flights = self._radar_flights()
+            layer, _layer_gen = radar.frame_layer_snapshot()
+            needs_projected_flights = (
+                layer is None
+                or self._calibrating_facing
+                or self._panning_map
+                or self._pan_commit_choice
+            )
+            # A fresh cached layer does not consume this argument, and live
+            # sprites query the smoother individually. Copying/dead-reckoning
+            # the entire dense feed here cost ~5ms on every sweep frame.
+            radar_flights = (
+                self._radar_flights() if needs_projected_flights else self.flights
+            )
             if FRAME_DEBUG:
                 self._stage("1_flights", time.perf_counter() - _t)
                 _t = time.perf_counter()
@@ -1577,12 +1592,24 @@ class RoundTouchDisplay:
 
         Runs whether or not the board screen is switched on. The Layers
         toggle gates reaching the screen; gating collection too meant
-        switching the board on gave you an empty one. Measured on the device
-        at 0.47 ms per sample for 25 aircraft over 6 airports, and 4.3 ms for
-        120 over 30, once every four seconds.
+        switching the board on gave you an empty one. Dense snapshots can take
+        tens of milliseconds, so observation and checkpoint I/O run on one
+        worker instead of stopping the display loop.
         """
         now = time.time()
+        try:
+            while True:
+                events, identity_changed = self._flip_board_results.get_nowait()
+                if self.screen == SCREEN_FLIP_BOARD and (events or identity_changed):
+                    if events:
+                        flap_sound.reset()
+                    self._invalidate_timeout_content_cache()
+                    self._safe_draw()
+        except queue.Empty:
+            pass
         if now - self._flip_board_sampled_at < self._FLIP_BOARD_SAMPLE_S:
+            return
+        if self._flip_board_worker is not None and self._flip_board_worker.is_alive():
             return
         self._flip_board_sampled_at = now
         try:
@@ -1592,29 +1619,35 @@ class RoundTouchDisplay:
             airports = airport_overlay.in_view_airports()
             if not airports:
                 return
-            _lt = time.perf_counter()
-            events = flip_board_data.tracker().observe(flights, airports, now)
-            self._loop_stage("flip_observe", _lt)
-            identity_changed = bool(flip_board_data.tracker().identity_changed)
-            if self.screen == SCREEN_FLIP_BOARD and (events or identity_changed):
-                # New rows, or older tail-only rows that just got a callsign
-                # from the live feed, should flap to the selected identity.
-                if events:
-                    flap_sound.reset()
-                self._invalidate_timeout_content_cache()
-                self._safe_draw()
-            # Write when something landed or left, when we filled airline
-            # ids onto a row that was stored as tail-only, or on a slow
-            # checkpoint so pending approaches survive a restart.
-            if (
-                events
-                or identity_changed
-                or now - self._flip_board_saved_at >= self._FLIP_BOARD_TRACK_SAVE_S
-            ):
+            save_due = now - self._flip_board_saved_at >= self._FLIP_BOARD_TRACK_SAVE_S
+            if save_due:
                 self._flip_board_saved_at = now
-                _lt = time.perf_counter()
-                flip_board_data.save()
-                self._loop_stage("flip_save", _lt)
+
+            def _observe_and_save() -> None:
+                try:
+                    _lt = time.perf_counter()
+                    tracker = flip_board_data.tracker()
+                    events = tracker.observe(tuple(flights), tuple(airports), now)
+                    if FRAME_DEBUG:
+                        frame_debug.stage("flip_observe", time.perf_counter() - _lt)
+                    identity_changed = bool(tracker.identity_changed)
+                    # Write when something landed or left, when we filled airline
+                    # ids onto a row, or on a slow checkpoint so approaches survive.
+                    if events or identity_changed or save_due:
+                        _save_t = time.perf_counter()
+                        flip_board_data.save()
+                        if FRAME_DEBUG:
+                            frame_debug.stage("flip_save", time.perf_counter() - _save_t)
+                    self._flip_board_results.put((events, identity_changed))
+                except Exception:
+                    logger.debug("Flip board worker failed", exc_info=True)
+
+            self._flip_board_worker = Thread(
+                target=_observe_and_save,
+                name="flip-board-observer",
+                daemon=True,
+            )
+            self._flip_board_worker.start()
         except Exception:
             logger.debug("Flip board update failed", exc_info=True)
 

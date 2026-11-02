@@ -369,7 +369,7 @@ class FlipBoardTracker:
         new_events: list[dict],
     ) -> set[str]:
         present: set[str] = set()
-        for flight in flights or []:
+        for index, flight in enumerate(flights or []):
             if not isinstance(flight, dict) or flight.get("kind") == "vessel":
                 continue
             key = track_key(flight)
@@ -377,6 +377,10 @@ class FlipBoardTracker:
                 continue
             present.add(key)
             self._update_track(key, flight, airports, now, new_events)
+            if index and index % 8 == 0:
+                # This runs on the observer worker, but its Python loops still
+                # share the GIL with pygame. Reserve a short slice for the beam.
+                time.sleep(0.002)
         return present
 
     def _update_track(
@@ -390,7 +394,24 @@ class FlipBoardTracker:
         alt = _int_field(flight, "altitude")
         vs = _int_field(flight, "vertical_speed")
         on_ground = bool(flight.get("on_ground"))
-        airport = nearest_airport(flight, airports, self.radius_nm)
+        # One nearest-field scan serves both the 3 nm approach window and the
+        # 0.5 nm confirmation box. Dense snapshots previously scanned every
+        # in-view airport twice for every aircraft.
+        approach = nearest_airport(flight, airports, APPROACH_RADIUS_NM)
+        airport = None
+        pos = _coords(flight)
+        if approach is not None and pos is not None:
+            try:
+                confirm_nm = distance_nm(
+                    pos[0],
+                    pos[1],
+                    float(approach["lat"]),
+                    float(approach["lon"]),
+                )
+                if confirm_nm <= self.radius_nm:
+                    airport = approach
+            except (KeyError, TypeError, ValueError):
+                airport = None
         ident = str(airport.get("ident") or "").upper() if airport else ""
         low = bool(airport) and in_movement_band(alt, airport)
 
@@ -464,7 +485,6 @@ class FlipBoardTracker:
 
         # Pending arrival comes from the wider approach window, so a track
         # lost on short final still lands on the board.
-        approach = nearest_airport(flight, airports, APPROACH_RADIUS_NM)
         approach_agl = (
             height_above_field_ft(alt, approach) if approach else None
         )
