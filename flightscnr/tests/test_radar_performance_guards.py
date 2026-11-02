@@ -19,6 +19,81 @@ import pygame  # noqa: E402
 pygame.init()
 
 
+def test_live_frame_reads_an_atomic_cache_snapshot():
+    from display.round_touch.screens import radar
+
+    class MutatesDuringItems(dict):
+        def items(self):
+            source = super().items()
+
+            def _iter():
+                for index, item in enumerate(source):
+                    if index == 0:
+                        self.pop("id-1", None)
+                    yield item
+
+            return _iter()
+
+    sprite = pygame.Surface((8, 8), pygame.SRCALPHA)
+    old_cache = radar._live_frame_cache
+    old_icons = radar._live_icons
+    old_labels = radar._live_labels
+    old_heads = radar._live_heads
+    old_cursor = radar._live_frame_cursor
+    try:
+        radar._live_frame_cache = MutatesDuringItems({
+            "id-0": ((100.0, 100.0), (sprite, 100, 100), None),
+            "id-1": ((110.0, 100.0), (sprite, 110, 100), None),
+        })
+        radar._live_icons = [
+            {
+                "id": f"id-{i}",
+                "xy": (100.0 + i * 10, 100.0),
+                "flight": {"heading": 0},
+                "color": (255, 255, 255),
+                "vis": None,
+            }
+            for i in range(2)
+        ]
+        radar._live_labels = []
+        radar._live_heads = {}
+        radar._live_frame_cursor = 0
+        with (
+            mock.patch.object(radar, "_LIVE_FRAME_BUDGET_S", 0.0),
+            mock.patch("display.round_touch.position_smooth.active", return_value=None),
+            mock.patch.object(radar, "_flight_icon_color", return_value=(255, 255, 255)),
+            mock.patch.object(radar, "_live_glow_sprite", return_value=None),
+            mock.patch.object(radar, "_icon_vis", return_value={}),
+            mock.patch.object(radar, "_place_sprite", return_value=(sprite, 100, 100)),
+            mock.patch.object(
+                radar, "_clip_to_display", side_effect=lambda surface, x, y: (surface, x, y)
+            ),
+        ):
+            frame = radar.live_icon_frame(now=1.0)
+        assert frame
+        assert set(radar._live_frame_cache) == {"id-0", "id-1"}
+    finally:
+        radar._live_frame_cache = old_cache
+        radar._live_icons = old_icons
+        radar._live_labels = old_labels
+        radar._live_heads = old_heads
+        radar._live_frame_cursor = old_cursor
+
+
+def test_concurrent_dict_mutation_skips_one_draw_without_latching_fatal_error():
+    from display.round_touch import app
+
+    display = object.__new__(app.RoundTouchDisplay)
+    display._fatal_error = None
+    display._draw = mock.Mock(
+        side_effect=RuntimeError("dictionary changed size during iteration")
+    )
+    display._note_frame_time = mock.Mock()
+    display._safe_draw()
+    assert display._fatal_error is None
+    display._note_frame_time.assert_not_called()
+
+
 def test_dense_live_icons_advance_in_bounded_round_robin_batches():
     from display.round_touch.screens import radar
 
