@@ -27,7 +27,9 @@ _LABEL_PROGRESS = "Update in progress — do not turn off"
 _MODE_NONE = "none"
 _MODE_AVAILABLE = "available"
 _MODE_PROGRESS = "progress"
-_CACHE_TTL_S = 0.5
+# Taps call invalidate_cache(), so the only thing this delays is the portal
+# starting or finishing an update; 2 s keeps the per-frame disk reads rare.
+_CACHE_TTL_S = 2.0
 
 _bubble_rect = pygame.Rect(0, 0, 0, 0)
 _close_rect = pygame.Rect(0, 0, 0, 0)

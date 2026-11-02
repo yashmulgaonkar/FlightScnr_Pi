@@ -655,6 +655,13 @@ def _ensure_rot_hud(rotation: int) -> pygame.Surface | None:
     key = (gen, rotation, theme.SIZE)
     if _rot_hud is not None and _rot_hud_key == key:
         return _rot_hud
+    # The rebuild thread rotates the overlay as it publishes it; only fall back
+    # to rotating here when the rotation setting changed since that build.
+    pre, pre_gen = radar_hud.rotated_overlay_snapshot(rotation)
+    if pre is not None and pre_gen == gen:
+        _rot_hud = pre
+        _rot_hud_key = key
+        return _rot_hud
     try:
         if rotation % 360 == 0:
             # Overlay ref is swapped atomically on rebuild; safe to hold.

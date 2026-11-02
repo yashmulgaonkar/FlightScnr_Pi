@@ -105,3 +105,17 @@ class TestUpdateRunning(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestUpdateRunningReadsOnce(unittest.TestCase):
+    """The radar bubble polls update_running; it must not read the file twice."""
+
+    def test_single_status_read_per_call(self):
+        import importlib
+        from unittest import mock
+
+        updater = importlib.import_module("utilities.updater")
+        with mock.patch.object(updater, "_lock_held", return_value=False), \
+                mock.patch.object(updater, "_read_status", return_value={"state": "idle"}) as rs:
+            self.assertFalse(updater.update_running())
+        self.assertEqual(rs.call_count, 1)
