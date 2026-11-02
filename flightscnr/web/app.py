@@ -1608,6 +1608,7 @@ def radar_json():
             "facing_deg": settings.facing_deg(),
             "show_sweep_line": settings.show_sweep_line(),
             "show_tag_leaders": settings.tag_leaders_preferred(),
+            "tag_text_shadow": settings.tag_text_shadow(),
             "hud_tap_labels": settings.hud_tap_labels(),
             "smooth_motion": settings.smooth_motion_setting(),
             "rim_target_style": settings.rim_target_style(),
@@ -1811,6 +1812,8 @@ def radar_save():
         settings.set_smooth_motion(bool(data.get("smooth_motion")))
     if "show_tag_leaders" in data:
         settings.set_show_tag_leaders(bool(data.get("show_tag_leaders")))
+    if "tag_text_shadow" in data:
+        settings.set_tag_text_shadow(bool(data.get("tag_text_shadow")))
     if "rim_target_style" in data:
         settings.set_rim_target_style(str(data.get("rim_target_style") or ""))
     if "show_precipitation" in data:

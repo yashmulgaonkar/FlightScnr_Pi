@@ -37,6 +37,50 @@ def render_text_cached(font: "pygame.font.Font", text: str, color) -> pygame.Sur
     return surf
 
 
+# Drop shadow under radar tag text (settings.tag_text_shadow). Tags sit on
+# basemap tiles, trails and other tags, so a dark (or, for dark text on light
+# maps, light) copy offset one logical pixel down-right keeps the glyph edges
+# readable without a box behind the text.
+_TAG_SHADOW_ALPHA = 200
+
+
+def _tag_shadow_offset() -> tuple[int, int]:
+    px = max(1, theme.s(1))
+    return (px, px)
+
+
+def _shadow_rgb_for(color) -> tuple[int, int, int]:
+    """Black under light text, white under dark text (light basemaps)."""
+    r, g, b = (int(c) for c in tuple(color)[:3])
+    luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return (255, 255, 255) if luma < 100 else (0, 0, 0)
+
+
+def render_text_shadowed_cached(font: "pygame.font.Font", text: str, color) -> pygame.Surface:
+    """render_text_cached plus a 1 px drop shadow, composed once and memoized.
+
+    The result is one shadow offset wider and taller than the plain render so
+    the shadow is never clipped; callers that measure text should measure this
+    surface. Callers pick this or render_text_cached from the setting.
+    """
+    ox, oy = _tag_shadow_offset()
+    key = (id(font), text, tuple(color), "shadow", ox)
+    surf = _text_cache.get(key)
+    if surf is None:
+        if len(_text_cache) >= _TEXT_CACHE_MAX:
+            _text_cache.clear()
+        glyphs = render_text_cached(font, text, color)
+        shadow = font.render(text, True, _shadow_rgb_for(color))
+        shadow.fill((255, 255, 255, _TAG_SHADOW_ALPHA), special_flags=pygame.BLEND_RGBA_MULT)
+        surf = pygame.Surface(
+            (glyphs.get_width() + ox, glyphs.get_height() + oy), pygame.SRCALPHA
+        )
+        surf.blit(shadow, (ox, oy))
+        surf.blit(glyphs, (0, 0))
+        _text_cache[key] = surf
+    return surf
+
+
 def reset_font_cache() -> None:
     """Drop cached Font objects before pygame tears the font module down.
 

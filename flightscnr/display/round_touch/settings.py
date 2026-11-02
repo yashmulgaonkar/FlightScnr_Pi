@@ -361,6 +361,8 @@ _defaults = {
     "flip_board_sound": True,
     # Hockey-stick underline + diagonal from tag to blip.
     "show_tag_leaders": True,
+    # 1 px drop shadow under tag text so it stays readable over basemap tiles.
+    "tag_text_shadow": True,
     "hud_tap_labels": False,
     # Out-of-range rim targets: plane | dot (PR118). Seeded from config on first load.
     "rim_target_style": "plane",
@@ -1371,6 +1373,7 @@ def _settings_snapshot(state: dict) -> tuple:
         _normalize_facing(state.get("facing_deg", 0)),
         state.get("show_sweep"),
         state.get("show_tag_leaders"),
+        state.get("tag_text_shadow"),
         state.get("show_precipitation"),
         state.get("show_wildfires"),
         state.get("show_earthquakes"),
@@ -2053,6 +2056,16 @@ def toggle_tag_leaders():
 
 def set_show_tag_leaders(enabled: bool):
     _state["show_tag_leaders"] = bool(enabled)
+    _save(_state)
+
+
+def tag_text_shadow() -> bool:
+    """Drop shadow under radar tag text (callsign, type, altitude rows)."""
+    return bool(_state.get("tag_text_shadow", True))
+
+
+def set_tag_text_shadow(enabled: bool):
+    _state["tag_text_shadow"] = bool(enabled)
     _save(_state)
 
 

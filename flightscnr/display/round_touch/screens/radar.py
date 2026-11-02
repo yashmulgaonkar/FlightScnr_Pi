@@ -1013,7 +1013,10 @@ def _measure_tag_rows(lines):
     for text, color, font, row_y in lines:
         if not text:
             continue
-        rendered = draw.render_text_cached(font, text, color)
+        if settings.tag_text_shadow():
+            rendered = draw.render_text_shadowed_cached(font, text, color)
+        else:
+            rendered = draw.render_text_cached(font, text, color)
         rows.append((rendered, row_y))
         max_w = max(max_w, rendered.get_width())
     return rows, max_w
@@ -1332,7 +1335,7 @@ def _draw_labels(surface, inner_items, blips, live_ids=None, live_labels=None):
             sig = (
                 sig_text, place.tier, on_right, tuple(leader_color[:3]),
                 place.rect.size, (place.rect.left - x, place.rect.top - y),
-                settings.show_tag_leaders(),
+                settings.show_tag_leaders(), settings.tag_text_shadow(),
             )
             lb = _label_state.get(live_id)
             if lb is None or lb.get("sig") != sig:

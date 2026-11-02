@@ -180,6 +180,8 @@
   "portal.radar.aircraft_id.hint": "Top line of each aircraft tag: marketing flight number (e.g. UA5796), ATC callsign (e.g. SKW5796), tail / registration (e.g. N12345), or alternate through whichever of those differ.",
   "portal.radar.tag_leaders.label": "Etikettenführer anzeigen",
   "portal.radar.tag_leaders.hint": "Eiskunstlauf-Stich-Unterstrich und Diagonale von jedem Rufzeichenetikett zum Flugzeug oder Schiff. Gleiche Farbe wie der Blip. Nur gezeichnet, wenn Verkehrsetiketten an sind.",
+  "portal.radar.tag_text_shadow.label": "Schatten unter Etikettentext",
+  "portal.radar.tag_text_shadow.hint": "Dünner Schlagschatten unter Rufzeichen, Typ und Höhe, damit die Etiketten über Straßen, Wasser und anderen Etiketten lesbar bleiben. Helle Schrift bekommt einen dunklen Schatten, dunkle Schrift auf hellen Karten einen hellen.",
   "portal.radar.rim_targets.label": "Außerhalb-Reichweiten-Randziele",
   "portal.radar.rim_targets.aircraft": "Flugzeug-Symbol",
   "portal.radar.rim_targets.dot": "Punkt-Blip",

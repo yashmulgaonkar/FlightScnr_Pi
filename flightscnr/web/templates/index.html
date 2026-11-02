@@ -365,6 +365,11 @@
                 <span class="switch"><input id="show_tag_leaders" type="checkbox"><span class="track"></span></span>
             </div>
             <p class="hint">Hockey-stick underline and diagonal from each callsign tag to its aircraft or vessel. Same color as the blip. Only drawn when traffic labels are on.</p>
+            <div class="chk" id="tag_text_shadow_row">
+                <label for="tag_text_shadow" data-i18n="portal.radar.tag_text_shadow.label">Tag text shadow</label>
+                <span class="switch"><input id="tag_text_shadow" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint" data-i18n="portal.radar.tag_text_shadow.hint">Thin drop shadow under the callsign, type and altitude text so tags stay readable over map roads, water and other tags. Light text gets a dark shadow; dark text on light maps gets a light one.</p>
             <div class="chk">
                 <label for="smooth_motion" data-i18n="portal.radar.smooth_motion.label">Smooth aircraft motion</label>
                 <span class="switch"><input id="smooth_motion" type="checkbox"><span class="track"></span></span>
@@ -1813,6 +1818,7 @@ async function loadAll() {
         $("facing_deg").value = String(Math.round(Number(r.facing_deg) || 0) % 360);
         $("show_sweep").checked = !!r.show_sweep_line;
         if ($("show_tag_leaders")) $("show_tag_leaders").checked = r.show_tag_leaders !== false;
+        if ($("tag_text_shadow")) $("tag_text_shadow").checked = r.tag_text_shadow !== false;
         if ($("hud_tap_labels")) $("hud_tap_labels").checked = !!r.hud_tap_labels;
         if ($("smooth_motion")) $("smooth_motion").checked = !!r.smooth_motion;
         if ($("rim_target_style")) $("rim_target_style").value = r.rim_target_style || "plane";
@@ -2292,6 +2298,7 @@ async function saveRadar() {
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,
                 show_tag_leaders: $("show_tag_leaders") ? $("show_tag_leaders").checked : true,
+                tag_text_shadow: $("tag_text_shadow") ? $("tag_text_shadow").checked : true,
                 hud_tap_labels: $("hud_tap_labels") ? $("hud_tap_labels").checked : false,
                 smooth_motion: $("smooth_motion") ? $("smooth_motion").checked : false,
                 rim_target_style: $("rim_target_style") ? $("rim_target_style").value : "plane",
@@ -2599,6 +2606,7 @@ async function saveAndReloadSettings(statusId) {
                 facing_deg: Number($("facing_deg").value),
                 show_sweep_line: $("show_sweep").checked,
                 show_tag_leaders: $("show_tag_leaders") ? $("show_tag_leaders").checked : true,
+                tag_text_shadow: $("tag_text_shadow") ? $("tag_text_shadow").checked : true,
                 hud_tap_labels: $("hud_tap_labels") ? $("hud_tap_labels").checked : false,
                 smooth_motion: $("smooth_motion") ? $("smooth_motion").checked : false,
                 rim_target_style: $("rim_target_style") ? $("rim_target_style").value : "plane",
