@@ -26,6 +26,8 @@ import threading
 import time
 from pathlib import Path
 
+from utilities import run_as_user
+
 logger = logging.getLogger("flightscnr.bluetooth")
 
 _MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
@@ -166,9 +168,11 @@ def _run_as_audio_user(
     except (KeyError, ValueError):
         run_uid = None
     try:
-        if run_uid is not None and os.geteuid() == 0 and run_uid != 0:
-            run_kwargs["user"] = run_uid
-        return subprocess.run(cmd, **run_kwargs)
+        # setpriv keeps the vfork fast path; ``user=`` would fork the whole
+        # display process on every probe (see utilities/run_as_user.py).
+        argv, extra = run_as_user.as_user(cmd, run_uid)
+        run_kwargs.update(extra)
+        return subprocess.run(argv, **run_kwargs)
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout
         stderr = exc.stderr
