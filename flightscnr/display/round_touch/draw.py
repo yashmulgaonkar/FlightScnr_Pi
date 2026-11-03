@@ -50,10 +50,17 @@ def _tag_shadow_offset() -> tuple[int, int]:
 
 
 def _shadow_rgb_for(color) -> tuple[int, int, int]:
-    """Black under light text, white under dark text (light basemaps)."""
+    """Black under light or saturated text, white under dark text.
+
+    Luma is mostly green, so magenta and blue fall under the dark-text line
+    and were given a white halo on a dark map. A strong channel means the ink
+    is already vivid and needs a dark edge.
+    """
     r, g, b = (int(c) for c in tuple(color)[:3])
     luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
-    return (255, 255, 255) if luma < 100 else (0, 0, 0)
+    if luma >= 100 or max(r, g, b) >= 140:
+        return (0, 0, 0)
+    return (255, 255, 255)
 
 
 def render_text_shadowed_cached(font: "pygame.font.Font", text: str, color) -> pygame.Surface:

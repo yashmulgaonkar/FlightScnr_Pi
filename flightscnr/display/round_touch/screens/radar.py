@@ -1013,7 +1013,7 @@ def _measure_tag_rows(lines):
     for text, color, font, row_y in lines:
         if not text:
             continue
-        if settings.tag_text_shadow():
+        if _tag_text_shadow_enabled():
             rendered = draw.render_text_shadowed_cached(font, text, color)
         else:
             rendered = draw.render_text_cached(font, text, color)
@@ -1335,7 +1335,7 @@ def _draw_labels(surface, inner_items, blips, live_ids=None, live_labels=None):
             sig = (
                 sig_text, place.tier, on_right, tuple(leader_color[:3]),
                 place.rect.size, (place.rect.left - x, place.rect.top - y),
-                settings.show_tag_leaders(), settings.tag_text_shadow(),
+                settings.show_tag_leaders(), _tag_text_shadow_enabled(),
             )
             lb = _label_state.get(live_id)
             if lb is None or lb.get("sig") != sig:
@@ -1859,6 +1859,21 @@ def _is_tracked(flight) -> bool:
 
     tracked_keys = flight_identity_keys({"callsign": tracked, "registration": tracked})
     return bool(tracked_keys & flight_identity_keys(flight))
+
+
+# Light charts where a dark halo sits on pale paper and looks like a smear.
+# VFR and Toner keep the shadow; their ink is busier.
+_TAG_SHADOW_OFF_STYLES = frozenset({"light", "seamap", "streets", "voyager"})
+
+
+def _tag_text_shadow_enabled() -> bool:
+    """User shadow switch, except on the light street and nautical charts."""
+    if not settings.tag_text_shadow():
+        return False
+    try:
+        return settings.map_style() not in _TAG_SHADOW_OFF_STYLES
+    except Exception:
+        return True
 
 
 def _pale_basemap() -> bool:

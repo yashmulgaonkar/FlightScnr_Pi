@@ -68,6 +68,9 @@ class TestShadowRender(unittest.TestCase):
     def test_dark_text_gets_light_shadow(self):
         self.assertEqual(draw._shadow_rgb_for((15, 23, 42)), (255, 255, 255))
         self.assertEqual(draw._shadow_rgb_for((0, 255, 0)), (0, 0, 0))
+        # Magenta and blue are vivid but low-luma; a white halo disappears on a dark map.
+        self.assertEqual(draw._shadow_rgb_for((255, 0, 255)), (0, 0, 0))
+        self.assertEqual(draw._shadow_rgb_for((40, 80, 255)), (0, 0, 0))
 
     def test_cached_between_calls(self):
         a = draw.render_text_shadowed_cached(self.font, "UA502", (0, 255, 0))
@@ -96,6 +99,22 @@ class TestShadowSetting(unittest.TestCase):
             rows_shadow, w_shadow = radar._measure_tag_rows(lines)
         self.assertEqual(len(rows_plain), 1)
         self.assertEqual(w_shadow, w_plain + max(1, theme.s(1)))
+
+    def test_light_charts_skip_the_shadow(self):
+        from display.round_touch.screens import radar
+
+        font = draw.load_font(18, bold=True)
+        lines = [("WN88", (0, 255, 0), font, 0)]
+        with mock.patch.object(settings, "tag_text_shadow", return_value=True):
+            with mock.patch.object(settings, "map_style", return_value="dark"):
+                _, w_dark = radar._measure_tag_rows(lines)
+            for style in ("light", "seamap", "streets", "voyager"):
+                with mock.patch.object(settings, "map_style", return_value=style):
+                    _, w_plain = radar._measure_tag_rows(lines)
+                self.assertEqual(w_plain, w_dark - max(1, theme.s(1)), style)
+            with mock.patch.object(settings, "map_style", return_value="vfr"):
+                _, w_vfr = radar._measure_tag_rows(lines)
+            self.assertEqual(w_vfr, w_dark)
 
 
 if __name__ == "__main__":
