@@ -27,9 +27,12 @@ import logging
 import os
 import time
 import zipfile
+from array import array
 from datetime import datetime
 
 import requests
+
+from utilities import compact_store
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,73 @@ REFRESH_AFTER_S = 35 * 86400
 
 _db: dict[str, dict] = {}
 _loaded = False
+
+_FUEL, _BEACON, _TOWERED = 1, 2, 4
+
+
+class FaaStore:
+    """Packed ``ident -> {fuel, beacon, towered}``: a sorted index and one
+    flag byte per airport; ``get`` builds the dict on access."""
+
+    def __init__(self):
+        self._index = compact_store.PackedIndex(8)
+        self._flags = array("B")
+
+    def add(self, ident: str, rec) -> None:
+        if not isinstance(rec, dict):
+            return
+        ident = str(ident or "").strip().upper()
+        if not ident:
+            return
+        flags = (
+            (_FUEL if rec.get("fuel") else 0)
+            | (_BEACON if rec.get("beacon") else 0)
+            | (_TOWERED if rec.get("towered") else 0)
+        )
+        if self._index.add(ident, len(self._flags)):
+            self._flags.append(flags)
+
+    def build(self) -> "FaaStore":
+        self._index.build()
+        return self
+
+    @classmethod
+    def from_items(cls, items) -> "FaaStore":
+        store = cls()
+        for ident, rec in items:
+            store.add(ident, rec)
+        return store.build()
+
+    def __len__(self) -> int:
+        return len(self._flags)
+
+    def __bool__(self) -> bool:
+        return len(self._flags) > 0
+
+    def __contains__(self, ident: object) -> bool:
+        return isinstance(ident, str) and ident in self._index
+
+    def get(self, ident, default=None):
+        if not isinstance(ident, str):
+            return default
+        i = self._index.get(ident, -1)
+        if i < 0:
+            return default
+        f = self._flags[i]
+        return {"fuel": bool(f & _FUEL), "beacon": bool(f & _BEACON), "towered": bool(f & _TOWERED)}
+
+    def __getitem__(self, ident: str) -> dict:
+        rec = self.get(ident)
+        if rec is None:
+            raise KeyError(ident)
+        return rec
+
+    def keys(self):
+        return self._index.keys()
+
+    def items(self):
+        for ident in self._index.keys():
+            yield ident, self.get(ident)
 
 
 def cycle_zip_url(edition_date: str) -> str:
@@ -116,25 +186,28 @@ def _load() -> None:
     if _loaded:
         return
     _loaded = True
-    cached = None
+    meta: dict = {}
     try:
         with open(CACHE_FILE, encoding="utf-8") as fh:
-            cached = json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        cached = None
-    if (
-        cached
-        and cached.get("_version") == CACHE_VERSION
-        and isinstance(cached.get("airports"), dict)
-    ):
-        _db = cached["airports"]
-        age = time.time() - float(cached.get("fetched_at") or 0)
+            text = fh.read()
+        try:
+            meta, items = compact_store.split_cache(text, "airports")
+        except (compact_store.CacheFormatError, ValueError):
+            meta, items = {}, iter(())
+        if meta.get("_version") == CACHE_VERSION:
+            _db = FaaStore.from_items(items)
+        del text
+    except OSError:
+        meta = {}
+    if _db:
+        age = time.time() - float(meta.get("fetched_at") or 0)
         if age < REFRESH_AFTER_S:
             return
     fetched = _fetch()
     if fetched is not None:
-        _db, edition = fetched
-        _write_cache(_db, edition)
+        built, edition = fetched
+        _write_cache(built, edition)
+        _db = FaaStore.from_items(built.items())
     elif not _db:
         logger.info("[FAA] No NASR data available — chart icons run without US services")
 

@@ -24,8 +24,13 @@ Usage:
 import csv
 import json
 import os
-import requests
+import threading
+from array import array
 from io import StringIO
+
+import requests
+
+from utilities import compact_store
 
 BASE_DIR    = os.path.dirname(os.path.dirname(__file__))
 CACHE_FILE  = os.path.join(BASE_DIR, "airports.json")
@@ -63,6 +68,238 @@ def types_for_min_size(size: str) -> frozenset:
 # In-memory lookup: both IATA and ICAO -> {lat, lon, name?, type?}
 _db = {}
 _loaded = False
+_load_lock = threading.Lock()
+
+_NO_ELEV = -(2**31)
+
+
+class AirportStore:
+    """Packed airports database: one record per ident, codes (IATA and ICAO)
+    resolved through a sorted index, record dicts built on access.
+
+    Built from ``(code, record_dict)`` pairs, so the JSON cache can be
+    streamed into it and the CSV builder's dict can be converted too. See
+    ``compact_store`` for why the dict form is never kept.
+    """
+
+    def __init__(self):
+        self._lat = array("d")
+        self._lon = array("d")
+        self._elev = array("i")
+        self._type = array("B")
+        self._types = compact_store.Enum()
+        self._name = compact_store.TextBlob()
+        self._facility = compact_store.TextBlob()
+        self._key = compact_store.TextBlob()  # ident when the record has one, else its code
+        self._has_ident = array("B")
+        self._codes = compact_store.PackedIndex(8)
+        self._iata_slot = array("i")  # per record: index slot of its 3-letter alias, or -1
+        self._by_ident: dict[str, int] | None = {}
+        self._pending_codes: list[tuple[str, int]] = []
+        self._n_codes = 0
+
+    # Building ------------------------------------------------------------
+
+    def add(self, code: str, rec: dict) -> None:
+        if self._by_ident is None:
+            raise RuntimeError("store already built")
+        if not isinstance(rec, dict):
+            return
+        code = str(code or "").strip().upper()
+        if not code:
+            return
+        try:
+            lat = float(rec["lat"])
+            lon = float(rec["lon"])
+        except (KeyError, TypeError, ValueError):
+            return
+        raw_ident = str(rec.get("ident") or "").strip().upper()
+        ident = raw_ident or code
+        idx = self._by_ident.get(ident)
+        if idx is None:
+            idx = len(self._lat)
+            self._by_ident[ident] = idx
+            self._lat.append(lat)
+            self._lon.append(lon)
+            elev = rec.get("elevation_ft")
+            try:
+                self._elev.append(int(elev) if elev is not None else _NO_ELEV)
+            except (TypeError, ValueError):
+                self._elev.append(_NO_ELEV)
+            self._type.append(self._types.code(str(rec.get("type") or "").strip().lower()))
+            self._name.add(str(rec.get("name") or "").strip())
+            self._facility.add(str(rec.get("facility") or "").strip())
+            self._key.add(ident)
+            self._has_ident.append(1 if raw_ident else 0)
+            self._iata_slot.append(-1)
+        self._pending_codes.append((code, idx))
+
+    def build(self) -> "AirportStore":
+        for code, idx in self._pending_codes:
+            if self._codes.add(code, idx):
+                self._n_codes += 1
+        self._codes.build()
+        # Alias slots: a 3-letter code whose record ident is a different code.
+        for slot in range(len(self._codes)):
+            code = self._codes.key_at(slot)
+            if len(code) == 3:
+                idx = self._codes.value_at(slot)
+                if self._key.get(idx) != code:
+                    self._iata_slot[idx] = slot
+        self._pending_codes = []
+        self._by_ident = None
+        self._name.build()
+        self._facility.build()
+        self._key.build()
+        return self
+
+    @classmethod
+    def from_items(cls, items) -> "AirportStore":
+        store = cls()
+        for code, rec in items:
+            store.add(code, rec)
+        return store.build()
+
+    # Mapping-like access ------------------------------------------------
+
+    def __len__(self) -> int:
+        return self._n_codes
+
+    def __bool__(self) -> bool:
+        return self._n_codes > 0
+
+    def __contains__(self, code: object) -> bool:
+        return isinstance(code, str) and code in self._codes
+
+    def record(self, idx: int) -> dict:
+        rec = {"lat": self._lat[idx], "lon": self._lon[idx]}
+        name = self._name.get(idx)
+        if name:
+            rec["name"] = name
+        facility = self._facility.get(idx)
+        if facility:
+            rec["facility"] = facility
+        atype = self._types.values[self._type[idx]]
+        if atype:
+            rec["type"] = atype
+        elev = self._elev[idx]
+        if elev != _NO_ELEV:
+            rec["elevation_ft"] = elev
+        if self._has_ident[idx]:
+            rec["ident"] = self._key.get(idx)
+        return rec
+
+    def index_of(self, code: str) -> int:
+        return self._codes.get(code, -1)
+
+    def get(self, code, default=None):
+        if not isinstance(code, str):
+            return default
+        idx = self._codes.get(code, -1)
+        return self.record(idx) if idx >= 0 else default
+
+    def __getitem__(self, code: str) -> dict:
+        rec = self.get(code)
+        if rec is None:
+            raise KeyError(code)
+        return rec
+
+    def keys(self):
+        return self._codes.keys()
+
+    def items(self):
+        for slot in range(len(self._codes)):
+            yield self._codes.key_at(slot), self.record(self._codes.value_at(slot))
+
+    def __iter__(self):
+        return self.keys()
+
+    # Queries --------------------------------------------------------------
+
+    def iata_for(self, icao: str) -> str | None:
+        """The 3-letter alias of an ICAO code, else the first 3-letter code
+        whose record lies within 0.01 degrees (the historical rule), else None."""
+        idx = self._codes.get(icao, -1)
+        if idx < 0:
+            return None
+        slot = self._iata_slot[idx]
+        if slot >= 0:
+            return self._codes.key_at(slot)
+        lat = self._lat[idx]
+        lon = self._lon[idx]
+        for s in range(len(self._codes)):
+            code = self._codes.key_at(s)
+            if len(code) != 3:
+                continue
+            j = self._codes.value_at(s)
+            if abs(self._lat[j] - lat) < 0.01 and abs(self._lon[j] - lon) < 0.01:
+                return code
+        return None
+
+    def near(self, lat: float, lon: float, radius_km: float, wanted, small_paved_only: bool) -> list[dict]:
+        """Records within ``radius_km`` with a 4+ character ident and a type in
+        ``wanted`` (any type when ``wanted`` is empty), as point dicts sorted by
+        distance. Same output shape as the historical dict scan."""
+        wanted_codes = None
+        if wanted:
+            wanted_codes = {i for i, t in enumerate(self._types.values) if t in wanted}
+            if not wanted_codes:
+                return []
+        # Cheap latitude band first: one degree of latitude is about 111 km.
+        band = radius_km / 111.0 + 1e-6
+        lat_lo = lat - band
+        lat_hi = lat + band
+        lats = self._lat
+        lons = self._lon
+        types = self._type
+        out: list[dict] = []
+        runways_mod = None
+        for i in range(len(lats)):
+            alat = lats[i]
+            if alat < lat_lo or alat > lat_hi:
+                continue
+            if wanted_codes is not None and types[i] not in wanted_codes:
+                continue
+            ident = self._key.get(i)
+            if len(ident) < 4:
+                continue
+            alon = lons[i]
+            dist = _distance_km(lat, lon, alat, alon)
+            if dist > radius_km:
+                continue
+            atype = self._types.values[types[i]]
+            if small_paved_only and atype == "small_airport":
+                if runways_mod is None:
+                    from utilities import runways as runways_mod
+                if not runways_mod.has_paved_runway(ident):
+                    continue
+            point = {
+                "ident": ident,
+                "lat": alat,
+                "lon": alon,
+                "type": atype,
+                "name": self._name.get(i),
+                "facility": self._facility.get(i),
+                "dist_km": dist,
+            }
+            elev = self._elev[i]
+            if elev != _NO_ELEV:
+                point["elevation_ft"] = elev
+            out.append(point)
+        out.sort(key=lambda a: a["dist_km"])
+        return out
+
+
+def _store_from_cache_text(text: str):
+    """``(store, None)`` when the cache text is the current version, else
+    ``(None, raw)`` with the whole file parsed for the stale-cache path."""
+    try:
+        meta, items = compact_store.split_cache(text, "airports")
+    except (compact_store.CacheFormatError, ValueError):
+        return None, json.loads(text)
+    if meta.get("_version") != CACHE_VERSION:
+        return None, json.loads(text)
+    return AirportStore.from_items(items), None
 
 
 def _record_from_row(row: dict) -> dict | None:
@@ -160,19 +397,20 @@ def _load():
     global _db, _loaded
     if _loaded:
         return
-
-    stale: dict | None = None
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-
-            # Versioned cache (v2+): {"_version": N, "airports": {...}}
-            if isinstance(raw, dict) and raw.get("_version") == CACHE_VERSION:
-                _db = raw.get("airports", {})
-                _loaded = True
-                return
-            else:
+    with _load_lock:
+        if _loaded:
+            return
+        stale: dict | None = None
+        if os.path.exists(CACHE_FILE):
+            try:
+                with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                    text = f.read()
+                store, raw = _store_from_cache_text(text)
+                del text
+                if store is not None:
+                    _db = store
+                    _loaded = True
+                    return
                 # Stale or unversioned cache - rebuild
                 version_found = raw.get("_version", "none") if isinstance(raw, dict) else "legacy"
                 _safe_print(
@@ -183,15 +421,16 @@ def _load():
                     stale = raw["airports"]
                 elif isinstance(raw, dict) and "_version" not in raw:
                     stale = raw
-        except Exception as e:
-            _safe_print(f"[Airports] Cache load failed: {e} - re-downloading")
+            except Exception as e:
+                _safe_print(f"[Airports] Cache load failed: {e} - re-downloading")
 
-    _db = _download_and_build()
-    if not _db and stale:
-        # Keep lookups working offline until a typed rebuild succeeds.
-        _safe_print("[Airports] Using previous cache without type metadata (degraded)")
-        _db = stale
-    _loaded = True
+        built = _download_and_build()
+        if not built and stale:
+            # Keep lookups working offline until a typed rebuild succeeds.
+            _safe_print("[Airports] Using previous cache without type metadata (degraded)")
+            built = stale
+        _db = AirportStore.from_items(built.items()) if isinstance(built, dict) else built
+        _loaded = True
 
 
 def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -228,6 +467,8 @@ def iter_airports_near(
         return []
 
     wanted = RADAR_AIRPORT_TYPES if types is None else frozenset(types)
+    if isinstance(_db, AirportStore):
+        return _db.near(center_lat, center_lon, radius, wanted, small_paved_only)
     out: list[dict] = []
     seen: set[str] = set()
 
@@ -374,8 +615,14 @@ def icao_to_iata(icao_code):
     if not icao_code or len(icao_code) != 4:
         return icao_code or "?"
     _load()
+    if isinstance(_db, AirportStore):
+        found = _db.iata_for(icao_code.upper())
+        if found:
+            return found
+        icao_coords = None
+    else:
+        icao_coords = _db.get(icao_code.upper())
     # Search for a 3-letter key that maps to same coords as this ICAO
-    icao_coords = _db.get(icao_code.upper())
     if icao_coords:
         for code, coords in _db.items():
             if (len(code) == 3 and
