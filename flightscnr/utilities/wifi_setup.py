@@ -312,11 +312,65 @@ def active_client_wifi() -> bool:
     return probe_client_wifi() == "up"
 
 
-def probe_link() -> LinkState:
-    """Ethernet carrier or client Wi-Fi: up / down / unknown."""
+# nmcli costs ~150 ms of CPU and a D-Bus round trip per call and the display
+# asked three times every few seconds. The kernel's view of wlan0 (operstate +
+# carrier) is free to read and changes whenever the association does, so a
+# confirmed nmcli answer is reused while that view is unchanged, up to a TTL.
+# Explicit radio changes (AP up/down, joins) invalidate it.
+_LINK_SYSFS_TTL_S = 30.0
+_link_sysfs_sig: tuple[str, str] | None = None
+_link_sysfs_state: LinkState | str = ""
+_link_sysfs_at = 0.0
+
+
+def _wlan_sysfs_signature() -> tuple[str, str] | None:
+    base = f"/sys/class/net/{WLAN_IFACE}"
+    try:
+        with open(f"{base}/operstate", encoding="utf-8") as fh:
+            oper = fh.read().strip()
+    except OSError:
+        return None
+    try:
+        with open(f"{base}/carrier", encoding="utf-8") as fh:
+            carrier = fh.read().strip()
+    except OSError:
+        carrier = "?"
+    return (oper, carrier)
+
+
+def invalidate_link_probe() -> None:
+    """Forget the cached nmcli classification (call after changing the radio)."""
+    global _link_sysfs_sig, _link_sysfs_state, _link_sysfs_at
+    _link_sysfs_sig = None
+    _link_sysfs_state = ""
+    _link_sysfs_at = 0.0
+
+
+def probe_link(*, fresh: bool = False) -> LinkState:
+    """Ethernet carrier or client Wi-Fi: up / down / unknown.
+
+    ``fresh`` forces nmcli; otherwise a confirmed up/down answer is reused
+    while wlan0's sysfs state is unchanged and younger than ``_LINK_SYSFS_TTL_S``.
+    """
+    global _link_sysfs_sig, _link_sysfs_state, _link_sysfs_at
     if ethernet_up():
         return "up"
-    return probe_client_wifi()
+    sig = _wlan_sysfs_signature()
+    now = time.time()
+    if (
+        not fresh
+        and sig is not None
+        and sig == _link_sysfs_sig
+        and _link_sysfs_state in ("up", "down")
+        and now - _link_sysfs_at < _LINK_SYSFS_TTL_S
+    ):
+        return _link_sysfs_state  # type: ignore[return-value]
+    state = probe_client_wifi()
+    if sig is not None and state in ("up", "down"):
+        _link_sysfs_sig, _link_sysfs_state, _link_sysfs_at = sig, state, now
+    else:
+        invalidate_link_probe()
+    return state
 
 
 def link_down_streak_needed() -> int:
@@ -377,14 +431,15 @@ def link_up() -> bool:
     return True
 
 
-def link_up_blocking() -> bool:
+def link_up_blocking(*, fresh: bool = False) -> bool:
     """Synchronous link check (Wi-Fi setup / join paths only).
 
     Confirmed down updates the cache to False. Probe errors (unknown) keep the
     last good value so a flaky nmcli cannot start the offline countdown.
+    ``fresh`` bypasses the sysfs-keyed nmcli cache (join / wait paths).
     """
     global _link_up_cache, _link_up_cache_at, _link_probe_state
-    state = probe_link()
+    state = probe_link(fresh=fresh)
     _link_probe_state = state
     now = time.time()
     if state == "up":
@@ -432,17 +487,17 @@ def _refresh_link_worker() -> None:
 
 def refresh_link_up() -> bool:
     """Force a blocking refresh and return the new value."""
-    return link_up_blocking()
+    return link_up_blocking(fresh=True)
 
 
 def _wait_for_client_wifi(timeout_s: float) -> bool:
     """Return True if client Wi-Fi or ethernet comes up within timeout_s."""
     deadline = time.time() + max(0.0, timeout_s)
     while time.time() < deadline:
-        if link_up_blocking():
+        if link_up_blocking(fresh=True):
             return True
         time.sleep(1.0)
-    return link_up_blocking()
+    return link_up_blocking(fresh=True)
 
 
 def should_enter_setup_at_boot() -> bool:
@@ -766,6 +821,7 @@ def _detect_gateway() -> str:
 def ensure_setup_ap() -> ApCredentials:
     """Bring up the setup hotspot; idempotent."""
     global _ap_active
+    invalidate_link_probe()
     # Portal join owns the radio — do not yank it back into AP mode mid-connect.
     if client_join_busy():
         creds = _load_or_create_ap_creds()
@@ -898,6 +954,7 @@ def ensure_setup_ap() -> ApCredentials:
 def stop_setup_ap() -> None:
     """Tear down the setup hotspot and captive DNS."""
     global _ap_active
+    invalidate_link_probe()
     with _radio_lock():
         _remove_captive_dns()
         _nmcli("connection", "down", AP_CONNECTION_NAME, timeout=20.0)
@@ -914,7 +971,8 @@ def try_saved_wifi(*, timeout_s: float | None = None) -> tuple[bool, str]:
     sits over a dead hotspot (nmcli timeouts used to skip the restore path).
     """
     global _try_saved_busy
-    if link_up():
+    invalidate_link_probe()
+    if link_up_blocking(fresh=True):
         mark_wifi_connected()
         return True, "Already connected"
 
@@ -1039,6 +1097,7 @@ def connect_to_wifi(ssid: str, password: str = "") -> tuple[bool, str]:
 
     _set_status(f"Connecting to “{ssid}”…")
     mark_client_join_busy(f"connect:{ssid}")
+    invalidate_link_probe()
     restore_ap = True
     con_name = ""
     try:

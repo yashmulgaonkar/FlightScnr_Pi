@@ -50,6 +50,17 @@ _SCAN_NEW_RE = re.compile(
 _SCAN_DEFAULT_S = 10.0
 _CONNECT_SINK_WAIT_S = 12.0
 _RECONNECT_POLL_S = 8.0
+# Failed reconnects back off up to this interval; a speaker that powers on
+# usually initiates the link itself, which the sysfs gate notices at once.
+_RECONNECT_POLL_MAX_S = 32.0
+# How long a confirmed "sink ready" answer is trusted while the kernel still
+# shows the same set of Bluetooth links.
+_READY_CACHE_S = 20.0
+# Sink housekeeping on the watch tick (USB sink module, default-sink reassert)
+# runs when the kernel's device view changes or at least this often.
+_ENSURE_MIN_S = 60.0
+_BT_SYSFS_ROOT = Path("/sys/class/bluetooth")
+_ready_cache: tuple[str, frozenset[str], float] | None = None
 _last_error = ""
 _scan_lock = threading.Lock()
 _action_lock = threading.Lock()
@@ -993,25 +1004,84 @@ def wait_for_sink(mac: str, *, timeout: float = _CONNECT_SINK_WAIT_S) -> dict | 
     return None
 
 
+def bluetooth_links() -> frozenset[str] | None:
+    """Kernel view of established Bluetooth connections, without spawning anything.
+
+    BlueZ's kernel side adds ``/sys/class/bluetooth/hciN/hciN:HANDLE`` for every
+    ACL/LE link and removes it on disconnect, so an empty set means no speaker
+    can be connected and ``bluetoothctl`` / ``pactl`` need not be asked. Returns
+    None where the sysfs tree is missing (dev boxes), which disables the gate.
+    """
+    try:
+        adapters = list(_BT_SYSFS_ROOT.iterdir())
+    except OSError:
+        return None
+    links: set[str] = set()
+    for adapter in adapters:
+        prefix = adapter.name + ":"
+        try:
+            for entry in adapter.iterdir():
+                if entry.name.startswith(prefix):
+                    links.add(entry.name)
+        except OSError:
+            continue
+    return frozenset(links)
+
+
+def _no_bluetooth_link() -> bool:
+    links = bluetooth_links()
+    return links is not None and not links
+
+
 def is_connected(mac: str | None = None) -> bool:
     mac = _normalize_mac(mac or preferred_mac())
     if not mac:
         return False
+    if _no_bluetooth_link():
+        return False
     return bool(_device_info(mac).get("connected"))
 
 
+def invalidate_ready_cache() -> None:
+    global _ready_cache
+    _ready_cache = None
+
+
 def is_output_ready(mac: str | None = None) -> bool:
-    """True when preferred/connected BT speaker has an audio sink."""
+    """True when preferred/connected BT speaker has an audio sink.
+
+    Polled every few seconds by the speaker gate, so it answers from sysfs
+    whenever the kernel shows no Bluetooth link at all, and trusts a positive
+    answer for ``_READY_CACHE_S`` while the set of links is unchanged.
+    """
+    global _ready_cache
     mac = _normalize_mac(mac or preferred_mac())
+    links = bluetooth_links()
+    if links is not None and not links:
+        _ready_cache = None
+        return False
+    now = time.monotonic()
+    cached = _ready_cache
+    if (
+        cached is not None
+        and links is not None
+        and cached[0] == mac
+        and cached[1] == links
+        and now - cached[2] < _READY_CACHE_S
+    ):
+        return True
     if not mac:
         # Any connected bluez sink counts for the speaker gate.
-        for sink in list_audio_sinks():
-            if _sink_is_bluetooth(sink):
-                return True
-        return False
-    if not is_connected(mac):
-        return False
-    return find_sink_for_mac(mac) is not None
+        ready = any(_sink_is_bluetooth(sink) for sink in list_audio_sinks())
+    elif not is_connected(mac):
+        ready = False
+    else:
+        ready = find_sink_for_mac(mac) is not None
+    if ready and links is not None:
+        _ready_cache = (mac, links, now)
+    else:
+        _ready_cache = None
+    return ready
 
 
 def connect(mac: str, *, pair_if_needed: bool = False) -> dict:
@@ -1216,6 +1286,15 @@ def maybe_reconnect_preferred() -> bool:
     return bool(result.get("connected") and result.get("output_ready"))
 
 
+def _usb_card_signature() -> tuple:
+    try:
+        from utilities.audio_output import list_playback_devices
+
+        return tuple(sorted(str(d.get("card")) for d in list_playback_devices(usb_only=True)))
+    except Exception:
+        return ()
+
+
 def _watch_loop() -> None:
     ensure_adapter_powered()
     if audio_route() == "bluetooth":
@@ -1225,8 +1304,21 @@ def _watch_loop() -> None:
             use_usb_output(disconnect_bluetooth=False)
         except Exception:
             logger.debug("USB audio ensure on watch start failed", exc_info=True)
-    while not _watch_stop.wait(_RECONNECT_POLL_S):
+    usb_sig: tuple | None = None
+    usb_at = 0.0
+    bt_ok_at = 0.0
+    reconnect_wait = _RECONNECT_POLL_S
+    links_seen = bluetooth_links()
+    while not _watch_stop.wait(reconnect_wait):
         if audio_route() == "usb":
+            reconnect_wait = _RECONNECT_POLL_S
+            # pactl only when a USB card appears/disappears or the hour-ish
+            # safety net expires; the sink list does not change on its own.
+            sig = _usb_card_signature()
+            now = time.monotonic()
+            if sig == usb_sig and now - usb_at < _ENSURE_MIN_S:
+                continue
+            usb_sig, usb_at = sig, now
             try:
                 sink = ensure_usb_pulse_sink()
                 if sink is not None:
@@ -1235,18 +1327,38 @@ def _watch_loop() -> None:
                 logger.debug("USB audio watch tick failed", exc_info=True)
             continue
         if audio_route() != "bluetooth":
+            reconnect_wait = _RECONNECT_POLL_S
             continue
         mac = preferred_mac()
         if not mac:
             continue
         try:
+            links = bluetooth_links()
+            now = time.monotonic()
+            if links != links_seen:
+                # The speaker (re)appeared or dropped on its own: look now.
+                links_seen = links
+                reconnect_wait = _RECONNECT_POLL_S
+                bt_ok_at = 0.0
+            elif links and bt_ok_at and now - bt_ok_at < _ENSURE_MIN_S:
+                # Connected on the last pass and the kernel still shows the
+                # same link: nothing to re-check or re-assert yet.
+                continue
             if is_connected(mac):
+                reconnect_wait = _RECONNECT_POLL_S
                 if find_sink_for_mac(mac) is not None:
                     # Keep default sink pointed at BT only while BT route is active.
                     set_as_default_sink(mac)
+                    bt_ok_at = now
+                else:
+                    bt_ok_at = 0.0
                 continue
-            logger.info("Bluetooth speaker %s offline — reconnecting", mac)
-            maybe_reconnect_preferred()
+            bt_ok_at = 0.0
+            logger.info("Bluetooth speaker %s offline, reconnecting", mac)
+            if maybe_reconnect_preferred():
+                reconnect_wait = _RECONNECT_POLL_S
+            else:
+                reconnect_wait = min(_RECONNECT_POLL_MAX_S, reconnect_wait * 2)
         except Exception:
             logger.debug("Bluetooth watch tick failed", exc_info=True)
 
