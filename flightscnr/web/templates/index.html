@@ -624,6 +624,49 @@
             <label for="quiet_dim_pct">Quiet-hours dim level <span id="quiet_dim_pct_label">20%</span></label>
             <input id="quiet_dim_pct" type="range" min="0" max="100" step="1" value="20" oninput="document.getElementById('quiet_dim_pct_label').textContent = this.value + '%'">
             <p class="hint">Caps the screen at this brightness while ATC quiet hours are active. Same as Settings &rarr; Quiet on the device, where the slider previews the dimness live.</p>
+            <div class="chk">
+                <label for="idle_dim_enabled" data-i18n="portal.display.idle_dim.label">Dim when idle</label>
+                <span class="switch"><input id="idle_dim_enabled" type="checkbox"><span class="track"></span></span>
+            </div>
+            <div class="row2">
+                <div>
+                    <label for="idle_dim_minutes" data-i18n="portal.display.idle_dim_after.label">Dim after</label>
+                    <select id="idle_dim_minutes">
+                        <option value="1" data-i18n="portal.display.idle.minutes.1">1 minute</option>
+                        <option value="2" data-i18n="portal.display.idle.minutes.2">2 minutes</option>
+                        <option value="5" selected data-i18n="portal.display.idle.minutes.5">5 minutes</option>
+                        <option value="10" data-i18n="portal.display.idle.minutes.10">10 minutes</option>
+                        <option value="15" data-i18n="portal.display.idle.minutes.15">15 minutes</option>
+                        <option value="30" data-i18n="portal.display.idle.minutes.30">30 minutes</option>
+                        <option value="60" data-i18n="portal.display.idle.minutes.60">60 minutes</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="idle_dim_pct" data-i18n="portal.display.idle_dim_level.label">Idle dim level</label>
+                    <select id="idle_dim_pct">
+                        <option value="5">5%</option>
+                        <option value="10">10%</option>
+                        <option value="20" selected>20%</option>
+                        <option value="30">30%</option>
+                        <option value="50">50%</option>
+                    </select>
+                </div>
+            </div>
+            <div class="chk">
+                <label for="idle_off_enabled" data-i18n="portal.display.idle_off.label">Turn the screen off when idle</label>
+                <span class="switch"><input id="idle_off_enabled" type="checkbox"><span class="track"></span></span>
+            </div>
+            <label for="idle_off_minutes" data-i18n="portal.display.idle_off_after.label">Screen off after</label>
+            <select id="idle_off_minutes">
+                        <option value="2" data-i18n="portal.display.idle.minutes.2">2 minutes</option>
+                        <option value="5" data-i18n="portal.display.idle.minutes.5">5 minutes</option>
+                        <option value="10" data-i18n="portal.display.idle.minutes.10">10 minutes</option>
+                        <option value="15" data-i18n="portal.display.idle.minutes.15">15 minutes</option>
+                        <option value="30" selected data-i18n="portal.display.idle.minutes.30">30 minutes</option>
+                        <option value="60" data-i18n="portal.display.idle.minutes.60">60 minutes</option>
+                        <option value="120" data-i18n="portal.display.idle.minutes.120">120 minutes</option>
+            </select>
+            <p class="hint" data-i18n="portal.display.idle.hint">Burn-in protection. Idle means no touch on the panel; each option has its own timer and a tap restores full brightness. The waking tap is not passed to the screen. Same as Settings &rarr; Display on the device.</p>
             <label for="display_rotation">Screen rotation</label>
             <select id="display_rotation">
                 <option value="0">0°</option>
@@ -1849,6 +1892,11 @@ async function loadAll() {
             $("quiet_dim_pct").value = String(d.quiet_dim_percent ?? 20);
             document.getElementById("quiet_dim_pct_label").textContent = ($("quiet_dim_pct").value) + "%";
         }
+        if ($("idle_dim_enabled")) $("idle_dim_enabled").checked = !!d.idle_dim_enabled;
+        if ($("idle_dim_minutes")) $("idle_dim_minutes").value = String(d.idle_dim_minutes ?? 5);
+        if ($("idle_dim_pct")) $("idle_dim_pct").value = String(d.idle_dim_percent ?? 20);
+        if ($("idle_off_enabled")) $("idle_off_enabled").checked = !!d.idle_off_enabled;
+        if ($("idle_off_minutes")) $("idle_off_minutes").value = String(d.idle_off_minutes ?? 30);
         if ($("display_rotation")) {
             const rot = [0, 90, 180, 270].includes(Number(d.display_rotation))
                 ? String(d.display_rotation)
@@ -2637,6 +2685,11 @@ async function saveAndReloadSettings(statusId) {
                 brightness_percent: Number($("bright_pct").value),
                 quiet_dim_enabled: $("quiet_dim_enabled") ? $("quiet_dim_enabled").checked : false,
                 quiet_dim_percent: $("quiet_dim_pct") ? Number($("quiet_dim_pct").value) : 20,
+                idle_dim_enabled: $("idle_dim_enabled") ? $("idle_dim_enabled").checked : false,
+                idle_dim_minutes: $("idle_dim_minutes") ? Number($("idle_dim_minutes").value) : 5,
+                idle_dim_percent: $("idle_dim_pct") ? Number($("idle_dim_pct").value) : 20,
+                idle_off_enabled: $("idle_off_enabled") ? $("idle_off_enabled").checked : false,
+                idle_off_minutes: $("idle_off_minutes") ? Number($("idle_off_minutes").value) : 30,
                 display_rotation: Number($("display_rotation") ? $("display_rotation").value : 90),
                 flight_detail_timeout_s: Number($("detail_timeout").value),
                 clock_timeout_s: Number($("clock_timeout").value),

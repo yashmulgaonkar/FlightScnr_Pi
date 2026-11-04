@@ -92,6 +92,11 @@ DISPLAY_ACTIONS = (
     "zoom_position",
     "rotate",
     "background_texture",
+    "idle_dim",
+    "idle_dim_after",
+    "idle_dim_level",
+    "idle_off",
+    "idle_off_after",
     "brightness",
 )
 # Radar clock HUD + hourly chime + enter-range / military / quake SFX.
@@ -250,6 +255,9 @@ LIST_PICKER_KINDS = frozenset(
         # Missing here meant the Display > Rim targets row opened a picker
         # with a title, a close button, and no choices in it.
         "rim_style",
+        "idle_dim_after",
+        "idle_dim_level",
+        "idle_off_after",
     }
 )
 # Maps picker id -> catalog key. Ids stay English; titles resolve at draw time.
@@ -281,6 +289,9 @@ _LIST_PICKER_TITLES = {
     "default_clock": "settings.picker.default_clock",
     "default_clock_off_hours": "settings.picker.default_clock_off_hours",
     "hud_dark": "settings.picker.hud_dark",
+    "idle_dim_after": "settings.picker.idle_dim_after",
+    "idle_dim_level": "settings.picker.idle_dim_level",
+    "idle_off_after": "settings.picker.idle_off_after",
 }
 _ATC_PICKER_TITLES = _LIST_PICKER_TITLES
 
@@ -649,6 +660,24 @@ def _build_settings_picker_items(kind: str) -> list[dict]:
             settings.RADAR_ZOOM_POSITIONS,
             settings.radar_zoom_position(),
             lambda pos: str(pos).title(),
+        )
+    if kind == "idle_dim_after":
+        return _enum_picker_items(
+            settings.IDLE_DIM_MINUTES,
+            settings.idle_dim_minutes(),
+            lambda minutes: tr("settings.idle.minutes", value=minutes),
+        )
+    if kind == "idle_off_after":
+        return _enum_picker_items(
+            settings.IDLE_OFF_MINUTES,
+            settings.idle_off_minutes(),
+            lambda minutes: tr("settings.idle.minutes", value=minutes),
+        )
+    if kind == "idle_dim_level":
+        return _enum_picker_items(
+            settings.IDLE_DIM_PERCENTS,
+            settings.idle_dim_percent(),
+            lambda pct: f"{pct}%",
         )
     if kind == "default_clock":
         return _enum_picker_items(
@@ -3076,6 +3105,11 @@ def _display_row_labels() -> list[str]:
         tr("settings.row.zoom_position", value=settings.radar_zoom_position().title()),
         tr("settings.row.rotate_screen", value=settings.display_rotation()),
         tr("settings.row.background_texture"),
+        tr("settings.row.idle_dim"),
+        tr("settings.row.idle_dim_after", value=settings.idle_dim_minutes()),
+        tr("settings.row.idle_dim_level", value=settings.idle_dim_percent()),
+        tr("settings.row.idle_off"),
+        tr("settings.row.idle_off_after", value=settings.idle_off_minutes()),
         "",  # brightness slider
     ]
 
@@ -3182,6 +3216,8 @@ _TOGGLE_ROW_STATE = {
     "quiet_always": settings.atc_play_during_quiet,
     "quiet_override": _quiet_override_switch,
     "quiet_dim": settings.quiet_dim_enabled,
+    "idle_dim": settings.idle_dim_enabled,
+    "idle_off": settings.idle_off_enabled,
 }
 
 
