@@ -1104,5 +1104,11 @@
   "portal.display.idle.minutes.15": "15 minutes",
   "portal.display.idle.minutes.30": "30 minutes",
   "portal.display.idle.minutes.60": "60 minutes",
-  "portal.display.idle.minutes.120": "120 minutes"
+  "portal.display.idle.minutes.120": "120 minutes",
+  "portal.display.pixel_shift.label": "Pixel shift",
+  "portal.display.pixel_shift_every.label": "Shift every",
+  "portal.display.pixel_shift.hint": "Burn-in protection. Nudges the whole picture by a pixel or two on a slow cycle so static elements do not sit on the same pixels for hours. Same as Settings → Display on the device.",
+  "settings.row.pixel_shift": "Pixel Shift",
+  "settings.row.pixel_shift_every": "Shift Every › {value} min",
+  "settings.picker.pixel_shift_every": "Shift every"
 }

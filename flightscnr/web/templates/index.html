@@ -666,6 +666,19 @@
                         <option value="60" data-i18n="portal.display.idle.minutes.60">60 minutes</option>
                         <option value="120" data-i18n="portal.display.idle.minutes.120">120 minutes</option>
             </select>
+            <div class="chk">
+                <label for="pixel_shift_enabled" data-i18n="portal.display.pixel_shift.label">Pixel shift</label>
+                <span class="switch"><input id="pixel_shift_enabled" type="checkbox"><span class="track"></span></span>
+            </div>
+            <label for="pixel_shift_minutes" data-i18n="portal.display.pixel_shift_every.label">Shift every</label>
+            <select id="pixel_shift_minutes">
+                        <option value="1" data-i18n="portal.display.idle.minutes.1">1 minute</option>
+                        <option value="2" data-i18n="portal.display.idle.minutes.2">2 minutes</option>
+                        <option value="5" selected data-i18n="portal.display.idle.minutes.5">5 minutes</option>
+                        <option value="10" data-i18n="portal.display.idle.minutes.10">10 minutes</option>
+                        <option value="15" data-i18n="portal.display.idle.minutes.15">15 minutes</option>
+            </select>
+            <p class="hint" data-i18n="portal.display.pixel_shift.hint">Burn-in protection. Nudges the whole picture by a pixel or two on a slow cycle so static elements do not sit on the same pixels for hours. Same as Settings &rarr; Display on the device.</p>
             <p class="hint" data-i18n="portal.display.idle.hint">Burn-in protection. Idle means no touch on the panel; each option has its own timer and a tap restores full brightness. The waking tap is not passed to the screen. Same as Settings &rarr; Display on the device.</p>
             <label for="display_rotation">Screen rotation</label>
             <select id="display_rotation">
@@ -1897,6 +1910,8 @@ async function loadAll() {
         if ($("idle_dim_pct")) $("idle_dim_pct").value = String(d.idle_dim_percent ?? 20);
         if ($("idle_off_enabled")) $("idle_off_enabled").checked = !!d.idle_off_enabled;
         if ($("idle_off_minutes")) $("idle_off_minutes").value = String(d.idle_off_minutes ?? 30);
+        if ($("pixel_shift_enabled")) $("pixel_shift_enabled").checked = !!d.pixel_shift_enabled;
+        if ($("pixel_shift_minutes")) $("pixel_shift_minutes").value = String(d.pixel_shift_minutes ?? 5);
         if ($("display_rotation")) {
             const rot = [0, 90, 180, 270].includes(Number(d.display_rotation))
                 ? String(d.display_rotation)
@@ -2690,6 +2705,8 @@ async function saveAndReloadSettings(statusId) {
                 idle_dim_percent: $("idle_dim_pct") ? Number($("idle_dim_pct").value) : 20,
                 idle_off_enabled: $("idle_off_enabled") ? $("idle_off_enabled").checked : false,
                 idle_off_minutes: $("idle_off_minutes") ? Number($("idle_off_minutes").value) : 30,
+                pixel_shift_enabled: $("pixel_shift_enabled") ? $("pixel_shift_enabled").checked : false,
+                pixel_shift_minutes: $("pixel_shift_minutes") ? Number($("pixel_shift_minutes").value) : 5,
                 display_rotation: Number($("display_rotation") ? $("display_rotation").value : 90),
                 flight_detail_timeout_s: Number($("detail_timeout").value),
                 clock_timeout_s: Number($("clock_timeout").value),

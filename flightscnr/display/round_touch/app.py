@@ -362,6 +362,10 @@ class RoundTouchDisplay:
         self._idle_dark = False
         self._idle_wake_swallow = False
         self._idle_wake_at = 0.0
+        # Pixel shift: index into rotation.pixel_shift_path and the time of
+        # the last step.
+        self._pixel_shift_step = 0
+        self._pixel_shift_at: float | None = None
         self._radar_hud_volume_drag = False
         self._radar_hud_layout_drag = False
         self._hud_opacity_slider_active = False
@@ -1799,14 +1803,10 @@ class RoundTouchDisplay:
         try:
             display = self._display
             rot = rotation.rotation_degrees()
-            if display.get_size() == base.get_size():
-                origin = (0, 0)
+            origin = rotation.origin_offset(display, base)
+            if origin == (0, 0) and display.get_size() == base.get_size():
                 display.blit(base, (0, 0))
             else:
-                origin = (
-                    (display.get_width() - base.get_width()) // 2,
-                    (display.get_height() - base.get_height()) // 2,
-                )
                 display.fill((0, 0, 0))
                 display.blit(base, origin)
             cx = origin[0] + base.get_width() * 0.5
@@ -2168,7 +2168,10 @@ class RoundTouchDisplay:
         elif action == "idle_off":
             settings.set_idle_off_enabled(not settings.idle_off_enabled())
             self._apply_brightness()
-        elif action in ("idle_dim_after", "idle_dim_level", "idle_off_after"):
+        elif action == "pixel_shift":
+            settings.set_pixel_shift_enabled(not settings.pixel_shift_enabled())
+            self._tick_pixel_shift()
+        elif action in ("idle_dim_after", "idle_dim_level", "idle_off_after", "pixel_shift_every"):
             self._open_atc_picker(action)
         elif action == "quiet_start":
             self._open_atc_picker("quiet_start")
@@ -2491,6 +2494,9 @@ class RoundTouchDisplay:
             return
         if kind == "idle_off_after":
             settings.set_idle_off_minutes(choice)
+            return
+        if kind == "pixel_shift_every":
+            settings.set_pixel_shift_minutes(choice)
             return
         if kind == "default_clock":
             settings.set_default_clock(choice)
@@ -3638,6 +3644,37 @@ class RoundTouchDisplay:
             self._idle_wake_swallow = False
             return False
         return True
+
+    # Pixel shift walks the picture around a square of this half-side, in
+    # theme reference units (theme.s: 2 px on the 720 panel, 3 px at 1080).
+    _PIXEL_SHIFT_RADIUS_BASE = 1
+
+    def _tick_pixel_shift(self) -> None:
+        """Burn-in protection: move the whole picture one pixel every N minutes.
+
+        The offset walks the perimeter of a small square so no static element
+        (HUD pill, range rings, attribution) sits on the same pixels for hours.
+        Each step is a single pixel; the full frame repaints once per step.
+        """
+        if not settings.pixel_shift_enabled():
+            if rotation.pixel_shift() != (0, 0):
+                self._pixel_shift_step = 0
+                rotation.set_pixel_shift(0, 0)
+                self._safe_draw()
+            return
+        now = time.time()
+        last = getattr(self, "_pixel_shift_at", None)
+        if last is None:
+            self._pixel_shift_at = now
+            return
+        if now - last < settings.pixel_shift_minutes() * 60:
+            return
+        self._pixel_shift_at = now
+        path = rotation.pixel_shift_path(theme.s(self._PIXEL_SHIFT_RADIUS_BASE))
+        step = (getattr(self, "_pixel_shift_step", 0) + 1) % len(path)
+        self._pixel_shift_step = step
+        if rotation.set_pixel_shift(*path[step]):
+            self._safe_draw()
 
     def _note_idle_touch(self) -> None:
         """A finger touched the panel: restart the idle timers, wake if dark."""
@@ -6125,6 +6162,9 @@ class RoundTouchDisplay:
     )
     _RELOAD_INERT_KEYS = frozenset(
         {
+            # Pixel shift reads its settings live on every tick.
+            "pixel_shift_enabled",
+            "pixel_shift_minutes",
             "safety_disclaimer_version",
             "auto_wifi_setup_hotspot",
             "low_ram_board_dismissed",
@@ -7277,6 +7317,7 @@ class RoundTouchDisplay:
                     self._tick_manual_weather_refresh()
                     self._tick_off_hours_clock()
                 self._apply_brightness()
+                self._tick_pixel_shift()
                 if not self._slider_drag_armed():
                     settings.flush_pending()
                 self._loop_stage("loop_misc", _lt)

@@ -459,6 +459,10 @@ _defaults = {
     "idle_dim_percent": 20,
     "idle_off_enabled": False,
     "idle_off_minutes": 30,
+    # Burn-in protection: walk the whole picture one pixel at a time around a
+    # small square, one step every N minutes.
+    "pixel_shift_enabled": False,
+    "pixel_shift_minutes": 5,
     # Targets page: per-category appearance ("" = today's default look).
     "tgt_plane_color": "",
     "tgt_heli_color": "",
@@ -769,6 +773,8 @@ _ATC_PRESERVE_KEYS = (
     "idle_dim_percent",
     "idle_off_enabled",
     "idle_off_minutes",
+    "pixel_shift_enabled",
+    "pixel_shift_minutes",
     "atc_want_playing",
     "atc_quiet_override",
     "atc_quiet_override_until",
@@ -1391,6 +1397,8 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("idle_dim_percent"),
         bool(state.get("idle_off_enabled", False)),
         state.get("idle_off_minutes"),
+        bool(state.get("pixel_shift_enabled", False)),
+        state.get("pixel_shift_minutes"),
         state.get("show_precipitation"),
         state.get("show_wildfires"),
         state.get("show_earthquakes"),
@@ -1843,6 +1851,7 @@ def quiet_dim_percent() -> int:
 IDLE_DIM_MINUTES = (1, 2, 5, 10, 15, 30, 60)
 IDLE_OFF_MINUTES = (2, 5, 10, 15, 30, 60, 120)
 IDLE_DIM_PERCENTS = (5, 10, 20, 30, 50)
+PIXEL_SHIFT_MINUTES = (1, 2, 5, 10, 15)
 
 
 def _snap_choice(value, choices: tuple, default) -> int:
@@ -1898,6 +1907,24 @@ def idle_off_minutes() -> int:
 def set_idle_off_minutes(value) -> int:
     minutes = _snap_choice(value, IDLE_OFF_MINUTES, 30)
     _rmw_save({"idle_off_minutes": minutes})
+    return minutes
+
+
+def pixel_shift_enabled() -> bool:
+    return bool(_state.get("pixel_shift_enabled", False))
+
+
+def set_pixel_shift_enabled(enabled: bool) -> None:
+    _rmw_save({"pixel_shift_enabled": bool(enabled)})
+
+
+def pixel_shift_minutes() -> int:
+    return _snap_choice(_state.get("pixel_shift_minutes", 5), PIXEL_SHIFT_MINUTES, 5)
+
+
+def set_pixel_shift_minutes(value) -> int:
+    minutes = _snap_choice(value, PIXEL_SHIFT_MINUTES, 5)
+    _rmw_save({"pixel_shift_minutes": minutes})
     return minutes
 
 

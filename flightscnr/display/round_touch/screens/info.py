@@ -97,6 +97,8 @@ DISPLAY_ACTIONS = (
     "idle_dim_level",
     "idle_off",
     "idle_off_after",
+    "pixel_shift",
+    "pixel_shift_every",
     "brightness",
 )
 # Radar clock HUD + hourly chime + enter-range / military / quake SFX.
@@ -258,6 +260,7 @@ LIST_PICKER_KINDS = frozenset(
         "idle_dim_after",
         "idle_dim_level",
         "idle_off_after",
+        "pixel_shift_every",
     }
 )
 # Maps picker id -> catalog key. Ids stay English; titles resolve at draw time.
@@ -292,6 +295,7 @@ _LIST_PICKER_TITLES = {
     "idle_dim_after": "settings.picker.idle_dim_after",
     "idle_dim_level": "settings.picker.idle_dim_level",
     "idle_off_after": "settings.picker.idle_off_after",
+    "pixel_shift_every": "settings.picker.pixel_shift_every",
 }
 _ATC_PICKER_TITLES = _LIST_PICKER_TITLES
 
@@ -678,6 +682,12 @@ def _build_settings_picker_items(kind: str) -> list[dict]:
             settings.IDLE_DIM_PERCENTS,
             settings.idle_dim_percent(),
             lambda pct: f"{pct}%",
+        )
+    if kind == "pixel_shift_every":
+        return _enum_picker_items(
+            settings.PIXEL_SHIFT_MINUTES,
+            settings.pixel_shift_minutes(),
+            lambda minutes: tr("settings.idle.minutes", value=minutes),
         )
     if kind == "default_clock":
         return _enum_picker_items(
@@ -3110,6 +3120,8 @@ def _display_row_labels() -> list[str]:
         tr("settings.row.idle_dim_level", value=settings.idle_dim_percent()),
         tr("settings.row.idle_off"),
         tr("settings.row.idle_off_after", value=settings.idle_off_minutes()),
+        tr("settings.row.pixel_shift"),
+        tr("settings.row.pixel_shift_every", value=settings.pixel_shift_minutes()),
         "",  # brightness slider
     ]
 
@@ -3218,6 +3230,7 @@ _TOGGLE_ROW_STATE = {
     "quiet_dim": settings.quiet_dim_enabled,
     "idle_dim": settings.idle_dim_enabled,
     "idle_off": settings.idle_off_enabled,
+    "pixel_shift": settings.pixel_shift_enabled,
 }
 
 
