@@ -1105,10 +1105,10 @@
   "portal.display.idle.minutes.30": "30 minuten",
   "portal.display.idle.minutes.60": "60 minuten",
   "portal.display.idle.minutes.120": "120 minuten",
-  "portal.display.pixel_shift.label": "Pixelverschuiving",
+  "portal.display.pixel_shift.label": "Bescherming tegen inbranden",
   "portal.display.pixel_shift_every.label": "Verschuiven elke",
-  "portal.display.pixel_shift.hint": "Bescherming tegen inbranden. Verschuift het hele beeld een of twee pixels in een langzame cyclus zodat vaste elementen niet urenlang op dezelfde pixels staan. Hetzelfde als Instellingen → Weergave op het apparaat.",
-  "settings.row.pixel_shift": "Pixelverschuiving",
+  "portal.display.pixel_shift.hint": "Pixelverschuiving: verschuift het hele beeld een of twee pixels in een langzame cyclus zodat vaste elementen niet urenlang op dezelfde pixels staan. Hetzelfde als Instellingen → Weergave op het apparaat.",
+  "settings.row.pixel_shift": "Bescherming tegen inbranden",
   "settings.row.pixel_shift_every": "Verschuiven elke › {value} min",
   "settings.picker.pixel_shift_every": "Verschuiven elke"
 }

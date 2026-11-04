@@ -1105,10 +1105,10 @@
   "portal.display.idle.minutes.30": "30 perc",
   "portal.display.idle.minutes.60": "60 perc",
   "portal.display.idle.minutes.120": "120 perc",
-  "portal.display.pixel_shift.label": "Pixeleltolás",
+  "portal.display.pixel_shift.label": "Beégés elleni védelem",
   "portal.display.pixel_shift_every.label": "Eltolás gyakorisága",
-  "portal.display.pixel_shift.hint": "Beégés elleni védelem. A teljes képet egy-két pixellel lassú ciklusban eltolja, hogy a statikus elemek ne álljanak órákig ugyanazokon a pixeleken. Ugyanaz, mint a Beállítások → Kijelző az eszközön.",
-  "settings.row.pixel_shift": "Pixeleltolás",
+  "portal.display.pixel_shift.hint": "Pixeleltolás: a teljes képet egy-két pixellel lassú ciklusban eltolja, hogy a statikus elemek ne álljanak órákig ugyanazokon a pixeleken. Ugyanaz, mint a Beállítások → Kijelző az eszközön.",
+  "settings.row.pixel_shift": "Beégés elleni védelem",
   "settings.row.pixel_shift_every": "Eltolás › {value} perc",
   "settings.picker.pixel_shift_every": "Eltolás gyakorisága"
 }

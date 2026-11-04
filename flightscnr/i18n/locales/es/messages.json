@@ -1105,10 +1105,10 @@
   "portal.display.idle.minutes.30": "30 minutos",
   "portal.display.idle.minutes.60": "60 minutos",
   "portal.display.idle.minutes.120": "120 minutos",
-  "portal.display.pixel_shift.label": "Desplazamiento de píxeles",
+  "portal.display.pixel_shift.label": "Protección contra el marcado",
   "portal.display.pixel_shift_every.label": "Desplazar cada",
-  "portal.display.pixel_shift.hint": "Protección contra el marcado de pantalla. Mueve toda la imagen uno o dos píxeles en un ciclo lento para que los elementos fijos no ocupen los mismos píxeles durante horas. Igual que Ajustes → Pantalla en el dispositivo.",
-  "settings.row.pixel_shift": "Desplazamiento de píxeles",
+  "portal.display.pixel_shift.hint": "Desplazamiento de píxeles: mueve toda la imagen uno o dos píxeles en un ciclo lento para que los elementos fijos no ocupen los mismos píxeles durante horas. Igual que Ajustes → Pantalla en el dispositivo.",
+  "settings.row.pixel_shift": "Protección contra el marcado",
   "settings.row.pixel_shift_every": "Desplazar cada › {value} min",
   "settings.picker.pixel_shift_every": "Desplazar cada"
 }
