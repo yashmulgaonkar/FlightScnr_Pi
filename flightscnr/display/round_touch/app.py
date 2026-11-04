@@ -35,6 +35,7 @@ from display.round_touch import (
     follow_overlays,
     frame_debug,
     flap_sound,
+    mem_debug,
     ghost_touch_filter,
     gesture_handler,
     hourly_chime,
@@ -6718,6 +6719,13 @@ class RoundTouchDisplay:
             except (OSError, ValueError):
                 # Not the main thread, or the platform lacks this signal.
                 logger.warning("Could not install a handler for %s", sig)
+        # kill -USR1 <pid> logs a one-shot memory report on the next tick.
+        usr1 = getattr(signal, "SIGUSR1", None)
+        if usr1 is not None:
+            try:
+                signal.signal(usr1, lambda _s, _f: mem_debug.request())
+            except (OSError, ValueError):
+                logger.warning("Could not install a handler for SIGUSR1")
 
     def run(self):
         import gc
@@ -7318,6 +7326,7 @@ class RoundTouchDisplay:
                     self._tick_off_hours_clock()
                 self._apply_brightness()
                 self._tick_pixel_shift()
+                mem_debug.maybe_report(self)
                 if not self._slider_drag_armed():
                     settings.flush_pending()
                 self._loop_stage("loop_misc", _lt)
