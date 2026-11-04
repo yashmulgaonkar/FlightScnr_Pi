@@ -1478,12 +1478,17 @@ def _settings_snapshot(state: dict) -> tuple:
     )
 
 
-def request_reload() -> None:
-    """Ask the display process to re-apply settings from disk (cross-process)."""
+def request_reload(scope: str = "all") -> None:
+    """Ask the display process to re-apply settings from disk (cross-process).
+
+    ``scope`` is a hint for the display: ``"audio"`` means only audio state
+    (ATC, speaker, volumes) may have changed, so it can skip the map, radar
+    layer and weather work that a full re-apply does. Anything else means all.
+    """
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
         with open(RELOAD_REQUEST_PATH, "w", encoding="utf-8") as fh:
-            fh.write("1\n")
+            fh.write(f"{scope if scope in _RELOAD_SCOPES else 'all'}\n")
         try:
             os.chmod(RELOAD_REQUEST_PATH, 0o666)
         except OSError:
@@ -1495,14 +1500,31 @@ def request_reload() -> None:
         logger.warning("Could not request settings reload: %s", exc)
 
 
+_RELOAD_SCOPES = ("all", "audio")
+_last_reload_scope = "all"
+
+
 def _consume_reload_request() -> bool:
+    """Consume a pending reload request; remembers its scope hint."""
+    global _last_reload_scope
     if not os.path.isfile(RELOAD_REQUEST_PATH):
         return False
+    try:
+        with open(RELOAD_REQUEST_PATH, encoding="utf-8") as fh:
+            scope = fh.read().strip().lower()
+    except OSError:
+        scope = ""
     try:
         os.unlink(RELOAD_REQUEST_PATH)
     except OSError:
         return False
+    _last_reload_scope = scope if scope in _RELOAD_SCOPES else "all"
     return True
+
+
+def reload_scope() -> str:
+    """Scope hint of the most recent consumed reload request ('all' or 'audio')."""
+    return _last_reload_scope
 
 
 def sync_from_disk() -> bool:
@@ -1541,7 +1563,10 @@ def sync_from_disk() -> bool:
 def reload() -> bool:
     """Reload settings from disk if file changed externally."""
     global _state, _settings_mtime, _disk_synced, _last_reload_changed_keys, _runtime_min_height_ft
+    global _last_reload_scope
     force = _consume_reload_request()
+    if not force:
+        _last_reload_scope = "all"
     # Do not clobber in-memory slider edits (brightness / VFR opacity / theme RGB)
     # that have not been flushed to disk yet — otherwise values flicker every poll.
     if not force and not _disk_synced:

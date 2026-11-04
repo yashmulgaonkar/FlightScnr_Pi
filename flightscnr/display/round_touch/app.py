@@ -5992,6 +5992,81 @@ class RoundTouchDisplay:
             self._open_screen(want)
             self._safe_draw()
 
+    # Settings keys whose change never affects the map, the radar layer or the
+    # weather payload. A portal audio action (connect a speaker, start ATC)
+    # rewrites several of these at once; before this grouping that took the
+    # generic path below, which drops every map surface and fetches weather
+    # synchronously, and stalled the sweep for about 1.5 s on a Pi 4.
+    _RELOAD_AUDIO_PREFIXES = (
+        "atc_",
+        "bluetooth_",
+        "audio_",
+        "lofi_",
+        "hourly_chime_",
+        "alarm_",
+        "traffic_sfx_",
+        "military_sfx_",
+        "iss_sfx_",
+        "earthquake_voice_",
+        "master_sound_",
+        "flip_board_sound",
+    )
+    _RELOAD_BRIGHTNESS_KEYS = frozenset(
+        {
+            "brightness_percent",
+            "quiet_dim_enabled",
+            "quiet_dim_percent",
+            "quiet_dim_restore",
+            "quiet_dim_migrated",
+        }
+    )
+    _RELOAD_INERT_KEYS = frozenset(
+        {
+            "safety_disclaimer_version",
+            "auto_wifi_setup_hotspot",
+            "low_ram_board_dismissed",
+            "alarm_dismissed_key",
+            "alarm_snooze_until",
+        }
+    )
+
+    @classmethod
+    def _reload_is_light(cls, changed: frozenset) -> bool:
+        """True when every changed key is audio, brightness or inert."""
+        if not changed:
+            return False
+        for key in changed:
+            if key in cls._RELOAD_BRIGHTNESS_KEYS or key in cls._RELOAD_INERT_KEYS:
+                continue
+            if key.startswith(cls._RELOAD_AUDIO_PREFIXES):
+                continue
+            return False
+        return True
+
+    def _refresh_weather_async(self) -> None:
+        """Re-read weather units and refresh the payload off the main thread.
+
+        ``weather_data.refresh(force=True)`` performs the provider HTTP calls
+        inline (about a second on a Pi), so it must never run on the sweep
+        thread. The HUD overlay is rebuilt once the payload is back.
+        """
+
+        def _worker() -> None:
+            try:
+                import weather_prefs
+                from display.round_touch import weather_data
+
+                weather_prefs.reload()
+                # Keep the provider cache; temperatures convert on read.
+                weather_data.invalidate_cache()
+                weather_data.refresh(force=True)
+                radar_hud.rebuild_overlay()
+                self._weather_redraw_pending = True
+            except Exception:
+                logger.debug("Weather refresh after settings reload failed", exc_info=True)
+
+        Thread(target=_worker, name="settings-weather-refresh", daemon=True).start()
+
     def _apply_reloaded_settings(self):
         """Apply settings written by another process (e.g. web portal)."""
         changed = settings.reload_changed_keys()
@@ -6003,6 +6078,27 @@ class RoundTouchDisplay:
             radar.invalidate_frame_layer()
             self._weather_redraw_pending = True
             self._safe_draw()
+            return
+        audio_hint = not changed and settings.reload_scope() == "audio"
+        if audio_hint or self._reload_is_light(changed):
+            # Audio / brightness only (or a portal audio action that changed no
+            # value, e.g. reconnecting the same speaker): no map, layer or
+            # weather work.
+            if audio_hint:
+                changed = frozenset({"atc_want_playing"})
+            if changed & self._RELOAD_BRIGHTNESS_KEYS:
+                self._apply_brightness()
+            if any(key.startswith(self._RELOAD_AUDIO_PREFIXES) for key in changed):
+                try:
+                    from utilities import atc_audio
+
+                    atc_audio.reconcile_enabled_state()
+                except Exception:
+                    logger.debug("ATC reconcile after settings reload failed", exc_info=True)
+                # The HUD shows ATC / LoFi state; its signature picks up the
+                # new values on the next rebuild without touching the layer.
+                radar_hud.rebuild_overlay()
+                self._atc_power_redraw = True
             return
         scale.select(settings.scale_index())
         map_bg.invalidate()
@@ -6022,20 +6118,10 @@ class RoundTouchDisplay:
             self._last_quake_poll = 0.0
         except Exception:
             logger.debug("AIS sync after settings reload failed", exc_info=True)
-        # Weather units live in weather_prefs.json (portal Weather card) — refresh
-        # so the radar HUD / clock pick up °F↔°C without a service restart.
-        try:
-            import weather_prefs
-            from display.round_touch import weather_data
-
-            weather_prefs.reload()
-            # Keep Tomorrow.io cache; temperatures convert on read. Rebuild payload.
-            weather_data.invalidate_cache()
-            weather_data.refresh(force=True)
-            radar_hud.rebuild_overlay()
-            self._weather_redraw_pending = True
-        except Exception:
-            logger.debug("Weather refresh after settings reload failed", exc_info=True)
+        # Weather units live in weather_prefs.json (portal Weather card): refresh
+        # so the radar HUD / clock pick up F/C without a service restart. The
+        # fetch runs on a worker; the sweep must not wait on the provider.
+        self._refresh_weather_async()
         # Portal Disable/Stop updates JSON in the web process; stop display-owned
         # mpv here so audio cannot keep playing after ATC is turned off.
         try:
