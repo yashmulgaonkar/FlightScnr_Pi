@@ -2067,7 +2067,7 @@ def atc_quiet_override():
 
     data = request.get_json(silent=True) or {}
     result = atc_audio.set_quiet_override(bool(data.get("enabled")))
-    settings.request_reload()
+    settings.request_reload(scope="audio")
     return jsonify(result)
 
 
@@ -2108,11 +2108,11 @@ def atc_save():
     # Legacy Play/Stop map onto the single enable switch.
     if action == "play":
         result = atc_audio.apply_enabled(True)
-        settings.request_reload()
+        settings.request_reload(scope="audio")
         return jsonify(result)
     if action == "stop":
         result = atc_audio.apply_enabled(False)
-        settings.request_reload()
+        settings.request_reload(scope="audio")
         return jsonify(result)
 
     # Retune when the requested selection differs from what is actually playing
@@ -2134,9 +2134,9 @@ def atc_save():
     )
     if need_retune:
         result = atc_audio.retune_if_playing()
-        settings.request_reload()
+        settings.request_reload(scope="audio")
         return jsonify(result)
-    settings.request_reload()
+    settings.request_reload(scope="audio")
     return jsonify(atc_audio.status())
 
 
@@ -2175,7 +2175,7 @@ def bluetooth_connect():
         pair = pair.strip().lower() not in ("0", "false", "no")
     result = bluetooth_audio.connect(mac, pair_if_needed=bool(pair))
     bluetooth_audio.ensure_reconnect_watch()
-    settings.request_reload()
+    settings.request_reload(scope="audio")
     return jsonify(result)
 
 
@@ -2187,7 +2187,7 @@ def bluetooth_disconnect():
     data = request.get_json(silent=True) or {}
     mac = str(data.get("mac") or "").strip() or None
     result = bluetooth_audio.disconnect(mac)
-    settings.request_reload()
+    settings.request_reload(scope="audio")
     return jsonify(result)
 
 
@@ -2199,7 +2199,7 @@ def bluetooth_forget():
     data = request.get_json(silent=True) or {}
     mac = str(data.get("mac") or "").strip() or None
     result = bluetooth_audio.forget(mac)
-    settings.request_reload()
+    settings.request_reload(scope="audio")
     return jsonify(result)
 
 
@@ -2211,7 +2211,7 @@ def bluetooth_use():
 
     result = bluetooth_audio.use_preferred()
     bluetooth_audio.ensure_reconnect_watch()
-    settings.request_reload()
+    settings.request_reload(scope="audio")
     return jsonify(result)
 
 
@@ -2226,7 +2226,7 @@ def bluetooth_route():
     result = bluetooth_audio.apply_audio_route(route)
     if route == "bluetooth":
         bluetooth_audio.ensure_reconnect_watch()
-    settings.request_reload()
+    settings.request_reload(scope="audio")
     return jsonify(result)
 
 
