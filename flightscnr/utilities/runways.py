@@ -23,9 +23,12 @@ import csv
 import json
 import logging
 import os
+from array import array
 from io import StringIO
 
 import requests
+
+from utilities import compact_store
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +42,122 @@ CACHE_VERSION = 2  # v2: persist runway surface for paved-only filtering
 
 _db: dict[str, list[dict]] = {}
 _loaded = False
+
+_NO_LENGTH = -(2**31)
+
+
+class RunwayStore:
+    """Packed ``airport ident -> runway segments``: segment columns grouped
+    per airport, airports in a sorted index, segment dicts built on access.
+    ``get(ident)`` returns the list of segment dicts like the plain dict did."""
+
+    _FIELDS = ("le_lat", "le_lon", "he_lat", "he_lon")
+
+    def __init__(self):
+        self._coords = tuple(array("d") for _ in self._FIELDS)
+        self._length = array("i")
+        self._surface = array("H")
+        self._surfaces = compact_store.Enum()
+        self._le_ident = compact_store.TextBlob()
+        self._he_ident = compact_store.TextBlob()
+        self._airports = compact_store.PackedIndex(8)
+        self._seg_start = array("I", [0])
+        self._n_airports = 0
+        self._skipped = 0
+
+    def add(self, ident: str, segments) -> None:
+        ident = str(ident or "").strip().upper()
+        if not ident or not isinstance(segments, list):
+            return
+        if not self._airports.add(ident, self._n_airports):
+            self._skipped += 1
+            return
+        for seg in segments:
+            if not isinstance(seg, dict):
+                continue
+            try:
+                vals = [float(seg[k]) for k in self._FIELDS]
+            except (KeyError, TypeError, ValueError):
+                continue
+            for col, v in zip(self._coords, vals):
+                col.append(v)
+            length = seg.get("length_ft")
+            try:
+                self._length.append(int(length) if length is not None else _NO_LENGTH)
+            except (TypeError, ValueError):
+                self._length.append(_NO_LENGTH)
+            self._surface.append(self._surfaces.code(str(seg.get("surface") or "")))
+            self._le_ident.add(str(seg.get("le_ident") or ""))
+            self._he_ident.add(str(seg.get("he_ident") or ""))
+        self._seg_start.append(len(self._length))
+        self._n_airports += 1
+
+    def build(self) -> "RunwayStore":
+        self._airports.build()
+        self._le_ident.build()
+        self._he_ident.build()
+        if self._skipped:
+            logger.info("[Runways] %d airport idents did not fit the packed index", self._skipped)
+        return self
+
+    @classmethod
+    def from_items(cls, items) -> "RunwayStore":
+        store = cls()
+        for ident, segments in items:
+            store.add(ident, segments)
+        return store.build()
+
+    def __len__(self) -> int:
+        return self._n_airports
+
+    def __bool__(self) -> bool:
+        return self._n_airports > 0
+
+    def __contains__(self, ident: object) -> bool:
+        return isinstance(ident, str) and ident in self._airports
+
+    def _range(self, ident: str) -> tuple[int, int]:
+        a = self._airports.get(ident, -1)
+        if a < 0:
+            return 0, 0
+        return self._seg_start[a], self._seg_start[a + 1]
+
+    def segment(self, i: int) -> dict:
+        seg = {k: col[i] for k, col in zip(self._FIELDS, self._coords)}
+        seg["le_ident"] = self._le_ident.get(i)
+        seg["he_ident"] = self._he_ident.get(i)
+        seg["surface"] = self._surfaces.values[self._surface[i]]
+        length = self._length[i]
+        if length != _NO_LENGTH:
+            seg["length_ft"] = length
+        return seg
+
+    def get(self, ident, default=None):
+        if not isinstance(ident, str):
+            return default
+        lo, hi = self._range(ident)
+        if lo == hi and ident not in self._airports:
+            return default
+        return [self.segment(i) for i in range(lo, hi)]
+
+    def __getitem__(self, ident: str) -> list[dict]:
+        segs = self.get(ident)
+        if segs is None:
+            raise KeyError(ident)
+        return segs
+
+    def surfaces(self, ident: str):
+        """Surface strings of an airport's segments, without building dicts."""
+        lo, hi = self._range(ident)
+        for i in range(lo, hi):
+            yield self._surfaces.values[self._surface[i]]
+
+    def keys(self):
+        return self._airports.keys()
+
+    def items(self):
+        for ident in self._airports.keys():
+            yield ident, self.get(ident)
 
 
 def _as_float(value) -> float | None:
@@ -182,9 +301,20 @@ def _load() -> None:
     if os.path.exists(CACHE_FILE):
         try:
             with open(CACHE_FILE, encoding="utf-8") as fh:
-                raw = json.load(fh)
+                text = fh.read()
+            try:
+                meta, items = compact_store.split_cache(text, "runways")
+            except (compact_store.CacheFormatError, ValueError):
+                meta, items = {}, iter(())
+            if meta.get("_version") == CACHE_VERSION:
+                _db = RunwayStore.from_items(items)
+                del text
+                _loaded = True
+                return
+            raw = json.loads(text)
+            del text
             if isinstance(raw, dict) and raw.get("_version") == CACHE_VERSION:
-                _db = raw.get("runways") or {}
+                _db = RunwayStore.from_items((raw.get("runways") or {}).items())
                 _loaded = True
                 return
             version_found = raw.get("_version", "none") if isinstance(raw, dict) else "legacy"
@@ -196,10 +326,11 @@ def _load() -> None:
                 stale = raw["runways"]
         except Exception as exc:
             print(f"[Runways] Cache load failed: {exc} - rebuilding")
-    _db = _build_db()
-    if not _db and stale:
+    built = _build_db()
+    if not built and stale:
         print("[Runways] Using previous cache (degraded)")
-        _db = stale
+        built = stale
+    _db = RunwayStore.from_items(built.items()) if isinstance(built, dict) else built
     _loaded = True
 
 
@@ -221,7 +352,10 @@ def has_paved_runway(airport_ident: str) -> bool:
     False — in paved-only mode that errs toward hiding marginal strips.
     """
     _load()
-    for seg in _db.get((airport_ident or "").strip().upper(), []):
+    ident = (airport_ident or "").strip().upper()
+    if isinstance(_db, RunwayStore):
+        return any(is_paved_surface(surface) for surface in _db.surfaces(ident))
+    for seg in _db.get(ident, []):
         if is_paved_surface(seg.get("surface")):
             return True
     return False

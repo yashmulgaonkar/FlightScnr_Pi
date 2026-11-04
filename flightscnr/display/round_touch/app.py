@@ -124,6 +124,26 @@ SECONDARY_TIMEOUT_S = 45
 # FLIGHTSCNR_FRAME_DEBUG=1 logs draw cost and achieved frame interval every 2s.
 # The sweep turns 60°/s, so anything past ~20ms/frame shows as a stepping beam.
 FRAME_DEBUG = os.environ.get("FLIGHTSCNR_FRAME_DEBUG", "").lower() in ("1", "true", "yes")
+
+
+def _preload_local_databases() -> None:
+    """Build the packed airports, cities, runways and FAA stores off the UI thread.
+
+    They are loaded on first use otherwise, and the first user can be a draw
+    on the main thread (route labels, the ATC airport picker); on a Pi 4B the
+    airports build takes about 3 s.
+    """
+
+    def _work():
+        from utilities import airports, cities, faa_airports, runways
+
+        for mod in (airports, cities, runways, faa_airports):
+            try:
+                mod._load()
+            except Exception:
+                logger.debug("preload of %s failed", mod.__name__, exc_info=True)
+
+    Thread(target=_work, daemon=True, name="db-preload").start()
 # Always-on hitch probe (no journald): one line per visible sweep stall.
 _HITCH_LOG = os.environ.get("FLIGHTSCNR_HITCH_LOG", "/tmp/flightscnr-hitch.log")
 _HITCH_GAP_S = float(os.environ.get("FLIGHTSCNR_HITCH_GAP_MS", "48")) / 1000.0
@@ -6740,6 +6760,7 @@ class RoundTouchDisplay:
         gc.collect()
         gc.freeze()
         self._install_signal_handlers()
+        _preload_local_databases()
 
         logger.info(
             "Round touch display starting (%dx%d framebuffer, rotation=%d°, visible radius=%d)",
