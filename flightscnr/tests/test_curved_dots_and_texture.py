@@ -99,15 +99,24 @@ class TestDetailScreenDots:
         assert abs(gap_px - theme.s(14)) <= 1.5
 
 
-class TestClockCurvedBreadcrumb:
-    def test_clock_screen_uses_curved_band(self):
-        from display.round_touch.app import RoundTouchDisplay, SCREEN_CLOCK
+class TestCurvedChromeBreadcrumb:
+    def test_curved_chrome_screens_use_the_rim_band(self):
+        from display.round_touch.app import RoundTouchDisplay, SCREEN_FORECAST, SCREEN_SETTINGS
 
-        fake = type("F", (), {})()
-        fake.screen = SCREEN_CLOCK
         x = theme.CENTER_X
         y = theme.CENTER_Y - int(theme.VISIBLE_RADIUS * 0.90)
-        assert RoundTouchDisplay._breadcrumb_tapped(fake, x, y)
+        for screen in (SCREEN_FORECAST, SCREEN_SETTINGS):
+            fake = type("F", (), {})()
+            fake.screen = screen
+            assert RoundTouchDisplay._breadcrumb_tapped(fake, x, y), screen
+
+    def test_flip_board_never_treats_the_rim_as_breadcrumb(self):
+        from display.round_touch.app import RoundTouchDisplay, SCREEN_FLIP_BOARD
+
+        fake = type("F", (), {})()
+        fake.screen = SCREEN_FLIP_BOARD
+        y = theme.CENTER_Y - int(theme.VISIBLE_RADIUS * 0.90)
+        assert not RoundTouchDisplay._breadcrumb_tapped(fake, theme.CENTER_X, y)
 
 
 class TestTopoBackground:

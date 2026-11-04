@@ -217,10 +217,13 @@ class TestSettingsFooterDispatch:
             kind: mid for kind, mid, _half in
             nav.curved_footer_segments(list(details.FOOTER_BUTTONS))
         }
-        x, y = _polar(r, segs["radar"])
-        assert details.tap_footer_action(x, y) == "radar"
+        # The details footer only carries "next"; the curved breadcrumb is the
+        # way back to the radar on that screen.
+        assert set(segs) == set(details.FOOTER_BUTTONS) == {"next"}
         x, y = _polar(r, segs["next"])
         assert details.tap_footer_action(x, y) == "next"
+        x, y = _polar(r, math.pi / 2)
+        assert details.tap_footer_action(x, y) is None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

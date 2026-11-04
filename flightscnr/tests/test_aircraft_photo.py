@@ -100,6 +100,8 @@ class TestAircraftPhoto(unittest.TestCase):
                 aircraft_type="EC45",
                 registration="12-72233",
                 force=False,
+                allow_type_fallback=True,
+                airline_name="",
             )
 
     def test_credit_line_planespotters(self):

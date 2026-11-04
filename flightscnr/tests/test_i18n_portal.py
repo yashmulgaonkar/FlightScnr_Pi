@@ -76,6 +76,7 @@ def test_catalog_preview_uses_shared_validated_catalog_without_saving(portal):
         "de",
         "fr",
         "es",
+        "hu",
     }
     assert body["date_previews"]["eu"]
     assert settings.display_language() == "en"

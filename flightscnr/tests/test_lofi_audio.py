@@ -31,6 +31,14 @@ from display.round_touch import settings
 from utilities import lofi_audio
 
 
+@pytest.fixture(autouse=True)
+def _atc_power_on(monkeypatch):
+    """set_lofi_enabled refuses to arm while ATC power is off; these tests
+    exercise the LoFi bed itself, so treat ATC as powered."""
+    monkeypatch.setattr(settings, "atc_enabled", lambda: True)
+    yield
+
+
 class FakePlayer:
     def __init__(self, duration=120.0):
         self.path = None

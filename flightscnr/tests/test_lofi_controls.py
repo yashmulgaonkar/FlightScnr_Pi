@@ -43,6 +43,8 @@ def _reset(monkeypatch):
     from utilities import lofi_audio
 
     monkeypatch.setattr(lofi_audio, "has_tracks", lambda ttl=5.0: True)
+    # set_lofi_enabled refuses to arm while ATC power is off.
+    monkeypatch.setattr(settings, "atc_enabled", lambda: True)
     settings.set_lofi_enabled(True)
     settings.set_lofi_controls_enabled(True)
     settings.set_lofi_title_scroll(True)

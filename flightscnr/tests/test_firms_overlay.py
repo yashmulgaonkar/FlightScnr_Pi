@@ -110,9 +110,16 @@ class TestFirmsOverlay(unittest.TestCase):
         self.assertIn(firms_overlay.SOURCE, url)
 
     def test_basemap_screen_matches_home(self):
-        from display.round_touch import map_bg, theme
+        from display.round_touch import map_bg, settings, theme
 
-        pos = map_bg.lat_lon_to_basemap_screen(37.4757, -122.2062)
+        # Pin the projection inputs: other suites move the home location, leave
+        # a per-frame projection batch behind, or rotate the dial.
+        with mock.patch.object(map_bg, "_proj_batch", None), mock.patch.object(
+            settings, "effective_facing_deg", return_value=0.0
+        ):
+            pos = map_bg.lat_lon_to_basemap_screen(
+                37.4757, -122.2062, center_lat=37.4757, center_lon=-122.2062
+            )
         self.assertIsNotNone(pos)
         self.assertEqual(pos, (theme.CENTER_X, theme.CENTER_Y))
 

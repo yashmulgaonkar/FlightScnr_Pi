@@ -264,13 +264,17 @@ class SettingsPickerUxTests(unittest.TestCase):
         from display.round_touch import settings, theme
         from display.round_touch.screens import info
 
+        # Quiet start/end are dial time pickers now (no list, no scroll); the
+        # minimum altitude list is long enough to overflow the dial.
         surf = pygame.Surface((theme.SIZE, theme.SIZE))
-        with mock.patch.object(settings, "atc_quiet_start", return_value="22:00"):
-            info.invalidate_atc_labels()
-            with mock.patch.object(info, "_draw_scroll_overflow_cues") as cue:
-                max_scroll = info.draw_atc_picker(surf, "quiet_start")
+        info.invalidate_atc_labels()
+        with mock.patch.object(info, "_draw_scroll_overflow_cues") as cue:
+            max_scroll = info.draw_atc_picker(surf, "min_height")
         self.assertGreater(max_scroll, 0)
         cue.assert_called_once()
+        with mock.patch.object(info, "_draw_scroll_overflow_cues") as cue:
+            self.assertEqual(info.draw_atc_picker(surf, "quiet_start"), 0)
+        cue.assert_not_called()
 
     def test_draw_info_uses_picker_on_options_page(self):
         import pygame

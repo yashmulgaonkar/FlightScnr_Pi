@@ -50,19 +50,62 @@ long_press_pan = _load_module(
 )
 
 # ghost_touch_filter imports display.round_touch.rotation / input_handler lazily.
-sys.modules.setdefault("display", types.ModuleType("display"))
-sys.modules.setdefault("display.round_touch", types.ModuleType("display.round_touch"))
+import pytest
+
+_created_pkgs: list[str] = []
+for _name in ("display", "display.round_touch"):
+    if _name not in sys.modules:
+        sys.modules[_name] = types.ModuleType(_name)
+        _created_pkgs.append(_name)
 rotation_stub = types.ModuleType("display.round_touch.rotation")
 rotation_stub.to_logical = lambda x, y: (float(x), float(y))
-sys.modules["display.round_touch.rotation"] = rotation_stub
-sys.modules["display.round_touch"].rotation = rotation_stub
+# Installed only while this module's tests run (see the fixture below): left
+# in sys.modules the stub shadowed the real rotation module for later tests.
+_saved_rotation = sys.modules.get("display.round_touch.rotation")
+_saved_pkg_rotation = getattr(sys.modules["display.round_touch"], "rotation", None)
+
+
+def _install_rotation_stub() -> None:
+    sys.modules["display.round_touch.rotation"] = rotation_stub
+    pkg = sys.modules.get("display.round_touch")
+    if pkg is not None:
+        pkg.rotation = rotation_stub
+
+
+def _restore_rotation() -> None:
+    if _saved_rotation is None:
+        sys.modules.pop("display.round_touch.rotation", None)
+    else:
+        sys.modules["display.round_touch.rotation"] = _saved_rotation
+    for name in _created_pkgs:
+        if isinstance(sys.modules.get(name), types.ModuleType) and not hasattr(
+            sys.modules[name], "__path__"
+        ):
+            sys.modules.pop(name, None)
+    pkg = sys.modules.get("display.round_touch")
+    if pkg is not None:
+        if _saved_pkg_rotation is None:
+            if hasattr(pkg, "rotation"):
+                delattr(pkg, "rotation")
+        else:
+            pkg.rotation = _saved_pkg_rotation
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _stubbed_rotation():
+    _install_rotation_stub()
+    yield
+    _restore_rotation()
 # Do NOT register under display.round_touch.input_handler — that would steal
 # the name from tests.test_gesture_handler when suites share a process.
 
+_install_rotation_stub()
 _lp_ghost = _load_module(
     "long_press_test_ghost_touch_filter",
     os.path.join(_RT, "ghost_touch_filter.py"),
 )
+# The copy is loaded; give the real modules back until this module's tests run.
+_restore_rotation()
 
 LongPressPanController = long_press_pan.LongPressPanController
 HOLD_MS = long_press_pan.HOLD_MS

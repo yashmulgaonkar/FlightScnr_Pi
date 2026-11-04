@@ -65,7 +65,8 @@ class TestSystemControlProgressFlag(unittest.TestCase):
 
         copy = system_control.reboot_progress_copy()
 
-        self.assertEqual(copy, ("Shutting down", "Display and portal will power off."))
+        # The display translates these keys when it draws the overlay.
+        self.assertEqual(copy, ("reboot.shutting_down", "settings.confirm.shutdown.detail"))
 
     def test_reboot_progress_copy_clears_stale_flag(self) -> None:
         system_control.mark_reboot_in_progress("user")
