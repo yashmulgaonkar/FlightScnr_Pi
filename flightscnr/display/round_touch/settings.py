@@ -1874,18 +1874,11 @@ def set_idle_dim_minutes(value) -> int:
 
 
 def idle_dim_percent() -> int:
-    try:
-        pct = int(_state.get("idle_dim_percent", 20))
-    except (TypeError, ValueError):
-        pct = 20
-    return max(1, min(100, pct))
+    return _snap_choice(_state.get("idle_dim_percent", 20), IDLE_DIM_PERCENTS, 20)
 
 
 def set_idle_dim_percent(value) -> int:
-    try:
-        pct = max(1, min(100, int(value)))
-    except (TypeError, ValueError):
-        pct = 20
+    pct = _snap_choice(value, IDLE_DIM_PERCENTS, 20)
     _rmw_save({"idle_dim_percent": pct})
     return pct
 

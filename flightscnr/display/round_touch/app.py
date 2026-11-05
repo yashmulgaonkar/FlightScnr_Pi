@@ -3548,6 +3548,9 @@ class RoundTouchDisplay:
         if alarm_clock.is_ringing():
             day_pct = settings.brightness_percent()
             backlight.apply_percent(day_pct if day_pct > 0 else 100)
+            # The panel is lit, so the tap that dismisses the alarm is not a
+            # wake and must not be swallowed.
+            self._idle_dark = False
             return
 
         if self._manual_screen_off:
@@ -4786,6 +4789,18 @@ class RoundTouchDisplay:
 
         if system_control.reboot_progress_copy() is not None:
             self.input.consume_gesture()
+            return
+        # The disclaimer and Wi-Fi setup screens consume gestures themselves
+        # below, before the power-menu swallow runs, so a touch that woke an
+        # idle-blanked panel on them is dropped here instead of landing on
+        # Accept, the checkbox or the try-saved control.
+        if getattr(self, "_idle_wake_swallow", False) and self.screen in (
+            SCREEN_DISCLAIMER,
+            SCREEN_WIFI_SETUP,
+        ):
+            if self.input.consume_gesture():
+                self._idle_wake_swallow = False
+                self._safe_draw()
             return
         if self.screen == SCREEN_DISCLAIMER:
             # Consume all gestures; only checkbox / Accept hit rects act.
@@ -6084,6 +6099,12 @@ class RoundTouchDisplay:
             "quiet_dim_percent",
             "quiet_dim_restore",
             "quiet_dim_migrated",
+            # Idle dim and idle screen-off are read live by _apply_brightness.
+            "idle_dim_enabled",
+            "idle_dim_minutes",
+            "idle_dim_percent",
+            "idle_off_enabled",
+            "idle_off_minutes",
         }
     )
     _RELOAD_INERT_KEYS = frozenset(

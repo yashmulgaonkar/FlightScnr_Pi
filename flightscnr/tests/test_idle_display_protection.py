@@ -47,10 +47,26 @@ class IdleSettingsTests(unittest.TestCase):
         self.assertEqual(settings.set_idle_off_minutes("junk"), 30)
         self.assertEqual(settings.set_idle_dim_minutes("60"), 60)
 
-    def test_percent_clamps(self):
-        self.assertEqual(settings.set_idle_dim_percent(0), 1)
-        self.assertEqual(settings.set_idle_dim_percent(500), 100)
+    def test_percent_snaps_to_offered_choices(self):
+        self.assertEqual(settings.set_idle_dim_percent(0), 5)
+        self.assertEqual(settings.set_idle_dim_percent(500), 50)
+        self.assertEqual(settings.set_idle_dim_percent(12), 10)
+        self.assertEqual(settings.set_idle_dim_percent("30"), 30)
         self.assertEqual(settings.set_idle_dim_percent("x"), 20)
+        settings._state["idle_dim_percent"] = 42
+        self.assertEqual(settings.idle_dim_percent(), 50)
+
+    def test_portal_idle_changes_take_the_light_reload_path(self):
+        """A portal write of idle keys only reaches _apply_brightness, not the
+        full reload with its map invalidate and prewarm."""
+        from display.round_touch import app as app_mod
+
+        cls = app_mod.RoundTouchDisplay
+        idle_keys = frozenset(
+            {"idle_dim_enabled", "idle_dim_minutes", "idle_dim_percent", "idle_off_enabled", "idle_off_minutes"}
+        )
+        self.assertTrue(cls._reload_is_light(idle_keys))
+        self.assertTrue(idle_keys <= cls._RELOAD_BRIGHTNESS_KEYS)
 
     def test_portal_writes_are_seen_by_the_display_reload(self):
         """The reload change detector compares a whitelist of keys; a portal
@@ -146,6 +162,44 @@ class IdleBrightnessTests(unittest.TestCase):
         self.assertFalse(d._idle_dark)
         d._apply_brightness.assert_called_once()
         self.assertEqual(d._idle_protection_percent(100), 100)
+
+    def test_ringing_alarm_clears_the_stale_dark_flag(self):
+        """The alarm lights the panel; the tap that dismisses it is not a wake."""
+        from display.round_touch import app as app_mod
+
+        d = app_mod.RoundTouchDisplay.__new__(app_mod.RoundTouchDisplay)
+        d._idle_touch_at = time.time() - 3600
+        d._idle_dark = True
+        d._idle_wake_swallow = False
+        d._manual_screen_off = False
+        d._quiet_dim_preview = None
+        with mock.patch("display.round_touch.alarm_clock.is_ringing", return_value=True), mock.patch(
+            "display.round_touch.backlight.apply_percent"
+        ) as apply:
+            d._apply_brightness()
+        apply.assert_called_once()
+        self.assertFalse(d._idle_dark)
+        d._note_idle_touch()
+        self.assertFalse(d._idle_wake_swallow)
+
+    def test_wake_touch_on_disclaimer_is_swallowed(self):
+        from display.round_touch import app as app_mod
+
+        d = app_mod.RoundTouchDisplay.__new__(app_mod.RoundTouchDisplay)
+        d._boot_until = 0
+        d.screen = app_mod.SCREEN_DISCLAIMER
+        d._idle_wake_swallow = True
+        d.input = mock.Mock()
+        d.input.consume_gesture.return_value = ("tap", (360, 600))
+        d._safe_draw = mock.Mock()
+        with mock.patch("utilities.system_control.reboot_progress_copy", return_value=None), mock.patch(
+            "display.round_touch.screens.disclaimer.hit_accept", return_value=True
+        ) as accept, mock.patch.object(d, "_accept_safety_disclaimer", create=True) as accepted:
+            d._handle_navigation()
+        self.assertFalse(d._idle_wake_swallow)
+        accept.assert_not_called()
+        accepted.assert_not_called()
+        d._safe_draw.assert_called_once()
 
     def test_touch_while_merely_dimmed_does_not_swallow(self):
         settings.set_idle_dim_enabled(True)
