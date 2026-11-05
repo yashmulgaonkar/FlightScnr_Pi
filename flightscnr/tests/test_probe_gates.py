@@ -11,7 +11,8 @@
 
 Bluetooth: ``/sys/class/bluetooth/hciN/hciN:HANDLE`` exists only while a link
 is up, so no entry means no ``bluetoothctl`` / ``pactl`` call. Wi-Fi: a
-confirmed nmcli answer is reused while wlan0's operstate/carrier are unchanged.
+confirmed "up" nmcli answer is reused while wlan0's operstate/carrier are
+unchanged; a down answer is asked again every time.
 """
 
 from __future__ import annotations
@@ -143,14 +144,39 @@ class WifiSysfsCacheTests(unittest.TestCase):
         self.assertEqual(probe.call_count, 1)
 
     def test_sysfs_change_reprobes(self):
-        sigs = iter([("up", "1"), ("down", "0"), ("down", "0")])
+        sigs = iter([("up", "1"), ("up", "1"), ("down", "0"), ("up", "1")])
         with mock.patch.object(w, "_wlan_sysfs_signature", side_effect=lambda: next(sigs)), mock.patch.object(
-            w, "probe_client_wifi", side_effect=["up", "down", "down"]
+            w, "probe_client_wifi", side_effect=["up", "down", "up"]
         ) as probe:
             self.assertEqual(w.probe_link(), "up")
+            self.assertEqual(w.probe_link(), "up")  # reused: same sysfs view
+            self.assertEqual(w.probe_link(), "down")  # carrier dropped: asked again
+            self.assertEqual(w.probe_link(), "up")
+        self.assertEqual(probe.call_count, 3)
+
+    def test_down_is_never_reused(self):
+        with mock.patch.object(w, "_wlan_sysfs_signature", return_value=("down", "0")), mock.patch.object(
+            w, "probe_client_wifi", return_value="down"
+        ) as probe:
             self.assertEqual(w.probe_link(), "down")
             self.assertEqual(w.probe_link(), "down")
         self.assertEqual(probe.call_count, 2)
+
+    def test_reassociation_recovers_within_one_poll(self):
+        """wlan0 comes back up with carrier while NetworkManager is still
+        getting an address. nmcli calls that window not connected; the next
+        poll after the lease must see up, not a cached down, or the offline
+        grace runs out and the setup hotspot replaces a working link."""
+        sigs = iter([("down", "0"), ("up", "1"), ("up", "1"), ("up", "1")])
+        answers = iter(["down", "down", "up", "up"])
+        with mock.patch.object(w, "_wlan_sysfs_signature", side_effect=lambda: next(sigs)), mock.patch.object(
+            w, "probe_client_wifi", side_effect=lambda: next(answers)
+        ) as probe:
+            self.assertEqual(w.probe_link(), "down")  # disassociated
+            self.assertEqual(w.probe_link(), "down")  # associated, no lease yet
+            self.assertEqual(w.probe_link(), "up")  # lease arrived, sysfs unchanged
+            self.assertEqual(w.probe_link(), "up")  # reused from here on
+        self.assertEqual(probe.call_count, 3)
 
     def test_ttl_expiry_reprobes(self):
         with mock.patch.object(w, "_wlan_sysfs_signature", return_value=("up", "1")), mock.patch.object(
