@@ -49,13 +49,7 @@ class LiveAtcClientTests(unittest.TestCase):
             },
         )
         twr = next(f for f in feeds if f["mount"] == "khpn_twr")
-        try:
-            import bs4  # noqa: F401
-        except ImportError:
-            # Without BeautifulSoup the parser falls back to mount ids as labels.
-            self.assertEqual(twr["label"], "khpn_twr")
-        else:
-            self.assertEqual(twr["label"], "KHPN Tower")
+        self.assertEqual(twr["label"], "KHPN Tower")
 
     def test_fetch_liveatc_feeds_prefers_curl_client(self):
         from utilities import atc_audio

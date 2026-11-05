@@ -57,6 +57,17 @@ import pytest
 # Remember what the real package had so the stubs below can be undone: left in
 # sys.modules they shadowed display.round_touch.rotation for every later test
 # in the same process (test_display_rotation, test_rim_target_style, ...).
+#
+# Import the real package first. Its __init__ pulls in app, which binds the
+# input_handler it finds in sys.modules for good; if that happens while the
+# stubs are installed (any test here that touches display.round_touch does
+# it), app keeps the isolated copy and a later test_favourite_cycle patches a
+# different module than the one app reads. Only the Pi-less environments where
+# the real package cannot import at all fall back to the placeholder package.
+try:
+    import display.round_touch  # noqa: F401
+except Exception:  # pragma: no cover - keeps the isolated tests runnable
+    pass
 _STUB_KEYS = (
     "display.round_touch.input_handler",
     "display.round_touch.pinch_handler",
