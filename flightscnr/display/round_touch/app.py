@@ -356,6 +356,11 @@ class RoundTouchDisplay:
         self._quiet_dim_preview: int | None = None
         # Radar peek: dark radar relights until this time after a touch.
         self._radar_peek_until = 0.0
+        # Burn-in protection: last touch time, whether the idle blank is in
+        # force, and whether the next gesture is the wake tap to swallow.
+        self._idle_touch_at = time.time()
+        self._idle_dark = False
+        self._idle_wake_swallow = False
         self._radar_hud_volume_drag = False
         self._radar_hud_layout_drag = False
         self._hud_opacity_slider_active = False
@@ -2156,6 +2161,14 @@ class RoundTouchDisplay:
         elif action == "quiet_dim":
             settings.set_quiet_dim_enabled(not settings.quiet_dim_enabled())
             self._apply_brightness()
+        elif action == "idle_dim":
+            settings.set_idle_dim_enabled(not settings.idle_dim_enabled())
+            self._apply_brightness()
+        elif action == "idle_off":
+            settings.set_idle_off_enabled(not settings.idle_off_enabled())
+            self._apply_brightness()
+        elif action in ("idle_dim_after", "idle_dim_level", "idle_off_after"):
+            self._open_atc_picker(action)
         elif action == "quiet_start":
             self._open_atc_picker("quiet_start")
         elif action == "quiet_end":
@@ -2467,6 +2480,16 @@ class RoundTouchDisplay:
         if kind == "zoom_position":
             settings.set_radar_zoom_position(choice)
             radar.invalidate_frame_layer()
+            return
+        if kind == "idle_dim_after":
+            settings.set_idle_dim_minutes(choice)
+            return
+        if kind == "idle_dim_level":
+            settings.set_idle_dim_percent(choice)
+            self._apply_brightness()
+            return
+        if kind == "idle_off_after":
+            settings.set_idle_off_minutes(choice)
             return
         if kind == "default_clock":
             settings.set_default_clock(choice)
@@ -3525,6 +3548,9 @@ class RoundTouchDisplay:
         if alarm_clock.is_ringing():
             day_pct = settings.brightness_percent()
             backlight.apply_percent(day_pct if day_pct > 0 else 100)
+            # The panel is lit, so the tap that dismisses the alarm is not a
+            # wake and must not be swallowed.
+            self._idle_dark = False
             return
 
         if self._manual_screen_off:
@@ -3571,11 +3597,46 @@ class RoundTouchDisplay:
             not in (SCREEN_CLOCK, SCREEN_ANALOG_CLOCK, SCREEN_ANALOG_NIGHT, SCREEN_FLIEGER_CLOCK, SCREEN_MOON, SCREEN_FLIP_BOARD, SCREEN_FORECAST)
         ):
             pct = day_pct
+        pct = self._idle_protection_percent(pct)
         backlight.apply_percent(pct)
+
+    def _idle_protection_percent(self, pct: int) -> int:
+        """Burn-in protection: dim and/or blank after idle minutes without a touch.
+
+        Independent of the scheduled quiet-hours and off-hours dimming; the
+        lower level wins. The idle blank sets ``_idle_dark`` so the waking tap
+        is swallowed instead of acting on whatever sits under the finger.
+        """
+        # Test doubles build the display without __init__; treat a missing
+        # timestamp as "touched now".
+        touched_at = getattr(self, "_idle_touch_at", None)
+        if touched_at is None:
+            touched_at = self._idle_touch_at = time.time()
+        idle_s = time.time() - touched_at
+        dark = False
+        if settings.idle_off_enabled() and idle_s >= settings.idle_off_minutes() * 60:
+            pct = 0
+            dark = True
+        elif settings.idle_dim_enabled() and idle_s >= settings.idle_dim_minutes() * 60:
+            pct = min(pct, settings.idle_dim_percent())
+        if dark and not getattr(self, "_idle_dark", False):
+            logger.info("Idle %d min: display off until the next touch", settings.idle_off_minutes())
+        self._idle_dark = dark
+        return pct
+
+    def _note_idle_touch(self) -> None:
+        """A finger touched the panel: restart the idle timers, wake if dark."""
+        self._idle_touch_at = time.time()
+        if getattr(self, "_idle_dark", False):
+            self._idle_wake_swallow = True
+            self._idle_dark = False
+            logger.info("Idle: touch woke the display")
+            self._apply_brightness()
 
     def _wake_for_off_hours_touch(self):
         from display.round_touch import off_hours
 
+        self._note_idle_touch()
         # Radar peek: a touch on the blacked-out quiet-hours radar
         # relights it briefly; each touch restarts the timer.
         if (
@@ -4656,6 +4717,14 @@ class RoundTouchDisplay:
                 self._safe_draw()
             return True
 
+        # Idle blank: the touch that woke the panel must not act on the screen.
+        if getattr(self, "_idle_wake_swallow", False):
+            if tap or swiped:
+                self._idle_wake_swallow = False
+                self._note_activity()
+                self._safe_draw()
+            return True
+
         # Confirm step for reboot / shutdown / restart.
         if self._power_menu_open and self._power_confirm is not None:
             if tap:
@@ -4720,6 +4789,18 @@ class RoundTouchDisplay:
 
         if system_control.reboot_progress_copy() is not None:
             self.input.consume_gesture()
+            return
+        # The disclaimer and Wi-Fi setup screens consume gestures themselves
+        # below, before the power-menu swallow runs, so a touch that woke an
+        # idle-blanked panel on them is dropped here instead of landing on
+        # Accept, the checkbox or the try-saved control.
+        if getattr(self, "_idle_wake_swallow", False) and self.screen in (
+            SCREEN_DISCLAIMER,
+            SCREEN_WIFI_SETUP,
+        ):
+            if self.input.consume_gesture():
+                self._idle_wake_swallow = False
+                self._safe_draw()
             return
         if self.screen == SCREEN_DISCLAIMER:
             # Consume all gestures; only checkbox / Accept hit rects act.
@@ -6018,6 +6099,12 @@ class RoundTouchDisplay:
             "quiet_dim_percent",
             "quiet_dim_restore",
             "quiet_dim_migrated",
+            # Idle dim and idle screen-off are read live by _apply_brightness.
+            "idle_dim_enabled",
+            "idle_dim_minutes",
+            "idle_dim_percent",
+            "idle_off_enabled",
+            "idle_off_minutes",
         }
     )
     _RELOAD_INERT_KEYS = frozenset(

@@ -948,6 +948,11 @@ def display_json():
             "brightness_percent": settings.brightness_percent(),
             "quiet_dim_enabled": settings.quiet_dim_enabled(),
             "quiet_dim_percent": settings.quiet_dim_percent(),
+            "idle_dim_enabled": settings.idle_dim_enabled(),
+            "idle_dim_minutes": settings.idle_dim_minutes(),
+            "idle_dim_percent": settings.idle_dim_percent(),
+            "idle_off_enabled": settings.idle_off_enabled(),
+            "idle_off_minutes": settings.idle_off_minutes(),
             "flight_detail_timeout_s": settings.flight_detail_timeout_s(),
             "clock_timeout_s": settings.clock_timeout_s(),
             "auto_idle_clock": settings.auto_idle_clock_enabled(),
@@ -1004,6 +1009,20 @@ def display_save():
             settings.set_quiet_dim_percent(int(data.get("quiet_dim_percent")))
         except (TypeError, ValueError):
             return jsonify({"message": "quiet_dim_percent must be a number"}), 400
+    if "idle_dim_enabled" in data:
+        settings.set_idle_dim_enabled(bool(data.get("idle_dim_enabled")))
+    if "idle_off_enabled" in data:
+        settings.set_idle_off_enabled(bool(data.get("idle_off_enabled")))
+    for key, setter in (
+        ("idle_dim_minutes", settings.set_idle_dim_minutes),
+        ("idle_dim_percent", settings.set_idle_dim_percent),
+        ("idle_off_minutes", settings.set_idle_off_minutes),
+    ):
+        if key in data:
+            try:
+                setter(int(data.get(key)))
+            except (TypeError, ValueError):
+                return jsonify({"message": f"{key} must be a number"}), 400
     if "flight_detail_timeout_s" in data:
         settings.set_flight_detail_timeout_s(data.get("flight_detail_timeout_s"))
     if "clock_timeout_s" in data:
@@ -1107,6 +1126,11 @@ def display_save():
             "brightness_percent": settings.brightness_percent(),
             "quiet_dim_enabled": settings.quiet_dim_enabled(),
             "quiet_dim_percent": settings.quiet_dim_percent(),
+            "idle_dim_enabled": settings.idle_dim_enabled(),
+            "idle_dim_minutes": settings.idle_dim_minutes(),
+            "idle_dim_percent": settings.idle_dim_percent(),
+            "idle_off_enabled": settings.idle_off_enabled(),
+            "idle_off_minutes": settings.idle_off_minutes(),
             "flight_detail_timeout_s": settings.flight_detail_timeout_s(),
             "clock_timeout_s": settings.clock_timeout_s(),
             "auto_idle_clock": settings.auto_idle_clock_enabled(),

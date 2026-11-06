@@ -5,7 +5,10 @@
   "english_name": "German",
   "direction": "ltr",
   "fallback": "en",
-  "source_catalog_revision": 26,
+  "source_catalog_revision": 27,
   "license": "CC-BY-NC-SA-4.0",
-  "authors": ["jmwijnholds (translation coordination)","OpenAI Codex (machine-assisted draft)"]
+  "authors": [
+    "jmwijnholds (translation coordination)",
+    "OpenAI Codex (machine-assisted draft)"
+  ]
 }

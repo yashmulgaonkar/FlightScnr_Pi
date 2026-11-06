@@ -452,6 +452,13 @@ _defaults = {
     "quiet_dim_restore": 20,
     # One-time fold of legacy off-hours dim/off into quiet dim.
     "quiet_dim_migrated": False,
+    # Burn-in protection: dim after N idle minutes (no touch), and/or blank the
+    # panel after M idle minutes. Either or both; a tap restores full brightness.
+    "idle_dim_enabled": False,
+    "idle_dim_minutes": 5,
+    "idle_dim_percent": 20,
+    "idle_off_enabled": False,
+    "idle_off_minutes": 30,
     # Targets page: per-category appearance ("" = today's default look).
     "tgt_plane_color": "",
     "tgt_heli_color": "",
@@ -757,6 +764,11 @@ _ATC_PRESERVE_KEYS = (
     "quiet_dim_enabled",
     "quiet_dim_percent",
     "quiet_dim_restore",
+    "idle_dim_enabled",
+    "idle_dim_minutes",
+    "idle_dim_percent",
+    "idle_off_enabled",
+    "idle_off_minutes",
     "atc_want_playing",
     "atc_quiet_override",
     "atc_quiet_override_until",
@@ -1374,6 +1386,11 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("show_sweep"),
         state.get("show_tag_leaders"),
         state.get("tag_text_shadow"),
+        bool(state.get("idle_dim_enabled", False)),
+        state.get("idle_dim_minutes"),
+        state.get("idle_dim_percent"),
+        bool(state.get("idle_off_enabled", False)),
+        state.get("idle_off_minutes"),
         state.get("show_precipitation"),
         state.get("show_wildfires"),
         state.get("show_earthquakes"),
@@ -1820,6 +1837,68 @@ def quiet_dim_percent() -> int:
     except (TypeError, ValueError):
         pct = 20
     return max(0, min(100, pct))
+
+
+# Idle timeouts offered by the device picker and the portal (minutes).
+IDLE_DIM_MINUTES = (1, 2, 5, 10, 15, 30, 60)
+IDLE_OFF_MINUTES = (2, 5, 10, 15, 30, 60, 120)
+IDLE_DIM_PERCENTS = (5, 10, 20, 30, 50)
+
+
+def _snap_choice(value, choices: tuple, default) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return default
+    if value in choices:
+        return value
+    return min(choices, key=lambda c: (abs(c - value), c))
+
+
+def idle_dim_enabled() -> bool:
+    return bool(_state.get("idle_dim_enabled", False))
+
+
+def set_idle_dim_enabled(enabled: bool) -> None:
+    _rmw_save({"idle_dim_enabled": bool(enabled)})
+
+
+def idle_dim_minutes() -> int:
+    return _snap_choice(_state.get("idle_dim_minutes", 5), IDLE_DIM_MINUTES, 5)
+
+
+def set_idle_dim_minutes(value) -> int:
+    minutes = _snap_choice(value, IDLE_DIM_MINUTES, 5)
+    _rmw_save({"idle_dim_minutes": minutes})
+    return minutes
+
+
+def idle_dim_percent() -> int:
+    return _snap_choice(_state.get("idle_dim_percent", 20), IDLE_DIM_PERCENTS, 20)
+
+
+def set_idle_dim_percent(value) -> int:
+    pct = _snap_choice(value, IDLE_DIM_PERCENTS, 20)
+    _rmw_save({"idle_dim_percent": pct})
+    return pct
+
+
+def idle_off_enabled() -> bool:
+    return bool(_state.get("idle_off_enabled", False))
+
+
+def set_idle_off_enabled(enabled: bool) -> None:
+    _rmw_save({"idle_off_enabled": bool(enabled)})
+
+
+def idle_off_minutes() -> int:
+    return _snap_choice(_state.get("idle_off_minutes", 30), IDLE_OFF_MINUTES, 30)
+
+
+def set_idle_off_minutes(value) -> int:
+    minutes = _snap_choice(value, IDLE_OFF_MINUTES, 30)
+    _rmw_save({"idle_off_minutes": minutes})
+    return minutes
 
 
 TARGET_CATEGORIES = ("plane", "heli", "drone", "vessel")
