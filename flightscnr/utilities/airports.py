@@ -83,9 +83,9 @@ class AirportStore:
     ``compact_store`` for why the dict form is never kept.
     """
 
-    # Every key a record can carry. A new field in ``_record_from_row`` or
-    # ``build_db_from_csv_text`` must be added here and packed, or lookups
-    # silently lose it; tests/test_compact_store_guards.py enforces that.
+    # Every key a record can carry. A record with any other key is not packed
+    # and the loader keeps the plain dict; a new field in ``_record_from_row``
+    # must be added here and packed (tests/test_compact_store_guards.py).
     FIELDS = frozenset({"lat", "lon", "name", "facility", "type", "elevation_ft", "ident"})
 
 
@@ -108,19 +108,26 @@ class AirportStore:
     # Building ------------------------------------------------------------
 
     def add(self, code: str, rec: dict) -> None:
+        """Pack one ``code -> record`` pair, or raise ``StoreFormatError``.
+
+        Strict by design: only records shaped exactly as ``build_db_from_csv_text``
+        writes them are packed; the loader keeps the plain dict otherwise.
+        """
         if self._by_ident is None:
             raise RuntimeError("store already built")
-        if not isinstance(rec, dict):
-            return
-        code = str(code or "").strip().upper()
-        if not code:
-            return
-        try:
-            lat = float(rec["lat"])
-            lon = float(rec["lon"])
-        except (KeyError, TypeError, ValueError):
-            return
-        raw_ident = str(rec.get("ident") or "").strip().upper()
+        code = compact_store.check_code(code, self._codes.width, "airport code")
+        compact_store.check_keys(rec, self.FIELDS, f"record {code}")
+        if "lat" not in rec or "lon" not in rec:
+            raise compact_store.StoreFormatError(f"record {code} has no coordinates")
+        lat = compact_store.check_number(rec["lat"], -90.0, 90.0, f"{code} lat")
+        lon = compact_store.check_number(rec["lon"], -180.0, 180.0, f"{code} lon")
+        name = compact_store.check_text(rec["name"], f"{code} name") if "name" in rec else ""
+        facility = compact_store.check_text(rec["facility"], f"{code} facility") if "facility" in rec else ""
+        atype = compact_store.check_text(rec["type"], f"{code} type") if "type" in rec else ""
+        elev = compact_store.check_int(rec["elevation_ft"], f"{code} elevation_ft") if "elevation_ft" in rec else _NO_ELEV
+        if elev == _NO_ELEV and "elevation_ft" in rec:
+            raise compact_store.StoreFormatError(f"{code} elevation_ft collides with the sentinel")
+        raw_ident = compact_store.check_code(rec["ident"], self._codes.width, f"{code} ident") if "ident" in rec else ""
         ident = raw_ident or code
         idx = self._by_ident.get(ident)
         if idx is None:
@@ -128,27 +135,34 @@ class AirportStore:
             self._by_ident[ident] = idx
             self._lat.append(lat)
             self._lon.append(lon)
-            elev = rec.get("elevation_ft")
-            try:
-                self._elev.append(int(elev) if elev is not None else _NO_ELEV)
-            except (TypeError, ValueError):
-                self._elev.append(_NO_ELEV)
-            self._type.append(self._types.code(str(rec.get("type") or "").strip().lower()))
-            self._name.add(str(rec.get("name") or "").strip())
-            self._facility.add(str(rec.get("facility") or "").strip())
+            self._elev.append(elev)
+            self._type.append(self._types.code(atype))
+            self._name.add(name)
+            self._facility.add(facility)
             self._key.add(ident)
             self._has_ident.append(1 if raw_ident else 0)
             self._iata_slot.append(-1)
+        elif (
+            self._lat[idx] != lat
+            or self._lon[idx] != lon
+            or self._elev[idx] != elev
+            or self._types.values[self._type[idx]] != atype
+            or self._name.peek(idx) != name
+            or self._facility.peek(idx) != facility
+        ):
+            # Two codes for one ident must carry the same record, as the
+            # builder writes them; otherwise the shared slot would lie.
+            raise compact_store.StoreFormatError(f"{code} and {ident} disagree on the record")
         self._pending_codes.append((code, idx))
 
     def build(self) -> "AirportStore":
         for code, idx in self._pending_codes:
-            if self._codes.add(code, idx):
-                self._n_codes += 1
+            if not self._codes.add(code, idx):
+                raise compact_store.StoreFormatError(f"code {code!r} does not fit the index")
+            self._n_codes += 1
         self._codes.build()
-        self.overflow = self._codes.overflow_count
         # Alias slots: a 3-letter code whose record ident is a different code.
-        for slot in range(self._codes.packed_len()):
+        for slot in range(len(self._codes)):
             code = self._codes.key_at(slot)
             if len(code) == 3:
                 idx = self._codes.value_at(slot)
@@ -216,8 +230,8 @@ class AirportStore:
         return self._codes.keys()
 
     def items(self):
-        for code in self._codes.keys():
-            yield code, self.record(self._codes.get(code))
+        for slot in range(len(self._codes)):
+            yield self._codes.key_at(slot), self.record(self._codes.value_at(slot))
 
     def __iter__(self):
         return self.keys()
@@ -235,7 +249,7 @@ class AirportStore:
             return self._codes.key_at(slot)
         lat = self._lat[idx]
         lon = self._lon[idx]
-        for s in range(self._codes.packed_len()):
+        for s in range(len(self._codes)):
             code = self._codes.key_at(s)
             if len(code) != 3:
                 continue
@@ -298,23 +312,34 @@ class AirportStore:
         return out
 
 
-def _store_from_cache_text(text: str):
-    """``(store, None)`` when the cache text is the current version, else
-    ``(None, raw)`` with the whole file parsed for the stale-cache path."""
+def _packed_from_text(text: str) -> "AirportStore | None":
+    """The packed store when the cache text is the current version and every
+    record has exactly the expected shape; otherwise None, with the reason
+    logged. Never raises: any surprise means the plain dict path runs."""
     try:
         meta, items = compact_store.split_cache(text, "airports")
-    except (compact_store.CacheFormatError, ValueError):
-        return None, json.loads(text)
-    if meta.get("_version") != CACHE_VERSION:
-        return None, json.loads(text)
-    # The member must be an object: a list streams as (None, item) pairs and
-    # would build an empty store without ever triggering a rebuild.
-    first = next(items, None)
-    if first is None:
-        return AirportStore.from_items(()), None
-    if first[0] is None:
-        return None, json.loads(text)
-    return AirportStore.from_items(itertools.chain((first,), items)), None
+        if meta.get("_version") != CACHE_VERSION:
+            return None
+        first = next(items, None)
+        if first is None:
+            return AirportStore.from_items(())
+        if first[0] is None:
+            raise compact_store.StoreFormatError("airports member is not an object")
+        return AirportStore.from_items(itertools.chain((first,), items))
+    except Exception as exc:
+        _safe_print(f"[Airports] Packed store not used ({exc}) - loading the plain dict")
+        return None
+
+
+def _pack_or_keep(db):
+    """Pack a freshly built dict when it conforms, else keep the dict."""
+    if not isinstance(db, dict) or not db:
+        return db
+    try:
+        return AirportStore.from_items(db.items())
+    except Exception as exc:
+        _safe_print(f"[Airports] Packed store not used ({exc}) - keeping the plain dict")
+        return db
 
 
 def _record_from_row(row: dict) -> dict | None:
@@ -408,7 +433,11 @@ def _download_and_build():
 
 
 def _load():
-    """Load from cache file or download if not present."""
+    """Load from cache file or download if not present.
+
+    The packed store is attempted first and only used when the cache matches
+    its exact expected format; everything after that is the historical path.
+    """
     global _db, _loaded
     if _loaded:
         return
@@ -420,37 +449,31 @@ def _load():
             try:
                 with open(CACHE_FILE, "r", encoding="utf-8") as f:
                     text = f.read()
-                try:
-                    store, raw = _store_from_cache_text(text)
-                except compact_store.StoreLimitError as exc:
-                    # New data outgrew a packed column: keep the plain dict for
-                    # this run rather than drop entries or refetch.
-                    _safe_print(f"[Airports] Packed store limit hit ({exc}) - using plain dict")
-                    raw = json.loads(text)
-                    del text
-                    _db = raw.get("airports", {}) if isinstance(raw, dict) else {}
-                    _loaded = True
-                    return
-                del text
+                store = _packed_from_text(text)
                 if store is not None:
-                    if store.overflow:
-                        _safe_print(
-                            f"[Airports] {store.overflow} codes did not fit the packed index "
-                            "(kept in overflow)"
-                        )
+                    del text
                     _db = store
                     _loaded = True
                     return
-                # Stale or unversioned cache - rebuild
-                version_found = raw.get("_version", "none") if isinstance(raw, dict) else "legacy"
-                _safe_print(
-                    f"[Airports] Cache version mismatch "
-                    f"(found: {version_found}, need: {CACHE_VERSION}) - rebuilding"
-                )
-                if isinstance(raw, dict) and isinstance(raw.get("airports"), dict):
-                    stale = raw["airports"]
-                elif isinstance(raw, dict) and "_version" not in raw:
-                    stale = raw
+                raw = json.loads(text)
+                del text
+
+                # Versioned cache (v2+): {"_version": N, "airports": {...}}
+                if isinstance(raw, dict) and raw.get("_version") == CACHE_VERSION:
+                    _db = raw.get("airports", {})
+                    _loaded = True
+                    return
+                else:
+                    # Stale or unversioned cache - rebuild
+                    version_found = raw.get("_version", "none") if isinstance(raw, dict) else "legacy"
+                    _safe_print(
+                        f"[Airports] Cache version mismatch "
+                        f"(found: {version_found}, need: {CACHE_VERSION}) - rebuilding"
+                    )
+                    if isinstance(raw, dict) and isinstance(raw.get("airports"), dict):
+                        stale = raw["airports"]
+                    elif isinstance(raw, dict) and "_version" not in raw:
+                        stale = raw
             except Exception as e:
                 _safe_print(f"[Airports] Cache load failed: {e} - re-downloading")
 
@@ -459,14 +482,7 @@ def _load():
             # Keep lookups working offline until a typed rebuild succeeds.
             _safe_print("[Airports] Using previous cache without type metadata (degraded)")
             built = stale
-        if isinstance(built, dict):
-            try:
-                _db = AirportStore.from_items(built.items())
-            except compact_store.StoreLimitError as exc:
-                _safe_print(f"[Airports] Packed store limit hit ({exc}) - using plain dict")
-                _db = built
-        else:
-            _db = built
+        _db = _pack_or_keep(built)
         _loaded = True
 
 

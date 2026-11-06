@@ -38,12 +38,64 @@ class CacheFormatError(ValueError):
     """The cache text is not the ``{"...": ..., big_key: {...} | [...]}`` shape."""
 
 
-class StoreLimitError(ValueError):
-    """A packed column cannot hold the data (a vocabulary outgrew its array).
+class StoreFormatError(ValueError):
+    """The data does not match the exact shape the packed store expects.
 
-    Loaders catch this and keep the plain dict for that database, so new
-    data degrades to the old memory cost instead of losing entries.
+    The stores are strict on purpose: the caches come from downloads the
+    project does not control, so anything unexpected (an extra key, a
+    string where a number belongs, a code the index cannot hold) makes the
+    loader keep the plain ``json.load`` dict for that database, which is
+    the historical code path. Packing is only ever a memory saving.
     """
+
+
+class StoreLimitError(StoreFormatError):
+    """A packed column cannot hold the data (a vocabulary outgrew its array)."""
+
+
+def check_number(value, lo: float, hi: float, what: str) -> float:
+    """``value`` as a float when it is a real number within [lo, hi]."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise StoreFormatError(f"{what} is {type(value).__name__}, not a number")
+    if not (lo <= value <= hi):
+        raise StoreFormatError(f"{what} {value!r} is outside {lo}..{hi}")
+    return float(value)
+
+
+def check_int(value, what: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise StoreFormatError(f"{what} is {type(value).__name__}, not an int")
+    return value
+
+
+def check_text(value, what: str) -> str:
+    if not isinstance(value, str):
+        raise StoreFormatError(f"{what} is {type(value).__name__}, not a string")
+    if not value:
+        raise StoreFormatError(f"{what} is empty")
+    return value
+
+
+def check_code(value, width: int, what: str) -> str:
+    """A lookup key as the builders write it: non-empty upper-case ASCII,
+    no surrounding whitespace, at most ``width`` characters."""
+    code = check_text(value, what)
+    if code != code.strip().upper():
+        raise StoreFormatError(f"{what} {code!r} is not canonical upper-case")
+    if not code.isascii():
+        raise StoreFormatError(f"{what} {code!r} is not ASCII")
+    if len(code) > width:
+        raise StoreFormatError(f"{what} {code!r} is longer than {width}")
+    return code
+
+
+def check_keys(rec, allowed: frozenset, what: str) -> dict:
+    if not isinstance(rec, dict):
+        raise StoreFormatError(f"{what} is {type(rec).__name__}, not an object")
+    extra = set(rec) - allowed
+    if extra:
+        raise StoreFormatError(f"{what} has unexpected keys {sorted(extra)}")
+    return rec
 
 
 def _expect(text: str, pos: int, char: str) -> None:
@@ -140,13 +192,12 @@ def split_cache(text: str, big_key: str) -> tuple[dict, Iterator[tuple[object, o
 class PackedIndex:
     """Sorted fixed-width ASCII keys to small ints, with no per-key objects.
 
-    Keys longer than ``width`` or outside ASCII do not fit the packed blob;
-    they go to a small overflow dict instead so nothing is lost. Only the
-    empty key is rejected (``add`` returns False). ``overflow_count`` tells
-    loaders how many keys took that path, for a log line.
+    ``add`` rejects (returns False) a key the blob cannot hold: empty,
+    non-ASCII or wider than ``width``. The stores turn that into a
+    ``StoreFormatError`` so the whole database falls back to the dict.
     """
 
-    __slots__ = ("width", "_pairs", "_blob", "_values", "_view", "_overflow")
+    __slots__ = ("width", "_pairs", "_blob", "_values", "_view")
 
     def __init__(self, width: int = 8):
         self.width = width
@@ -154,27 +205,14 @@ class PackedIndex:
         self._blob = b""
         self._values = array("I")
         self._view = None
-        self._overflow: dict[str, int] = {}
 
     def add(self, key: str, value: int) -> bool:
         if self._pairs is None:
             raise RuntimeError("index already built")
-        if not key:
+        if not key or not key.isascii() or len(key) > self.width:
             return False
-        try:
-            raw = key.encode("ascii")
-        except UnicodeEncodeError:
-            self._overflow[key] = value
-            return True
-        if len(raw) > self.width:
-            self._overflow[key] = value
-            return True
-        self._pairs.append((raw.ljust(self.width, b"\0"), value))
+        self._pairs.append((key.encode("ascii").ljust(self.width, b"\0"), value))
         return True
-
-    @property
-    def overflow_count(self) -> int:
-        return len(self._overflow)
 
     def build(self) -> "PackedIndex":
         pairs = self._pairs or []
@@ -186,10 +224,6 @@ class PackedIndex:
         return self
 
     def __len__(self) -> int:
-        return len(self._values) + len(self._overflow)
-
-    def packed_len(self) -> int:
-        """Keys in the packed blob (slots 0..packed_len-1); overflow keys have no slot."""
         return len(self._values)
 
     def _pos(self, key: str) -> int:
@@ -210,16 +244,10 @@ class PackedIndex:
 
     def get(self, key: str, default: int = -1) -> int:
         i = self._pos(key)
-        if i >= 0:
-            return self._values[i]
-        if self._overflow:
-            return self._overflow.get(key, default)
-        return default
+        return self._values[i] if i >= 0 else default
 
     def __contains__(self, key: object) -> bool:
-        if not isinstance(key, str):
-            return False
-        return self._pos(key) >= 0 or key in self._overflow
+        return isinstance(key, str) and self._pos(key) >= 0
 
     def key_at(self, slot: int) -> str:
         w = self.width
@@ -231,7 +259,6 @@ class PackedIndex:
     def keys(self) -> Iterator[str]:
         for i in range(len(self._values)):
             yield self.key_at(i)
-        yield from self._overflow
 
 
 class _SliceView:
@@ -275,6 +302,15 @@ class TextBlob:
         self._blob = bytes(self._buf or b"")
         self._buf = None
         return self
+
+    def peek(self, i: int) -> str:
+        """``get`` that also works before ``build`` (reads the growing buffer)."""
+        start = self._offsets[i]
+        end = self._offsets[i + 1]
+        if start == end:
+            return ""
+        src = self._blob if self._buf is None else self._buf
+        return bytes(src[start:end]).decode("utf-8", "replace")
 
     def __len__(self) -> int:
         return len(self._offsets) - 1

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import csv
 import io
+import itertools
 import json
 import logging
 import os
@@ -57,8 +58,9 @@ class FaaStore:
     """Packed ``ident -> {fuel, beacon, towered}``: a sorted index and one
     flag byte per airport; ``get`` builds the dict on access."""
 
-    # Keys a record carries; a new flag in ``distill_apt_base_rows`` must be
-    # packed here too (tests/test_compact_store_guards.py enforces that).
+    # Keys a record carries, all required. A record with any other key is not
+    # packed and the loader keeps the plain dict; a new flag in
+    # ``distill_apt_base_rows`` must be packed here (tests/test_compact_store_guards.py).
     FIELDS = frozenset({"fuel", "beacon", "towered"})
 
     def __init__(self):
@@ -66,18 +68,19 @@ class FaaStore:
         self._flags = array("B")
 
     def add(self, ident: str, rec) -> None:
-        if not isinstance(rec, dict):
-            return
-        ident = str(ident or "").strip().upper()
-        if not ident:
-            return
-        flags = (
-            (_FUEL if rec.get("fuel") else 0)
-            | (_BEACON if rec.get("beacon") else 0)
-            | (_TOWERED if rec.get("towered") else 0)
-        )
-        if self._index.add(ident, len(self._flags)):
-            self._flags.append(flags)
+        """Pack one ident, or raise ``StoreFormatError`` when the record is
+        not exactly the three booleans ``distill_apt_base_rows`` writes."""
+        ident = compact_store.check_code(ident, self._index.width, "FAA ident")
+        compact_store.check_keys(rec, self.FIELDS, f"FAA record {ident}")
+        flags = 0
+        for key, bit in (("fuel", _FUEL), ("beacon", _BEACON), ("towered", _TOWERED)):
+            if key not in rec or not isinstance(rec[key], bool):
+                raise compact_store.StoreFormatError(f"FAA record {ident} {key} is missing or not a bool")
+            if rec[key]:
+                flags |= bit
+        if not self._index.add(ident, len(self._flags)):
+            raise compact_store.StoreFormatError(f"ident {ident!r} does not fit the index")
+        self._flags.append(flags)
 
     def build(self) -> "FaaStore":
         self._index.build()
@@ -185,33 +188,74 @@ def _fetch() -> tuple[dict[str, dict], str] | None:
         return None
 
 
+def _packed_from_text(text: str):
+    """``(store, meta)`` when the cache is the current version and every
+    record has exactly the expected shape; else ``(None, None)``."""
+    try:
+        meta, items = compact_store.split_cache(text, "airports")
+        if meta.get("_version") != CACHE_VERSION:
+            return None, None
+        first = next(items, None)
+        if first is None:
+            return None, None  # an empty cache is not worth packing; the dict path handles it
+        if first[0] is None:
+            raise compact_store.StoreFormatError("airports member is not an object")
+        return FaaStore.from_items(itertools.chain((first,), items)), meta
+    except Exception as exc:
+        logger.info("[FAA] Packed store not used (%s) - loading the plain dict", exc)
+        return None, None
+
+
+def _pack_or_keep(db):
+    if not isinstance(db, dict) or not db:
+        return db
+    try:
+        return FaaStore.from_items(db.items())
+    except Exception as exc:
+        logger.info("[FAA] Packed store not used (%s) - keeping the plain dict", exc)
+        return db
+
+
 def _load() -> None:
     global _db, _loaded
     if _loaded:
         return
     _loaded = True
-    meta: dict = {}
+    cached = None
+    text = None
     try:
         with open(CACHE_FILE, encoding="utf-8") as fh:
             text = fh.read()
-        try:
-            meta, items = compact_store.split_cache(text, "airports")
-        except (compact_store.CacheFormatError, ValueError):
-            meta, items = {}, iter(())
-        if meta.get("_version") == CACHE_VERSION:
-            _db = FaaStore.from_items(items)
-        del text
     except OSError:
-        meta = {}
-    if _db:
-        age = time.time() - float(meta.get("fetched_at") or 0)
-        if age < REFRESH_AFTER_S:
-            return
+        text = None
+    if text is not None:
+        store, meta = _packed_from_text(text)
+        if store is not None:
+            del text
+            _db = store
+            age = time.time() - float(meta.get("fetched_at") or 0)
+            if age < REFRESH_AFTER_S:
+                return
+        else:
+            try:
+                cached = json.loads(text)
+            except json.JSONDecodeError:
+                cached = None
+            del text
+            if (
+                cached
+                and cached.get("_version") == CACHE_VERSION
+                and isinstance(cached.get("airports"), dict)
+            ):
+                _db = cached["airports"]
+                age = time.time() - float(cached.get("fetched_at") or 0)
+                if age < REFRESH_AFTER_S:
+                    return
     fetched = _fetch()
     if fetched is not None:
         built, edition = fetched
         _write_cache(built, edition)
-        _db = FaaStore.from_items(built.items())
+        _db = _pack_or_keep(built)
     elif not _db:
         logger.info("[FAA] No NASR data available — chart icons run without US services")
 

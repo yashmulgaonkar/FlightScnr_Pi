@@ -22,6 +22,7 @@ Usage:
     # {"name": "New York City", "distance_km": 18.3}
 """
 
+import itertools
 import json
 import math
 import os
@@ -58,13 +59,18 @@ class CityStore:
         self._names = compact_store.TextBlob()
 
     def add(self, row) -> None:
-        try:
-            name, lat, lon = row[0], float(row[1]), float(row[2])
-        except (TypeError, ValueError, IndexError):
-            return
+        """Pack one ``[name, lat, lon]`` row, or raise ``StoreFormatError``
+        when the row is not exactly that shape."""
+        if not isinstance(row, list) or len(row) != 3:
+            raise compact_store.StoreFormatError(f"city row {row!r} is not [name, lat, lon]")
+        name = row[0]
+        if not isinstance(name, str):
+            raise compact_store.StoreFormatError(f"city name {name!r} is not a string")
+        lat = compact_store.check_number(row[1], -90.0, 90.0, f"city {name!r} lat")
+        lon = compact_store.check_number(row[2], -180.0, 180.0, f"city {name!r} lon")
         self._lat.append(lat)
         self._lon.append(lon)
-        self._names.add(str(name or ""))
+        self._names.add(name)
 
     def build(self) -> "CityStore":
         self._names.build()
@@ -138,6 +144,35 @@ def _download_and_build():
         return []
 
 
+def _packed_from_text(text: str) -> "CityStore | None":
+    """Packed list when the cache is the current version and every row is
+    exactly ``[name, lat, lon]``; else None with the reason logged."""
+    try:
+        meta, items = compact_store.split_cache(text, "cities")
+        if meta.get("_version") != CACHE_VERSION:
+            return None
+        first = next(items, None)
+        if first is None:
+            return CityStore.from_rows(())
+        if first[0] is not None:
+            raise compact_store.StoreFormatError("cities member is not a list")
+        rows = itertools.chain((first[1],), (row for _, row in items))
+        return CityStore.from_rows(rows)
+    except Exception as exc:
+        print(f"[Cities] Packed store not used ({exc}) - loading the plain list")
+        return None
+
+
+def _pack_or_keep(rows):
+    if not isinstance(rows, list) or not rows:
+        return rows
+    try:
+        return CityStore.from_rows(rows)
+    except Exception as exc:
+        print(f"[Cities] Packed store not used ({exc}) - keeping the plain list")
+        return rows
+
+
 def _load():
     """Load from cache file or download if not present. Thread-safe."""
     global _db, _loaded
@@ -152,19 +187,17 @@ def _load():
             try:
                 with open(CACHE_FILE, "r", encoding="utf-8") as f:
                     text = f.read()
-                try:
-                    meta, items = compact_store.split_cache(text, "cities")
-                except (compact_store.CacheFormatError, ValueError):
-                    meta, items = {}, iter(())
-                if meta.get("_version") == CACHE_VERSION:
-                    _db = CityStore.from_rows(row for _, row in items)
+                store = _packed_from_text(text)
+                if store is not None:
                     del text
+                    _db = store
                     _loaded = True
                     return
                 raw = json.loads(text)
                 del text
+
                 if isinstance(raw, dict) and raw.get("_version") == CACHE_VERSION:
-                    _db = CityStore.from_rows(raw.get("cities", []))
+                    _db = raw.get("cities", [])
                     _loaded = True
                     return
                 else:
@@ -178,8 +211,7 @@ def _load():
             except Exception as e:
                 print(f"[Cities] Cache load failed: {e} - re-downloading")
 
-        built = _download_and_build()
-        _db = CityStore.from_rows(built) if isinstance(built, list) else built
+        _db = _pack_or_keep(_download_and_build())
         _loaded = True
 
 
