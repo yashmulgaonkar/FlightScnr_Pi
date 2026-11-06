@@ -57,6 +57,10 @@ class FaaStore:
     """Packed ``ident -> {fuel, beacon, towered}``: a sorted index and one
     flag byte per airport; ``get`` builds the dict on access."""
 
+    # Keys a record carries; a new flag in ``distill_apt_base_rows`` must be
+    # packed here too (tests/test_compact_store_guards.py enforces that).
+    FIELDS = frozenset({"fuel", "beacon", "towered"})
+
     def __init__(self):
         self._index = compact_store.PackedIndex(8)
         self._flags = array("B")

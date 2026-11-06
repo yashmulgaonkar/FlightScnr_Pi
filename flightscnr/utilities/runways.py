@@ -52,25 +52,26 @@ class RunwayStore:
     ``get(ident)`` returns the list of segment dicts like the plain dict did."""
 
     _FIELDS = ("le_lat", "le_lon", "he_lat", "he_lon")
+    # Keys a segment carries; a new field in ``runway_from_csv_row`` must be
+    # packed here too (tests/test_compact_store_guards.py enforces that).
+    FIELDS = frozenset({"le_lat", "le_lon", "he_lat", "he_lon", "le_ident", "he_ident", "surface", "length_ft"})
 
     def __init__(self):
         self._coords = tuple(array("d") for _ in self._FIELDS)
         self._length = array("i")
         self._surface = array("H")
-        self._surfaces = compact_store.Enum()
+        self._surfaces = compact_store.Enum(65536)  # two bytes per segment
         self._le_ident = compact_store.TextBlob()
         self._he_ident = compact_store.TextBlob()
         self._airports = compact_store.PackedIndex(8)
         self._seg_start = array("I", [0])
         self._n_airports = 0
-        self._skipped = 0
 
     def add(self, ident: str, segments) -> None:
         ident = str(ident or "").strip().upper()
         if not ident or not isinstance(segments, list):
             return
         if not self._airports.add(ident, self._n_airports):
-            self._skipped += 1
             return
         for seg in segments:
             if not isinstance(seg, dict):
@@ -96,8 +97,7 @@ class RunwayStore:
         self._airports.build()
         self._le_ident.build()
         self._he_ident.build()
-        if self._skipped:
-            logger.info("[Runways] %d airport idents did not fit the packed index", self._skipped)
+        self.overflow = self._airports.overflow_count
         return self
 
     @classmethod
@@ -307,7 +307,12 @@ def _load() -> None:
             except (compact_store.CacheFormatError, ValueError):
                 meta, items = {}, iter(())
             if meta.get("_version") == CACHE_VERSION:
-                _db = RunwayStore.from_items(items)
+                try:
+                    _db = RunwayStore.from_items(items)
+                except compact_store.StoreLimitError as exc:
+                    print(f"[Runways] Packed store limit hit ({exc}) - using plain dict")
+                    raw = json.loads(text)
+                    _db = raw.get("runways") or {}
                 del text
                 _loaded = True
                 return
@@ -330,7 +335,14 @@ def _load() -> None:
     if not built and stale:
         print("[Runways] Using previous cache (degraded)")
         built = stale
-    _db = RunwayStore.from_items(built.items()) if isinstance(built, dict) else built
+    if isinstance(built, dict):
+        try:
+            _db = RunwayStore.from_items(built.items())
+        except compact_store.StoreLimitError as exc:
+            print(f"[Runways] Packed store limit hit ({exc}) - using plain dict")
+            _db = built
+    else:
+        _db = built
     _loaded = True
 
 
