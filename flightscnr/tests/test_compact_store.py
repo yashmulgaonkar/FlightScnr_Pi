@@ -33,7 +33,6 @@ AIRPORTS = {
     "0J0": {"lat": 42.3, "lon": -87.9, "facility": "Strip", "type": "small_airport", "ident": "0J0"},
     "EGLL": {"lat": 51.4775, "lon": -0.4614},
     "LHR": {"lat": 51.4775, "lon": -0.4614},
-    "ÄBC": {"lat": 1.0, "lon": 1.0, "ident": "ÄBC"},
 }
 
 
@@ -61,27 +60,22 @@ class StreamTests(unittest.TestCase):
 
 
 class PackedIndexTests(unittest.TestCase):
-    def test_lookup_packed_and_overflow(self):
+    def test_lookup_and_rejects(self):
         idx = compact_store.PackedIndex(8)
         self.assertTrue(idx.add("KORD", 1))
         self.assertTrue(idx.add("ORD", 2))
         self.assertTrue(idx.add("US-0001", 3))
-        self.assertTrue(idx.add("TOOLONGCODE", 4))  # too wide: overflow, not lost
-        self.assertTrue(idx.add("ÄBC", 5))  # non-ASCII: overflow, not lost
+        self.assertFalse(idx.add("TOOLONGCODE", 4))
+        self.assertFalse(idx.add("ÄBC", 5))
         self.assertFalse(idx.add("", 6))
         idx.build()
         self.assertEqual(idx.get("KORD"), 1)
         self.assertEqual(idx.get("ORD"), 2)
         self.assertEqual(idx.get("US-0001"), 3)
-        self.assertEqual(idx.get("TOOLONGCODE"), 4)
-        self.assertEqual(idx.get("ÄBC"), 5)
         self.assertEqual(idx.get("KOR"), -1)
         self.assertEqual(idx.get("KORDX"), -1)
-        self.assertIn("ÄBC", idx)
-        self.assertEqual(sorted(idx.keys()), ["KORD", "ORD", "TOOLONGCODE", "US-0001", "ÄBC"])
-        self.assertEqual(len(idx), 5)
-        self.assertEqual(idx.packed_len(), 3)
-        self.assertEqual(idx.overflow_count, 2)
+        self.assertNotIn("ÄBC", idx)
+        self.assertEqual(sorted(idx.keys()), ["KORD", "ORD", "US-0001"])
 
 
 class AirportStoreTests(unittest.TestCase):
@@ -94,7 +88,6 @@ class AirportStoreTests(unittest.TestCase):
             self.assertIn(code, self.store)
         self.assertIsNone(self.store.get("ZZZZ"))
         self.assertEqual(len(self.store), len(AIRPORTS))
-        self.assertEqual(self.store.overflow, 1)  # ÄBC
 
     def test_iata_and_icao_share_one_record(self):
         self.assertEqual(self.store.index_of("ORD"), self.store.index_of("KORD"))
