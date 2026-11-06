@@ -315,8 +315,14 @@ def active_client_wifi() -> bool:
 # nmcli costs ~150 ms of CPU and a D-Bus round trip per call and the display
 # asked three times every few seconds. The kernel's view of wlan0 (operstate +
 # carrier) is free to read and changes whenever the association does, so a
-# confirmed nmcli answer is reused while that view is unchanged, up to a TTL.
+# confirmed "up" answer is reused while that view is unchanged, up to a TTL.
 # Explicit radio changes (AP up/down, joins) invalidate it.
+#
+# A "down" answer is never reused. After a reassociation wlan0 is up with
+# carrier before NetworkManager has an address, and nmcli reports that
+# "connecting" window as not connected; the sysfs view does not change when
+# the lease arrives, so a cached down would outlive the offline grace and
+# open the setup hotspot over a healthy link.
 _LINK_SYSFS_TTL_S = 30.0
 _link_sysfs_sig: tuple[str, str] | None = None
 _link_sysfs_state: LinkState | str = ""
@@ -349,8 +355,9 @@ def invalidate_link_probe() -> None:
 def probe_link(*, fresh: bool = False) -> LinkState:
     """Ethernet carrier or client Wi-Fi: up / down / unknown.
 
-    ``fresh`` forces nmcli; otherwise a confirmed up/down answer is reused
-    while wlan0's sysfs state is unchanged and younger than ``_LINK_SYSFS_TTL_S``.
+    ``fresh`` forces nmcli; otherwise a confirmed "up" answer is reused while
+    wlan0's sysfs state is unchanged and younger than ``_LINK_SYSFS_TTL_S``.
+    Down and unknown answers are probed again on every call.
     """
     global _link_sysfs_sig, _link_sysfs_state, _link_sysfs_at
     if ethernet_up():
@@ -361,12 +368,12 @@ def probe_link(*, fresh: bool = False) -> LinkState:
         not fresh
         and sig is not None
         and sig == _link_sysfs_sig
-        and _link_sysfs_state in ("up", "down")
+        and _link_sysfs_state == "up"
         and now - _link_sysfs_at < _LINK_SYSFS_TTL_S
     ):
-        return _link_sysfs_state  # type: ignore[return-value]
+        return "up"
     state = probe_client_wifi()
-    if sig is not None and state in ("up", "down"):
+    if sig is not None and state == "up":
         _link_sysfs_sig, _link_sysfs_state, _link_sysfs_at = sig, state, now
     else:
         invalidate_link_probe()
