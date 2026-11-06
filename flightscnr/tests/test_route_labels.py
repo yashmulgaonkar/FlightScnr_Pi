@@ -11,6 +11,7 @@ import os
 import sys
 import json
 import tempfile
+import types
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -33,6 +34,10 @@ def test_route_display_one_line():
     with patch.object(airports_mod, "CACHE_FILE", cache_path):
         airports_mod._loaded = False
         airports_mod._db = {}
-        lines = route_display_lines("SFO", "JFK")
+        # Without a font the label wraps to two lines; a font that reports a
+        # narrow width keeps the firmware's one-line layout.
+        narrow = types.SimpleNamespace(size=lambda text: (len(text) * 6, 12), get_height=lambda: 12)
+        lines = route_display_lines("SFO", "JFK", font=narrow)
         assert len(lines) == 1
         assert lines[0] == "SFO, San Francisco > JFK, New York"
+        assert route_display_lines("SFO", "JFK") == ["SFO, San Francisco", "> JFK, New York"]

@@ -45,11 +45,11 @@ class TestPickAirportAt(unittest.TestCase):
             "name": "Oakland",
             "type": "large_airport",
         }
-        airport_overlay._airports = [near, far]
-        airport_overlay._cache_key = ("test",)
-        airport_overlay._loading = False
-
-        with mock.patch.object(airport_overlay, "_icons_on", return_value=True), mock.patch.object(
+        # The pick reads the cache through _ensure_cached, which is keyed on the
+        # live query (home location, range); hand it the fixture list directly.
+        with mock.patch.object(
+            airport_overlay, "_ensure_cached", return_value=([near, far], [])
+        ), mock.patch.object(airport_overlay, "_icons_on", return_value=True), mock.patch.object(
             airport_overlay,
             "_screen_xy",
             side_effect=lambda lat, lon: (

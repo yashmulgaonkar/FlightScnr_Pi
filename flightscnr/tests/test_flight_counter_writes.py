@@ -76,7 +76,10 @@ def test_force_bypasses_the_interval(monkeypatch, tmp_path):
 def test_the_file_is_written_compact(monkeypatch, tmp_path):
     path = tmp_path / "flight_counter.json"
     monkeypatch.setattr(overhead, "COUNTER_FILE", str(path))
-    payload = {"2026-08-30": {"flights": [f"N{i:05d}" for i in range(200)]}}
+    # Days older than the retention window are pruned on save; use today.
+    from datetime import date
+
+    payload = {str(date.today()): {"flights": [f"N{i:05d}" for i in range(200)]}}
     overhead._save_counter_log(payload)
 
     text = path.read_text(encoding="utf-8")

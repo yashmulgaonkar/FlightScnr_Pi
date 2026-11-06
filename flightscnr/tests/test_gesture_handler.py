@@ -52,11 +52,42 @@ pinch_handler = _load_module(
 # gesture_handler imports display.round_touch.* — stub package for isolated tests.
 import types
 
-if "display.round_touch.input_handler" not in sys.modules:
-    display_pkg = types.ModuleType("display")
-    round_touch_pkg = types.ModuleType("display.round_touch")
-    sys.modules["display"] = display_pkg
-    sys.modules["display.round_touch"] = round_touch_pkg
+import pytest
+
+# Remember what the real package had so the stubs below can be undone: left in
+# sys.modules they shadowed display.round_touch.rotation for every later test
+# in the same process (test_display_rotation, test_rim_target_style, ...).
+#
+# Import the real package first. Its __init__ pulls in app, which binds the
+# input_handler it finds in sys.modules for good; if that happens while the
+# stubs are installed (any test here that touches display.round_touch does
+# it), app keeps the isolated copy and a later test_favourite_cycle patches a
+# different module than the one app reads. Only the Pi-less environments where
+# the real package cannot import at all fall back to the placeholder package.
+try:
+    import display.round_touch  # noqa: F401
+except Exception:  # pragma: no cover - keeps the isolated tests runnable
+    pass
+_STUB_KEYS = (
+    "display.round_touch.input_handler",
+    "display.round_touch.pinch_handler",
+    "display.round_touch.rotation",
+)
+_saved_modules = {key: sys.modules.get(key) for key in _STUB_KEYS}
+_saved_pkg_attrs = {
+    name: getattr(sys.modules.get("display.round_touch"), name, None)
+    for name in ("rotation", "input_handler", "pinch_handler")
+}
+
+# When this file is collected before anything imported the real package, a
+# placeholder package is needed to load the copies; it must go away again or
+# the real display.round_touch can never be imported in this process.
+_created_pkgs: list[str] = []
+if "display.round_touch" not in sys.modules:
+    for _name in ("display", "display.round_touch"):
+        if _name not in sys.modules:
+            sys.modules[_name] = types.ModuleType(_name)
+            _created_pkgs.append(_name)
 sys.modules["display.round_touch.input_handler"] = input_handler
 sys.modules["display.round_touch.pinch_handler"] = pinch_handler
 rotation_stub = types.ModuleType("display.round_touch.rotation")
@@ -72,6 +103,50 @@ gesture_handler = _load_module(
     "gesture_test_gesture_handler",
     os.path.join(_RT, "gesture_handler.py"),
 )
+
+
+def _install_stubs() -> None:
+    sys.modules["display.round_touch.input_handler"] = input_handler
+    sys.modules["display.round_touch.pinch_handler"] = pinch_handler
+    sys.modules["display.round_touch.rotation"] = rotation_stub
+    pkg = sys.modules.get("display.round_touch")
+    if pkg is not None:
+        pkg.rotation = rotation_stub
+        pkg.input_handler = input_handler
+        pkg.pinch_handler = pinch_handler
+
+
+def _restore_modules() -> None:
+    for key, mod in _saved_modules.items():
+        if mod is None:
+            sys.modules.pop(key, None)
+        else:
+            sys.modules[key] = mod
+    for name in _created_pkgs:
+        if isinstance(sys.modules.get(name), types.ModuleType) and not hasattr(
+            sys.modules[name], "__path__"
+        ):
+            sys.modules.pop(name, None)
+    pkg = sys.modules.get("display.round_touch")
+    if pkg is not None:
+        for name, value in _saved_pkg_attrs.items():
+            if value is None:
+                if hasattr(pkg, name):
+                    delattr(pkg, name)
+            else:
+                setattr(pkg, name, value)
+
+
+# The isolated copies are loaded; give the real modules back to everyone else
+# and re-install the stubs only while this module's tests run.
+_restore_modules()
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _stubbed_round_touch():
+    _install_stubs()
+    yield
+    _restore_modules()
 
 GESTURE_LOGIC_VERSION = gesture_handler.GESTURE_LOGIC_VERSION
 RadarGestureHandler = gesture_handler.RadarGestureHandler

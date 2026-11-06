@@ -30,3 +30,7 @@ pygame>=2.5.0
 
 # Lofi playlist album art (ID3 APIC extraction for the web portal)
 mutagen>=1.46
+
+# LiveATC station tables (feed names such as "KHPN Tower" instead of mount ids)
+beautifulsoup4>=4.12
+lxml>=5.0

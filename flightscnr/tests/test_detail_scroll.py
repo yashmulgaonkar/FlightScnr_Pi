@@ -66,16 +66,16 @@ class DetailScrollTests(unittest.TestCase):
             "photo_credit": "Photo credit line",
         }
         with mock.patch.object(common, "draw_logo", side_effect=_tall_header):
-            with mock.patch.object(nav, "draw_scroll_overflow_cues") as cue:
+            with mock.patch.object(nav, "draw_curved_scroll_arc") as cue:
                 max_scroll = flight_detail.draw_flight_detail(
                     self._surface(), [flight], 0, 0
                 )
         self.assertGreater(max_scroll, 0)
         cue.assert_called_once()
-        _surface, top, bottom, scroll, max_s = cue.call_args[0]
+        _surface, scroll, max_s = cue.call_args[0]
         self.assertEqual(scroll, 0)
         self.assertEqual(max_s, max_scroll)
-        self.assertLess(top, bottom)
+        self.assertGreater(cue.call_args[1]["viewport_h"], 0)
 
     def test_flight_fits_without_scrollbar(self):
         from display.round_touch import nav
@@ -83,7 +83,7 @@ class DetailScrollTests(unittest.TestCase):
 
         flight = {"callsign": "N123AB"}
         with mock.patch.object(common, "draw_logo", side_effect=lambda s, f, y, **k: y):
-            with mock.patch.object(nav, "draw_scroll_overflow_cues") as cue:
+            with mock.patch.object(nav, "draw_curved_scroll_arc") as cue:
                 max_scroll = flight_detail.draw_flight_detail(
                     self._surface(), [flight], 0, 0
                 )
@@ -134,7 +134,7 @@ class DetailScrollTests(unittest.TestCase):
         with mock.patch.object(
             fire_detail, "_draw_fire_icon_header", side_effect=_tall_icon
         ):
-            with mock.patch.object(nav, "draw_scroll_overflow_cues") as cue:
+            with mock.patch.object(nav, "draw_curved_scroll_arc") as cue:
                 max_scroll = fire_detail.draw_fire_detail(
                     self._surface(), [fire], 0, 0
                 )
@@ -162,7 +162,7 @@ class DetailScrollTests(unittest.TestCase):
         with mock.patch.object(
             earthquake_detail, "_draw_quake_icon_header", side_effect=_tall_icon
         ):
-            with mock.patch.object(nav, "draw_scroll_overflow_cues") as cue:
+            with mock.patch.object(nav, "draw_curved_scroll_arc") as cue:
                 max_scroll = earthquake_detail.draw_earthquake_detail(
                     self._surface(), [quake], 0, 0
                 )

@@ -165,8 +165,9 @@ class TestThemeCrayonGrid:
     def test_text_color_groups_are_on_colors_page(self):
         assert info.RGB_GROUP_TEXT_DARK in info._RGB_GROUP_ORDER
         assert info.RGB_GROUP_TEXT_LIGHT in info._RGB_GROUP_ORDER
-        assert "Flight Number" in info._RGB_GROUP_TITLES[info.RGB_GROUP_TEXT_DARK]
-        assert "Flight Number" in info._RGB_GROUP_TITLES[info.RGB_GROUP_TEXT_LIGHT]
+        # Titles are catalogue keys now; the English text lives in the catalogue.
+        assert "Flight Number" in info.tr(info._RGB_GROUP_TITLES[info.RGB_GROUP_TEXT_DARK])
+        assert "Flight Number" in info.tr(info._RGB_GROUP_TITLES[info.RGB_GROUP_TEXT_LIGHT])
 
 
 class TestRowsStartAtContentTop:
