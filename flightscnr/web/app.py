@@ -953,6 +953,8 @@ def display_json():
             "idle_dim_percent": settings.idle_dim_percent(),
             "idle_off_enabled": settings.idle_off_enabled(),
             "idle_off_minutes": settings.idle_off_minutes(),
+            "pixel_shift_enabled": settings.pixel_shift_enabled(),
+            "pixel_shift_minutes": settings.pixel_shift_minutes(),
             "flight_detail_timeout_s": settings.flight_detail_timeout_s(),
             "clock_timeout_s": settings.clock_timeout_s(),
             "auto_idle_clock": settings.auto_idle_clock_enabled(),
@@ -1013,10 +1015,13 @@ def display_save():
         settings.set_idle_dim_enabled(bool(data.get("idle_dim_enabled")))
     if "idle_off_enabled" in data:
         settings.set_idle_off_enabled(bool(data.get("idle_off_enabled")))
+    if "pixel_shift_enabled" in data:
+        settings.set_pixel_shift_enabled(bool(data.get("pixel_shift_enabled")))
     for key, setter in (
         ("idle_dim_minutes", settings.set_idle_dim_minutes),
         ("idle_dim_percent", settings.set_idle_dim_percent),
         ("idle_off_minutes", settings.set_idle_off_minutes),
+        ("pixel_shift_minutes", settings.set_pixel_shift_minutes),
     ):
         if key in data:
             try:
@@ -1131,6 +1136,8 @@ def display_save():
             "idle_dim_percent": settings.idle_dim_percent(),
             "idle_off_enabled": settings.idle_off_enabled(),
             "idle_off_minutes": settings.idle_off_minutes(),
+            "pixel_shift_enabled": settings.pixel_shift_enabled(),
+            "pixel_shift_minutes": settings.pixel_shift_minutes(),
             "flight_detail_timeout_s": settings.flight_detail_timeout_s(),
             "clock_timeout_s": settings.clock_timeout_s(),
             "auto_idle_clock": settings.auto_idle_clock_enabled(),

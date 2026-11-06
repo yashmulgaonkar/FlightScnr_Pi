@@ -1104,5 +1104,11 @@
   "portal.display.idle.minutes.15": "15 minutes",
   "portal.display.idle.minutes.30": "30 minutes",
   "portal.display.idle.minutes.60": "60 minutes",
-  "portal.display.idle.minutes.120": "120 minutes"
+  "portal.display.idle.minutes.120": "120 minutes",
+  "portal.display.pixel_shift.label": "Protection contre le marquage",
+  "portal.display.pixel_shift_every.label": "Décaler toutes les",
+  "portal.display.pixel_shift.hint": "Décalage de pixels : déplace toute l'image d'un ou deux pixels selon un cycle lent pour que les éléments fixes ne restent pas des heures sur les mêmes pixels. Identique à Réglages → Affichage sur l'appareil.",
+  "settings.row.pixel_shift": "Protection contre le marquage",
+  "settings.row.pixel_shift_every": "Décaler toutes les › {value} min",
+  "settings.picker.pixel_shift_every": "Décaler toutes les"
 }

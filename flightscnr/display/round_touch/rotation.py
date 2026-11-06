@@ -59,6 +59,44 @@ _needs_full = False
 # the full-screen flip. Another screen still flips.
 _upload_y: int | None = None
 _decouple_logged = False
+# Burn-in protection: the whole picture sits this many display pixels off
+# centre (see set_pixel_shift). Both present paths apply it; to_logical
+# undoes it so touches still land on what the finger covers.
+_shift: tuple[int, int] = (0, 0)
+
+
+def pixel_shift() -> tuple[int, int]:
+    return _shift
+
+
+def set_pixel_shift(dx: int, dy: int) -> bool:
+    """Move the whole picture by (dx, dy) display pixels.
+
+    Returns True when the offset changed; the next present then repaints the
+    full frame instead of trusting dirty-rect state.
+    """
+    global _shift, _needs_full
+    new = (int(dx), int(dy))
+    if new == _shift:
+        return False
+    _shift = new
+    _needs_full = True
+    return True
+
+
+def pixel_shift_path(radius: int) -> tuple[tuple[int, int], ...]:
+    """Perimeter of the square [-radius, radius]^2, one pixel per step.
+
+    Walked clockwise from the top-left corner; 8 * radius steps, each a single
+    pixel move, so a shift is never visible as a jump.
+    """
+    r = max(1, int(radius))
+    path: list[tuple[int, int]] = []
+    path.extend((x, -r) for x in range(-r, r))
+    path.extend((r, y) for y in range(-r, r))
+    path.extend((x, r) for x in range(r, -r, -1))
+    path.extend((-r, y) for y in range(r, -r, -1))
+    return tuple(path)
 
 
 def prewarm_base(base_layer: pygame.Surface, layer_gen: int) -> None:
@@ -115,6 +153,8 @@ def rotation_degrees() -> int:
 
 def to_logical(x: float, y: float) -> tuple[int, int]:
     """Map a physical screen/touch coordinate into the draw buffer."""
+    x -= _shift[0]
+    y -= _shift[1]
     side = theme.SIZE
     rotation = rotation_degrees()
     if rotation == 0:
@@ -135,19 +175,15 @@ def present(display: pygame.Surface, frame: pygame.Surface) -> None:
     _needs_full = True
     rotation = rotation_degrees()
     if rotation == 0:
-        if display.get_size() == frame.get_size():
-            display.blit(frame, (0, 0))
-        else:
-            display.fill((0, 0, 0))
-            display.blit(frame, _center_offset(display, frame))
-        return
-
-    rotated = pygame.transform.rotate(frame, -rotation)
-    if display.get_size() == rotated.get_size():
+        rotated = frame
+    else:
+        rotated = pygame.transform.rotate(frame, -rotation)
+    origin = origin_offset(display, rotated)
+    if origin == (0, 0) and display.get_size() == rotated.get_size():
         display.blit(rotated, (0, 0))
         return
     display.fill((0, 0, 0))
-    display.blit(rotated, _center_offset(display, rotated))
+    display.blit(rotated, origin)
 
 
 def present_radar_sweep(
@@ -231,9 +267,9 @@ def present_radar_sweep(
         # swap_in: new static layer. _needs_full: another screen (settings, etc.)
         # overwrote the framebuffer — dirty-rect erase would paint the sweep on
         # stale pixels and look like a full refresh every beam step.
-        if display.get_size() != _rot_base.get_size():
+        origin_off = origin_offset(display, _rot_base)
+        if origin_off != (0, 0) or display.get_size() != _rot_base.get_size():
             display.fill((0, 0, 0))
-            origin_off = _center_offset(display, _rot_base)
             display.blit(_rot_base, origin_off)
         else:
             display.blit(_rot_base, (0, 0))
@@ -263,8 +299,7 @@ def present_radar_sweep(
     else:
         if frame_debug.ENABLED:
             _t = time.perf_counter()
-        if display.get_size() != _rot_base.get_size():
-            origin_off = _center_offset(display, _rot_base)
+        origin_off = origin_offset(display, _rot_base)
         # Erase the previous wedge by restoring that rect from the static base.
         if _prev_sweep_rect is not None:
             r = _prev_sweep_rect
@@ -1154,3 +1189,9 @@ def _center_offset(dst: pygame.Surface, src: pygame.Surface) -> tuple[int, int]:
         (dst.get_width() - src.get_width()) // 2,
         (dst.get_height() - src.get_height()) // 2,
     )
+
+
+def origin_offset(dst: pygame.Surface, src: pygame.Surface) -> tuple[int, int]:
+    """Where ``src`` lands on ``dst``: centred, plus the pixel-shift offset."""
+    cx, cy = _center_offset(dst, src)
+    return (cx + _shift[0], cy + _shift[1])

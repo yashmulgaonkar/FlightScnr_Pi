@@ -1104,5 +1104,11 @@
   "portal.display.idle.minutes.15": "15 Minuten",
   "portal.display.idle.minutes.30": "30 Minuten",
   "portal.display.idle.minutes.60": "60 Minuten",
-  "portal.display.idle.minutes.120": "120 Minuten"
+  "portal.display.idle.minutes.120": "120 Minuten",
+  "portal.display.pixel_shift.label": "Schutz vor Einbrennen",
+  "portal.display.pixel_shift_every.label": "Verschieben alle",
+  "portal.display.pixel_shift.hint": "Pixelverschiebung: verschiebt das ganze Bild in einem langsamen Zyklus um ein bis zwei Pixel, damit statische Elemente nicht stundenlang auf denselben Pixeln liegen. Entspricht Einstellungen → Anzeige auf dem Gerät.",
+  "settings.row.pixel_shift": "Schutz vor Einbrennen",
+  "settings.row.pixel_shift_every": "Verschieben alle › {value} Min",
+  "settings.picker.pixel_shift_every": "Verschieben alle"
 }
