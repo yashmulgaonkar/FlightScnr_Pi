@@ -38,6 +38,14 @@ class CacheFormatError(ValueError):
     """The cache text is not the ``{"...": ..., big_key: {...} | [...]}`` shape."""
 
 
+class StoreLimitError(ValueError):
+    """A packed column cannot hold the data (a vocabulary outgrew its array).
+
+    Loaders catch this and keep the plain dict for that database, so new
+    data degrades to the old memory cost instead of losing entries.
+    """
+
+
 def _expect(text: str, pos: int, char: str) -> None:
     if pos >= len(text) or text[pos] != char:
         raise CacheFormatError(f"expected {char!r} at offset {pos}")
@@ -132,11 +140,13 @@ def split_cache(text: str, big_key: str) -> tuple[dict, Iterator[tuple[object, o
 class PackedIndex:
     """Sorted fixed-width ASCII keys to small ints, with no per-key objects.
 
-    Keys longer than ``width`` or outside ASCII are rejected by ``add``
-    (returns False) so callers can fall back or skip.
+    Keys longer than ``width`` or outside ASCII do not fit the packed blob;
+    they go to a small overflow dict instead so nothing is lost. Only the
+    empty key is rejected (``add`` returns False). ``overflow_count`` tells
+    loaders how many keys took that path, for a log line.
     """
 
-    __slots__ = ("width", "_pairs", "_blob", "_values", "_view")
+    __slots__ = ("width", "_pairs", "_blob", "_values", "_view", "_overflow")
 
     def __init__(self, width: int = 8):
         self.width = width
@@ -144,18 +154,27 @@ class PackedIndex:
         self._blob = b""
         self._values = array("I")
         self._view = None
+        self._overflow: dict[str, int] = {}
 
     def add(self, key: str, value: int) -> bool:
         if self._pairs is None:
             raise RuntimeError("index already built")
+        if not key:
+            return False
         try:
             raw = key.encode("ascii")
         except UnicodeEncodeError:
-            return False
-        if not raw or len(raw) > self.width:
-            return False
+            self._overflow[key] = value
+            return True
+        if len(raw) > self.width:
+            self._overflow[key] = value
+            return True
         self._pairs.append((raw.ljust(self.width, b"\0"), value))
         return True
+
+    @property
+    def overflow_count(self) -> int:
+        return len(self._overflow)
 
     def build(self) -> "PackedIndex":
         pairs = self._pairs or []
@@ -167,6 +186,10 @@ class PackedIndex:
         return self
 
     def __len__(self) -> int:
+        return len(self._values) + len(self._overflow)
+
+    def packed_len(self) -> int:
+        """Keys in the packed blob (slots 0..packed_len-1); overflow keys have no slot."""
         return len(self._values)
 
     def _pos(self, key: str) -> int:
@@ -187,10 +210,16 @@ class PackedIndex:
 
     def get(self, key: str, default: int = -1) -> int:
         i = self._pos(key)
-        return self._values[i] if i >= 0 else default
+        if i >= 0:
+            return self._values[i]
+        if self._overflow:
+            return self._overflow.get(key, default)
+        return default
 
     def __contains__(self, key: object) -> bool:
-        return isinstance(key, str) and self._pos(key) >= 0
+        if not isinstance(key, str):
+            return False
+        return self._pos(key) >= 0 or key in self._overflow
 
     def key_at(self, slot: int) -> str:
         w = self.width
@@ -202,6 +231,7 @@ class PackedIndex:
     def keys(self) -> Iterator[str]:
         for i in range(len(self._values)):
             yield self.key_at(i)
+        yield from self._overflow
 
 
 class _SliceView:
@@ -258,21 +288,27 @@ class TextBlob:
 
 
 class Enum:
-    """Small vocabulary (airport types, runway surfaces) to byte indices."""
+    """Small vocabulary (airport types, runway surfaces) to small ints.
 
-    __slots__ = ("values", "_index")
+    ``limit`` is the number of distinct values the owning array can hold
+    (256 for a ``B`` column, 65536 for ``H``). The first value past it
+    raises ``StoreLimitError`` rather than aliasing to another value.
+    """
 
-    def __init__(self):
+    __slots__ = ("values", "_index", "limit")
+
+    def __init__(self, limit: int = 65536):
         self.values: list[str] = [""]
         self._index: dict[str, int] = {"": 0}
+        self.limit = int(limit)
 
     def code(self, text: str) -> int:
         text = text or ""
         i = self._index.get(text)
         if i is None:
             i = len(self.values)
-            if i > 65535:
-                return 0
+            if i >= self.limit:
+                raise StoreLimitError(f"more than {self.limit} distinct values ({text!r})")
             self.values.append(text)
             self._index[text] = i
         return i

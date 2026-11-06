@@ -22,6 +22,7 @@ Usage:
 """
 
 import csv
+import itertools
 import json
 import os
 import threading
@@ -82,12 +83,18 @@ class AirportStore:
     ``compact_store`` for why the dict form is never kept.
     """
 
+    # Every key a record can carry. A new field in ``_record_from_row`` or
+    # ``build_db_from_csv_text`` must be added here and packed, or lookups
+    # silently lose it; tests/test_compact_store_guards.py enforces that.
+    FIELDS = frozenset({"lat", "lon", "name", "facility", "type", "elevation_ft", "ident"})
+
+
     def __init__(self):
         self._lat = array("d")
         self._lon = array("d")
         self._elev = array("i")
         self._type = array("B")
-        self._types = compact_store.Enum()
+        self._types = compact_store.Enum(256)  # one byte per record
         self._name = compact_store.TextBlob()
         self._facility = compact_store.TextBlob()
         self._key = compact_store.TextBlob()  # ident when the record has one, else its code
@@ -139,8 +146,9 @@ class AirportStore:
             if self._codes.add(code, idx):
                 self._n_codes += 1
         self._codes.build()
+        self.overflow = self._codes.overflow_count
         # Alias slots: a 3-letter code whose record ident is a different code.
-        for slot in range(len(self._codes)):
+        for slot in range(self._codes.packed_len()):
             code = self._codes.key_at(slot)
             if len(code) == 3:
                 idx = self._codes.value_at(slot)
@@ -208,8 +216,8 @@ class AirportStore:
         return self._codes.keys()
 
     def items(self):
-        for slot in range(len(self._codes)):
-            yield self._codes.key_at(slot), self.record(self._codes.value_at(slot))
+        for code in self._codes.keys():
+            yield code, self.record(self._codes.get(code))
 
     def __iter__(self):
         return self.keys()
@@ -227,7 +235,7 @@ class AirportStore:
             return self._codes.key_at(slot)
         lat = self._lat[idx]
         lon = self._lon[idx]
-        for s in range(len(self._codes)):
+        for s in range(self._codes.packed_len()):
             code = self._codes.key_at(s)
             if len(code) != 3:
                 continue
@@ -299,7 +307,14 @@ def _store_from_cache_text(text: str):
         return None, json.loads(text)
     if meta.get("_version") != CACHE_VERSION:
         return None, json.loads(text)
-    return AirportStore.from_items(items), None
+    # The member must be an object: a list streams as (None, item) pairs and
+    # would build an empty store without ever triggering a rebuild.
+    first = next(items, None)
+    if first is None:
+        return AirportStore.from_items(()), None
+    if first[0] is None:
+        return None, json.loads(text)
+    return AirportStore.from_items(itertools.chain((first,), items)), None
 
 
 def _record_from_row(row: dict) -> dict | None:
@@ -405,9 +420,24 @@ def _load():
             try:
                 with open(CACHE_FILE, "r", encoding="utf-8") as f:
                     text = f.read()
-                store, raw = _store_from_cache_text(text)
+                try:
+                    store, raw = _store_from_cache_text(text)
+                except compact_store.StoreLimitError as exc:
+                    # New data outgrew a packed column: keep the plain dict for
+                    # this run rather than drop entries or refetch.
+                    _safe_print(f"[Airports] Packed store limit hit ({exc}) - using plain dict")
+                    raw = json.loads(text)
+                    del text
+                    _db = raw.get("airports", {}) if isinstance(raw, dict) else {}
+                    _loaded = True
+                    return
                 del text
                 if store is not None:
+                    if store.overflow:
+                        _safe_print(
+                            f"[Airports] {store.overflow} codes did not fit the packed index "
+                            "(kept in overflow)"
+                        )
                     _db = store
                     _loaded = True
                     return
@@ -429,7 +459,14 @@ def _load():
             # Keep lookups working offline until a typed rebuild succeeds.
             _safe_print("[Airports] Using previous cache without type metadata (degraded)")
             built = stale
-        _db = AirportStore.from_items(built.items()) if isinstance(built, dict) else built
+        if isinstance(built, dict):
+            try:
+                _db = AirportStore.from_items(built.items())
+            except compact_store.StoreLimitError as exc:
+                _safe_print(f"[Airports] Packed store limit hit ({exc}) - using plain dict")
+                _db = built
+        else:
+            _db = built
         _loaded = True
 
 

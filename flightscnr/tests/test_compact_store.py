@@ -61,21 +61,27 @@ class StreamTests(unittest.TestCase):
 
 
 class PackedIndexTests(unittest.TestCase):
-    def test_lookup_and_rejects(self):
+    def test_lookup_packed_and_overflow(self):
         idx = compact_store.PackedIndex(8)
         self.assertTrue(idx.add("KORD", 1))
         self.assertTrue(idx.add("ORD", 2))
         self.assertTrue(idx.add("US-0001", 3))
-        self.assertFalse(idx.add("TOOLONGCODE", 4))
-        self.assertFalse(idx.add("ÄBC", 5))
+        self.assertTrue(idx.add("TOOLONGCODE", 4))  # too wide: overflow, not lost
+        self.assertTrue(idx.add("ÄBC", 5))  # non-ASCII: overflow, not lost
+        self.assertFalse(idx.add("", 6))
         idx.build()
         self.assertEqual(idx.get("KORD"), 1)
         self.assertEqual(idx.get("ORD"), 2)
         self.assertEqual(idx.get("US-0001"), 3)
+        self.assertEqual(idx.get("TOOLONGCODE"), 4)
+        self.assertEqual(idx.get("ÄBC"), 5)
         self.assertEqual(idx.get("KOR"), -1)
         self.assertEqual(idx.get("KORDX"), -1)
-        self.assertNotIn("ÄBC", idx)
-        self.assertEqual(sorted(idx.keys()), ["KORD", "ORD", "US-0001"])
+        self.assertIn("ÄBC", idx)
+        self.assertEqual(sorted(idx.keys()), ["KORD", "ORD", "TOOLONGCODE", "US-0001", "ÄBC"])
+        self.assertEqual(len(idx), 5)
+        self.assertEqual(idx.packed_len(), 3)
+        self.assertEqual(idx.overflow_count, 2)
 
 
 class AirportStoreTests(unittest.TestCase):
@@ -84,12 +90,11 @@ class AirportStoreTests(unittest.TestCase):
 
     def test_records_match_the_source_dicts(self):
         for code, rec in AIRPORTS.items():
-            if code == "ÄBC":
-                continue
             self.assertEqual(self.store.get(code), rec, code)
             self.assertIn(code, self.store)
         self.assertIsNone(self.store.get("ZZZZ"))
-        self.assertEqual(len(self.store), len(AIRPORTS) - 1)
+        self.assertEqual(len(self.store), len(AIRPORTS))
+        self.assertEqual(self.store.overflow, 1)  # ÄBC
 
     def test_iata_and_icao_share_one_record(self):
         self.assertEqual(self.store.index_of("ORD"), self.store.index_of("KORD"))
