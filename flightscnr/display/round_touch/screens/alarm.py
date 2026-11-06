@@ -39,6 +39,7 @@ _draft = {
     "volume": 80,
     "snooze": 9,
     "enabled": True,
+    "sound": "tones",
 }
 _hits: list[tuple[str, str, pygame.Rect]] = []
 _drag = {"kind": "", "last_y": 0, "origin": None, "samples": []}
@@ -69,6 +70,7 @@ def open_editor() -> None:
         volume=settings.alarm_volume(),
         snooze=settings.alarm_snooze_minutes(),
         enabled=bool(settings.alarm_enabled()),
+        sound=settings.alarm_sound(),
     )
     _editor = True
     _reset_column_scroll()
@@ -88,6 +90,7 @@ def save_editor() -> None:
     settings.set_alarm_volume(int(_draft["volume"]))
     settings.set_alarm_snooze_minutes(int(_draft["snooze"]))
     settings.set_alarm_enabled(bool(_draft["enabled"]))
+    settings.set_alarm_sound(str(_draft["sound"]))
     alarm_clock.clear_pending()
     if not _draft["enabled"]:
         alarm_clock.stop()
@@ -100,6 +103,11 @@ def toggle_enabled() -> None:
 
 def step_snooze(delta: int) -> None:
     _draft["snooze"] = alarm_clock.cycle_snooze(int(_draft["snooze"]), delta)
+
+
+def set_sound(sound: str) -> None:
+    if sound in settings.ALARM_SOUNDS:
+        _draft["sound"] = sound
 
 
 def clock_icon_hit(x: int, y: int) -> bool:
@@ -315,6 +323,9 @@ def _layout() -> dict:
     volume.midtop = (theme.CENTER_X, wheel.bottom + theme.s(14))
     snooze = pygame.Rect(0, 0, theme.s(210), theme.s(32))
     snooze.midtop = (theme.CENTER_X, volume.bottom + theme.s(8))
+    # Sound row: label on the left, Tones | LoFi segmented control on the right.
+    sound = pygame.Rect(0, 0, theme.s(210), theme.s(26))
+    sound.midtop = (theme.CENTER_X, snooze.bottom + theme.s(4))
     return {
         "wheel": wheel,
         "columns": columns,
@@ -322,6 +333,7 @@ def _layout() -> dict:
         "header_y": header_y,
         "volume": volume,
         "snooze": snooze,
+        "sound": sound,
     }
 
 
@@ -417,8 +429,11 @@ def draw_editor(surface) -> None:
     _hit("snooze_dec", "", minus_rect.inflate(theme.s(16), theme.s(12)))
     _hit("snooze_inc", "", plus_rect.inflate(theme.s(16), theme.s(12)))
 
+    sound_row = layout["sound"]
+    _draw_sound_row(surface, sound_row, body_font)
+
     switch = pygame.Rect(0, 0, theme.s(36), theme.s(20))
-    switch.midtop = (theme.CENTER_X + theme.s(28), snooze.bottom + theme.s(6))
+    switch.midtop = (theme.CENTER_X + theme.s(28), sound_row.bottom + theme.s(6))
     on = bool(_draft["enabled"])
     pygame.draw.rect(
         surface,
@@ -435,6 +450,40 @@ def draw_editor(surface) -> None:
         enabled_label.get_rect(midright=(switch.left - theme.s(8), switch.centery)),
     )
     _hit("enabled", "", switch.inflate(theme.s(8), theme.s(8)))
+
+
+def _draw_sound_row(surface, row: pygame.Rect, font) -> None:
+    """``Sound`` label, then a two-segment Tones | LoFi control on the right."""
+    label = font.render(tr("alarm.sound"), True, theme.LABEL)
+    surface.blit(label, label.get_rect(midleft=(row.left, row.centery)))
+    choices = (
+        ("tones", tr("alarm.sound.tones")),
+        ("lofi", tr("alarm.sound.lofi")),
+    )
+    # Each segment fits its own text; long translations ("Hangjelzés") give
+    # up padding before they reach the label.
+    text_w = [font.size(text)[0] for _key, text in choices]
+    room = row.width - label.get_width() - theme.s(8) - sum(text_w)
+    pad = max(theme.s(4), min(theme.s(10), room // (2 * len(choices))))
+    widths = [w + 2 * pad for w in text_w]
+    seg_h = row.height
+    control = pygame.Rect(0, 0, sum(widths), seg_h)
+    control.midright = (row.right, row.centery)
+    radius = seg_h // 2
+    pygame.draw.rect(surface, _CARD_FILL, control, border_radius=radius)
+    selected = str(_draft.get("sound") or "tones")
+    left = control.left
+    for (key, text), seg_w in zip(choices, widths):
+        seg = pygame.Rect(left, control.top, seg_w, seg_h)
+        left += seg_w
+        on = key == selected
+        if on:
+            pygame.draw.rect(surface, theme.SWEEP, seg, border_radius=radius)
+        img = font.render(text, True, (16, 18, 20) if on else theme.MUTED)
+        surface.blit(img, img.get_rect(center=seg.center))
+        # No vertical padding: the Alarm switch's touch target sits just below.
+        _hit("sound", key, seg)
+    pygame.draw.rect(surface, _CARD_BORDER, control, width=1, border_radius=radius)
 
 
 def _control_at(x: int, y: int) -> tuple[str, str] | None:
@@ -554,6 +603,8 @@ def editor_tap(x: int, y: int) -> str:
         step_snooze(1)
     elif action == "enabled":
         toggle_enabled()
+    elif action == "sound":
+        set_sound(value)
     elif action == "volume":
         _set_volume_at(x)
     return action

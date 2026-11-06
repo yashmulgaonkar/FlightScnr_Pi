@@ -9,16 +9,31 @@
 
 """Daily alarm: schedule, snooze, and playlist playback.
 
-Drop audio files in ``flightscnr/assets/alarm_audio/``, ``flightscnr/alarm_audio/``,
-``alarm_audio/`` at the repo root, or ``$FLIGHTSCNR_DATA_DIR/alarm_audio``.
-While the alarm is ringing they play in name order with a one-second gap, then loop.
+Two sounds, chosen in the alarm editor (``settings.alarm_sound``):
+
+- ``tones``: audio files in ``flightscnr/assets/alarm_audio/``,
+  ``flightscnr/alarm_audio/``, ``alarm_audio/`` at the repo root, or
+  ``$FLIGHTSCNR_DATA_DIR/alarm_audio``, in name order.
+- ``lofi``: a random track from the LoFi playlist (starter pack + user
+  MP3s, minus disabled tracks) every time the alarm rings, and another
+  random one whenever a track ends while it is still ringing. The previous
+  track is never picked twice in a row. With no LoFi tracks installed the
+  alarm falls back to the tones so it never rings silently.
+
+While the alarm is ringing the files play with a one-second gap, then loop.
 Quiet hours, off-hours, and the master mute do not silence it.
+
+Loudness comes only from the alarm editor's own volume slider
+(``settings.alarm_volume``). The radar's master volume and master mute are
+never applied, and the OS output is raised to 100% when the alarm starts so a
+quiet system mixer cannot turn it down either.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import random
 import shutil
 import signal
 import subprocess
@@ -41,6 +56,15 @@ _display_minute = 30
 _stop_audio = threading.Event()
 _audio_thread: threading.Thread | None = None
 _proc: subprocess.Popen | None = None
+# Source of the files the ringing alarm is playing ("tones" / "lofi"), or ""
+# while silent. The LoFi bed steps aside while this is "lofi".
+_playing_source = ""
+# Last LoFi track the alarm played, so the next pick (this ring, a snooze, or
+# tomorrow) is a different one.
+_last_lofi_track = ""
+
+SOUND_TONES = "tones"
+SOUND_LOFI = "lofi"
 
 
 def parse_hhmm(text: str, default: tuple[int, int] = (6, 30)) -> tuple[int, int]:
@@ -175,6 +199,46 @@ def list_audio_files() -> list[str]:
     return found
 
 
+def list_lofi_files() -> list[str]:
+    """The LoFi playlist (starter pack + user MP3s, minus disabled tracks)."""
+    try:
+        from utilities import lofi_audio
+
+        return list(lofi_audio.playlist())
+    except Exception:
+        logger.debug("Alarm LoFi playlist lookup failed", exc_info=True)
+        return []
+
+
+def pick_lofi_track(files: list[str]) -> str:
+    """A random track, avoiding the one the alarm played last when it can."""
+    global _last_lofi_track
+    choices = [path for path in files if path != _last_lofi_track] or list(files)
+    track = random.choice(choices)
+    _last_lofi_track = track
+    return track
+
+
+def playback_files(sound: str) -> tuple[str, list[str]]:
+    """``(source, files)`` for one pass of the alarm.
+
+    LoFi: one random track per pass, so every ring and every track change
+    picks afresh. With no LoFi tracks the tones play instead.
+    """
+    if sound == SOUND_LOFI:
+        files = list_lofi_files()
+        if files:
+            return SOUND_LOFI, [pick_lofi_track(files)]
+        logger.info("Alarm sound is LoFi but no LoFi tracks are installed; playing tones")
+    return SOUND_TONES, list_audio_files()
+
+
+def playing_lofi() -> bool:
+    """True while the ringing alarm is playing the LoFi playlist."""
+    with _lock:
+        return _ringing and _playing_source == SOUND_LOFI
+
+
 def is_ringing() -> bool:
     with _lock:
         return _ringing
@@ -274,10 +338,19 @@ def _spawn(path: str, volume: int) -> subprocess.Popen | None:
     return None
 
 
+def _alarm_sound_setting() -> str:
+    try:
+        return _settings().alarm_sound()
+    except Exception:
+        return SOUND_TONES
+
+
 def _play_loop() -> None:
-    global _proc
+    global _proc, _playing_source
     while not _stop_audio.is_set():
-        files = list_audio_files()
+        source, files = playback_files(_alarm_sound_setting())
+        with _lock:
+            _playing_source = source if files else ""
         if not files:
             logger.debug("Alarm ringing with no files in alarm_audio")
             if _stop_audio.wait(GAP_S):
@@ -286,6 +359,7 @@ def _play_loop() -> None:
         for path in files:
             if _stop_audio.is_set():
                 return
+            # The alarm slider only: never the radar's master volume or mute.
             try:
                 volume = _settings().alarm_volume()
             except Exception:
@@ -305,11 +379,25 @@ def _play_loop() -> None:
         # from the first file of the next pass.
 
 
+def _raise_system_output() -> None:
+    """OS mixer to 100% so only the alarm's own slider sets its loudness."""
+    try:
+        from utilities import atc_audio
+
+        atc_audio.raise_system_output()
+    except Exception:
+        logger.debug("Alarm could not raise the system output", exc_info=True)
+
+
 def _start_playback() -> None:
     global _audio_thread
     _stop_audio.clear()
     if _audio_thread is not None and _audio_thread.is_alive():
         return
+    # Own thread: wpctl/pactl can take a moment and must not delay the ring.
+    threading.Thread(
+        target=_raise_system_output, name="alarm-output", daemon=True
+    ).start()
     _audio_thread = threading.Thread(
         target=_play_loop, name="alarm-audio", daemon=True
     )
@@ -317,8 +405,11 @@ def _start_playback() -> None:
 
 
 def _stop_playback() -> None:
+    global _playing_source
     _stop_audio.set()
     _kill_proc()
+    with _lock:
+        _playing_source = ""
 
 
 def _begin(key: str, hour: int, minute: int) -> None:
@@ -402,10 +493,12 @@ def tick(now: datetime | None = None) -> str:
 
 
 def reset_for_tests() -> None:
-    global _ringing, _active_key, _audio_thread, _proc
+    global _ringing, _active_key, _audio_thread, _proc, _playing_source, _last_lofi_track
     _stop_playback()
     with _lock:
         _ringing = False
         _active_key = ""
+        _playing_source = ""
+    _last_lofi_track = ""
     _audio_thread = None
     _proc = None

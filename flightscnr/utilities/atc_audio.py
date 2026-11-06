@@ -1338,6 +1338,16 @@ def set_volume(percent: int, *, persist: bool = True) -> int:
     return value
 
 
+def raise_system_output() -> None:
+    """Set the OS output (PipeWire/Pulse sink, ALSA PCM) to 100% and unmute.
+
+    For players that carry their own level, such as the alarm, so the OS
+    mixer is not left at a quiet default when ATC has not run since boot.
+    Spawns wpctl/pactl/amixer, so call it off the UI thread.
+    """
+    _ensure_system_output_volume(1.0)
+
+
 def reassert_output_levels() -> None:
     """Re-raise PipeWire sink + mpv softvol (e.g. after Bluetooth reconnect)."""
     _ensure_system_output_volume(1.0)

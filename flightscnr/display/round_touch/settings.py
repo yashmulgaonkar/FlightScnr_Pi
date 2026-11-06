@@ -519,6 +519,8 @@ _defaults = {
     "alarm_snooze_minutes": 9,
     "alarm_snooze_until": "",
     "alarm_dismissed_key": "",
+    # What the alarm plays: the alert tones in alarm_audio/, or the LoFi playlist.
+    "alarm_sound": "tones",
     # One-time card for a Pi sold with 2 GB or less. The live low-memory
     # card is not remembered across boots.
     "low_ram_board_dismissed": False,
@@ -1485,6 +1487,7 @@ def _settings_snapshot(state: dict) -> tuple:
         int(state.get("alarm_snooze_minutes", 9) or 9),
         str(state.get("alarm_snooze_until") or ""),
         str(state.get("alarm_dismissed_key") or ""),
+        str(state.get("alarm_sound") or "tones"),
         bool(state.get("low_ram_board_dismissed", False)),
         bool(state.get("traffic_sfx_enabled", True)),
         clamp_sfx_volume(state.get("traffic_sfx_volume", 80)),
@@ -4102,6 +4105,23 @@ def set_alarm_snooze_minutes(value: int) -> int:
         minutes = 9
     _rmw_save({"alarm_snooze_minutes": minutes})
     return minutes
+
+
+ALARM_SOUNDS = ("tones", "lofi")
+
+
+def alarm_sound() -> str:
+    """``tones`` (alarm_audio files) or ``lofi`` (the LoFi playlist)."""
+    value = str(_state.get("alarm_sound") or "tones").strip().lower()
+    return value if value in ALARM_SOUNDS else "tones"
+
+
+def set_alarm_sound(value: str) -> str:
+    sound = str(value or "").strip().lower()
+    if sound not in ALARM_SOUNDS:
+        sound = "tones"
+    _rmw_save({"alarm_sound": sound})
+    return sound
 
 
 def alarm_snooze_until() -> str:

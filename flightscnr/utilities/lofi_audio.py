@@ -851,7 +851,21 @@ def app_tick() -> None:
         playing = bool(atc_audio.is_playing())
     except Exception:
         playing = False
+    if playing and _alarm_playing_lofi():
+        # The alarm is playing the same playlist; two tracks at once would
+        # clash. The bed stops and starts again on its own once the alarm
+        # is stopped or snoozed.
+        playing = False
     tick(atc_playing=playing)
+
+
+def _alarm_playing_lofi() -> bool:
+    try:
+        from display.round_touch import alarm_clock
+
+        return bool(alarm_clock.playing_lofi())
+    except Exception:
+        return False
 
 
 def stop() -> None:
