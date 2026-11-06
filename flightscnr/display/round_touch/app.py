@@ -361,6 +361,7 @@ class RoundTouchDisplay:
         self._idle_touch_at = time.time()
         self._idle_dark = False
         self._idle_wake_swallow = False
+        self._idle_wake_at = 0.0
         self._radar_hud_volume_drag = False
         self._radar_hud_layout_drag = False
         self._hud_opacity_slider_active = False
@@ -3624,11 +3625,26 @@ class RoundTouchDisplay:
         self._idle_dark = dark
         return pct
 
+    # A waking touch that never resolves to a tap or swipe (a hold, a pan, a
+    # pinch) would otherwise leave the swallow armed and eat the next real tap.
+    _IDLE_WAKE_SWALLOW_S = 1.5
+
+    def _idle_wake_swallow_active(self) -> bool:
+        """True while the waking touch's gesture is still due to be swallowed."""
+        if not getattr(self, "_idle_wake_swallow", False):
+            return False
+        woke_at = getattr(self, "_idle_wake_at", None)
+        if woke_at and time.time() - woke_at > self._IDLE_WAKE_SWALLOW_S:
+            self._idle_wake_swallow = False
+            return False
+        return True
+
     def _note_idle_touch(self) -> None:
         """A finger touched the panel: restart the idle timers, wake if dark."""
         self._idle_touch_at = time.time()
         if getattr(self, "_idle_dark", False):
             self._idle_wake_swallow = True
+            self._idle_wake_at = time.time()
             self._idle_dark = False
             logger.info("Idle: touch woke the display")
             self._apply_brightness()
@@ -4718,7 +4734,7 @@ class RoundTouchDisplay:
             return True
 
         # Idle blank: the touch that woke the panel must not act on the screen.
-        if getattr(self, "_idle_wake_swallow", False):
+        if self._idle_wake_swallow_active():
             if tap or swiped:
                 self._idle_wake_swallow = False
                 self._note_activity()
@@ -4794,7 +4810,7 @@ class RoundTouchDisplay:
         # below, before the power-menu swallow runs, so a touch that woke an
         # idle-blanked panel on them is dropped here instead of landing on
         # Accept, the checkbox or the try-saved control.
-        if getattr(self, "_idle_wake_swallow", False) and self.screen in (
+        if self._idle_wake_swallow_active() and self.screen in (
             SCREEN_DISCLAIMER,
             SCREEN_WIFI_SETUP,
         ):

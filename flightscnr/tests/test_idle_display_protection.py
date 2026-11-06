@@ -211,6 +211,48 @@ class IdleBrightnessTests(unittest.TestCase):
         self.assertFalse(d._idle_wake_swallow)
 
 
+class WakeSwallowExpiryTests(unittest.TestCase):
+    """A waking touch that never becomes a tap or swipe must not eat a later tap."""
+
+    def test_wake_stamps_the_swallow_time(self):
+        d = _display()
+        d._idle_dark = True
+        before = time.time()
+        d._note_idle_touch()
+        self.assertTrue(d._idle_wake_swallow)
+        self.assertGreaterEqual(d._idle_wake_at, before)
+        self.assertTrue(d._idle_wake_swallow_active())
+
+    def test_stale_swallow_expires_and_clears(self):
+        d = _display()
+        d._idle_wake_swallow = True
+        d._idle_wake_at = time.time() - 5.0
+        self.assertFalse(d._idle_wake_swallow_active())
+        self.assertFalse(d._idle_wake_swallow)
+
+    def test_flag_without_timestamp_still_swallows(self):
+        d = _display()
+        d._idle_wake_swallow = True
+        self.assertTrue(d._idle_wake_swallow_active())
+
+    def test_later_tap_after_a_hold_wake_reaches_the_screen(self):
+        from display.round_touch import app as app_mod
+
+        d = _display()
+        d._idle_wake_swallow = True
+        d._idle_wake_at = time.time() - 5.0
+        d._power_menu_open = False
+        d._power_confirm = None
+        d._manual_screen_off = False
+        d._note_activity = mock.Mock()
+        d._safe_draw = mock.Mock()
+        d._radar_modal_active = mock.Mock(return_value=False)
+        with mock.patch.object(app_mod.power_menu, "icon_hit", return_value=False):
+            handled = d._handle_power_menu((300, 300), app_mod.input_handler.SWIPE_NONE)
+        self.assertFalse(handled)
+        d._safe_draw.assert_not_called()
+
+
 class DeviceRowsTests(unittest.TestCase):
     def test_display_rows_and_labels_stay_aligned(self):
         import pygame
