@@ -109,5 +109,40 @@ class FaaLoadLockTests(_Reset, unittest.TestCase):
         self.assertEqual(fetch.call_count, 1)  # no retry after a failed fetch
 
 
+class PreloadSkipsMissingCachesTests(unittest.TestCase):
+    def test_only_modules_with_a_cache_file_are_loaded(self):
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+        from display.round_touch import app
+        from utilities import airports, cities
+
+        tmp = tempfile.mkdtemp()
+        present = os.path.join(tmp, "present.json")
+        with open(present, "w", encoding="utf-8") as fh:
+            fh.write("{}")
+        loaded = []
+
+        class _Now:
+            def __init__(self, target, **_kw):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+        patches = [mock.patch.object(app, "Thread", _Now)]
+        for mod, path in ((airports, present), (cities, MISSING),
+                          (runways, present), (faa_airports, MISSING)):
+            patches.append(mock.patch.object(mod, "CACHE_FILE", path))
+            patches.append(mock.patch.object(mod, "_load", lambda m=mod: loaded.append(m.__name__)))
+        for p in patches:
+            p.start()
+        try:
+            app._preload_local_databases()
+        finally:
+            for p in reversed(patches):
+                p.stop()
+        self.assertEqual(loaded, ["utilities.airports", "utilities.runways"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -132,12 +132,19 @@ def _preload_local_databases() -> None:
     They are loaded on first use otherwise, and the first user can be a draw
     on the main thread (route labels, the ATC airport picker); on a Pi 4B the
     airports build takes about 3 s.
+
+    Only modules whose cache file already exists are preloaded, so the
+    preload never starts a download: a device that has never needed a
+    database (FAA NASR off the US, cities5000.zip, ...) still fetches it only
+    when a screen first asks for it, as before.
     """
 
     def _work():
         from utilities import airports, cities, faa_airports, runways
 
         for mod in (airports, cities, runways, faa_airports):
+            if not os.path.exists(mod.CACHE_FILE):
+                continue
             try:
                 mod._load()
             except Exception:
