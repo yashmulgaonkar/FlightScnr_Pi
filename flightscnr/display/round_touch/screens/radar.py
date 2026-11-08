@@ -1402,7 +1402,10 @@ _label_state: dict = {}
 _live_frame_cache: dict[str, tuple] = {}
 _live_label_frame_cache: dict[str, tuple] = {}
 _live_frame_cursor = 0
-_LIVE_FRAME_BUDGET_S = 0.006
+# 4 ms: on a Pi 4 a refresh costs ~0.6 ms per target, so ~6 targets a frame and
+# each one every ~6 frames with 40 on screen. They move well under a pixel per
+# frame; at 6 ms the pass alone pushed busy frames past the 33 ms budget.
+_LIVE_FRAME_BUDGET_S = 0.004
 
 
 def _set_pending_live_specs(icons, labels) -> None:
