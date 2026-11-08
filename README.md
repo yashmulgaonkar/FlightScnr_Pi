@@ -270,6 +270,18 @@ dtoverlay=vc4-kms-v3d
 | **4inch DSI LCD (C)** (original) | [waveshare.com/4inch-dsi-lcd-c.htm](https://www.waveshare.com/4inch-dsi-lcd-c.htm?&aff_id=108718) | `dtoverlay=vc4-kms-dsi-waveshare-panel,4_0_inchC` |
 | **4-DSI-TOUCH-C** (newer look; same housing) | [waveshare.com/4-dsi-touch-c.htm](https://www.waveshare.com/4-dsi-touch-c.htm?&aff_id=108718) | `dtoverlay=vc4-kms-dsi-waveshare-panel-v2,4_0_inch_c` |
 
+**7inch 1080×1080 LCD** ([waveshare.com/7inch-1080x1080-lcd.htm](https://www.waveshare.com/7inch-1080x1080-lcd.htm)) is HDMI, so it needs no panel overlay. Instead, add its HDMI timings to `config.txt` (this block is from a working Pi 5):
+
+```text
+hdmi_force_hotplug=1
+hdmi_group=2
+hdmi_mode=87
+hdmi_pixel_freq_limit=200000000
+hdmi_timings=1080 0 80 20 80 1080 0 10 10 14 0 0 0 60 0 84210000 0
+```
+
+Set `DISPLAY_WIDTH=1080` and `DISPLAY_HEIGHT=1080`. FlightScnr detects the panel (DSI → 4″, HDMI 1080×1080 → 7″) and keeps a separate radar HUD layout for each one. To force a profile, set `DISPLAY_PROFILE=4in` or `7in`.
+
 Use only one panel overlay. On **4-DSI-TOUCH-C**, connect the display **power cable** — it is required (the panel will not run from the DSI ribbon alone). On Pi 5 / CM, if the screen stays blank, try the DSI0 form of the same overlay (see [Software Setup](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Software-Setup)). Thanks to [@Matzebhv](https://github.com/Matzebhv) for the newer-panel overlay in [#207](https://github.com/yashmulgaonkar/FlightScnr_Pi/issues/207).
 
 Then:

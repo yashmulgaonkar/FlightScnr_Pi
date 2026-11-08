@@ -24,6 +24,17 @@ if str(ROOT) not in sys.path:
 
 
 class RadarHudSettingsTests(unittest.TestCase):
+    def setUp(self):
+        # Baked-offset assertions below are for the 4″ panel; pin it so the
+        # suite passes on any host (including a 7″ Pi).
+        from display.round_touch import display_profile
+
+        patcher = mock.patch.object(
+            display_profile, "current", return_value=display_profile.PROFILE_4IN
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_clamp_opacity(self):
         from display.round_touch import settings
 
@@ -233,6 +244,115 @@ class RadarHudSettingsTests(unittest.TestCase):
                 second = settings._load()
             self.assertNotIn("aqi", second.get("radar_hud_layout_top") or {})
             self.assertNotIn("aqi", second.get("radar_hud_layout_bottom") or {})
+
+
+class DisplayProfileTests(unittest.TestCase):
+    def _drm(self, tmp, connectors):
+        for name, (status, modes) in connectors.items():
+            d = Path(tmp) / name
+            d.mkdir()
+            (d / "status").write_text(status + "\n")
+            (d / "modes").write_text("".join(m + "\n" for m in modes))
+
+    def test_dsi_connected_is_4in(self):
+        import tempfile
+
+        from display.round_touch import display_profile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._drm(
+                tmp,
+                {
+                    "card1-DSI-1": ("connected", ["720x720"]),
+                    "card1-HDMI-A-1": ("disconnected", []),
+                },
+            )
+            self.assertEqual(display_profile.detect_from_drm(tmp), "4in")
+
+    def test_hdmi_1080_square_is_7in(self):
+        import tempfile
+
+        from display.round_touch import display_profile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._drm(
+                tmp,
+                {
+                    "card1-HDMI-A-1": ("connected", ["1080x1080", "720x480"]),
+                    "card1-HDMI-A-2": ("disconnected", []),
+                    "card1-Writeback-1": ("unknown", []),
+                },
+            )
+            self.assertEqual(display_profile.detect_from_drm(tmp), "7in")
+
+    def test_unknown_hdmi_monitor_is_undetected(self):
+        import tempfile
+
+        from display.round_touch import display_profile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._drm(tmp, {"card1-HDMI-A-1": ("connected", ["1920x1080"])})
+            self.assertIsNone(display_profile.detect_from_drm(tmp))
+
+    def test_env_override_wins(self):
+        from display.round_touch import display_profile
+
+        with mock.patch.dict(os.environ, {"DISPLAY_PROFILE": "7in # waveshare 7"}):
+            self.assertEqual(display_profile.detect(), "7in")
+        with mock.patch.dict(os.environ, {"DISPLAY_PROFILE": "4in"}):
+            self.assertEqual(display_profile.detect(), "4in")
+
+    def test_layouts_are_per_profile(self):
+        from display.round_touch import display_profile, settings
+
+        with mock.patch.object(settings, "_save"), mock.patch.object(
+            display_profile, "current", return_value="7in"
+        ):
+            settings._state["radar_hud_position"] = "top"
+            settings._state["radar_hud_layout_top"] = {"clock": [5, 5]}
+            settings._state["radar_hud_layout_top_7in"] = {}
+            settings.set_radar_hud_layout_offset("clock", 120, -4)
+            self.assertEqual(settings.radar_hud_layout_offset("clock"), (120, -4))
+            self.assertEqual(settings._state["radar_hud_layout_top_7in"]["clock"], [120, -4])
+            self.assertEqual(settings._state["radar_hud_layout_top"], {"clock": [5, 5]})
+            # 7″ clamp is wider than the 4″ one.
+            dx, _ = settings.set_radar_hud_layout_offset("clock", 500, 0)
+            self.assertEqual(dx, settings.RADAR_HUD_LAYOUT_OFFSET_MAX_BY_PROFILE["7in"])
+            settings.reset_radar_hud_layout_top()
+            self.assertEqual(
+                settings.radar_hud_layout_top(),
+                settings.copy_radar_hud_layout_default("top", "7in"),
+            )
+
+    def test_7in_defaults_scale_4in(self):
+        from display.round_touch import settings
+
+        four = settings.copy_radar_hud_layout_default("top", "4in")
+        seven = settings.copy_radar_hud_layout_default("top", "7in")
+        self.assertEqual(four["wx_icon"], [-24, 40])
+        self.assertEqual(seven["wx_icon"], [-36, 60])
+
+    def test_load_adds_7in_layout_and_keeps_4in(self):
+        import json
+        import tempfile
+
+        from display.round_touch import settings
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "round_touch_settings.json")
+            Path(path).write_text(
+                json.dumps({"radar_hud_layout_top": {"clock": [7, 7]}}),
+                encoding="utf-8",
+            )
+            with mock.patch.object(settings, "SETTINGS_PATH", path), mock.patch.object(
+                settings, "DATA_DIR", tmp
+            ), mock.patch.object(settings, "RELOAD_REQUEST_PATH", path + ".reload"):
+                loaded = settings._load()
+            self.assertEqual(loaded["radar_hud_layout_top"], {"clock": [7, 7]})
+            self.assertEqual(
+                loaded["radar_hud_layout_top_7in"],
+                settings.copy_radar_hud_layout_default("top", "7in"),
+            )
 
 
 class HourlyChimeGuardTests(unittest.TestCase):

@@ -14,7 +14,7 @@ import logging
 import os
 import re
 
-from display.round_touch import color_presets, theme
+from display.round_touch import color_presets, display_profile, theme
 from i18n import tr
 logger = logging.getLogger("flightscnr.display")
 
@@ -275,6 +275,54 @@ RADAR_HUD_LAYOUT_BOTTOM_DEFAULT = {
     "wind": [4, 0],
 }
 
+# Offsets are raw framebuffer px, so each panel keeps its own layout. The 4″
+# profile uses the original keys so existing devices keep their arrangement.
+# 7″ defaults are the 4″ ones scaled 720→1080 (×1.5), confirmed on a 7″ device
+# 2026-11-08. Re-bake here if a 7″ arrange pass ever diverges.
+RADAR_HUD_LAYOUT_PROFILE_SUFFIX = {
+    display_profile.PROFILE_4IN: "",
+    display_profile.PROFILE_7IN: "_7in",
+}
+RADAR_HUD_LAYOUT_OFFSET_MAX_BY_PROFILE = {
+    display_profile.PROFILE_4IN: RADAR_HUD_LAYOUT_OFFSET_MAX,
+    display_profile.PROFILE_7IN: 144,
+}
+
+
+def _scaled_layout(layout: dict, factor: float) -> dict:
+    return {k: [int(round(v[0] * factor)), int(round(v[1] * factor))] for k, v in layout.items()}
+
+
+RADAR_HUD_LAYOUT_DEFAULTS = {
+    display_profile.PROFILE_4IN: {
+        "top": RADAR_HUD_LAYOUT_TOP_DEFAULT,
+        "bottom": RADAR_HUD_LAYOUT_BOTTOM_DEFAULT,
+    },
+    display_profile.PROFILE_7IN: {
+        "top": _scaled_layout(RADAR_HUD_LAYOUT_TOP_DEFAULT, 1.5),
+        "bottom": _scaled_layout(RADAR_HUD_LAYOUT_BOTTOM_DEFAULT, 1.5),
+    },
+}
+
+
+def radar_hud_layout_state_key(position: str, profile: str | None = None) -> str:
+    """Settings key for one HUD position on one panel profile."""
+    profile = profile or display_profile.current()
+    pos = "bottom" if position == "bottom" else "top"
+    return f"radar_hud_layout_{pos}{RADAR_HUD_LAYOUT_PROFILE_SUFFIX.get(profile, '')}"
+
+
+def radar_hud_layout_offset_max(profile: str | None = None) -> int:
+    profile = profile or display_profile.current()
+    return RADAR_HUD_LAYOUT_OFFSET_MAX_BY_PROFILE.get(profile, RADAR_HUD_LAYOUT_OFFSET_MAX)
+
+
+def _all_radar_hud_layout_keys():
+    """Yield (state_key, profile, position) for every stored layout."""
+    for profile in display_profile.PROFILES:
+        for pos in ("top", "bottom"):
+            yield radar_hud_layout_state_key(pos, profile), profile, pos
+
 # Offsets baked when the pill held three right-side icons. The HUD now spaces
 # volume/chime/alert/ATC evenly, so these stale nudges make spacing look uneven.
 _LEGACY_RIGHT_ICON_OFFSETS = {
@@ -295,15 +343,16 @@ def drop_legacy_right_icon_offsets(layout, state_key: str):
     return out
 
 
-def clamp_radar_hud_layout_offset(value) -> int:
+def clamp_radar_hud_layout_offset(value, limit: int | None = None) -> int:
+    limit = RADAR_HUD_LAYOUT_OFFSET_MAX if limit is None else int(limit)
     try:
         v = int(round(float(value)))
     except (TypeError, ValueError):
         return 0
-    return max(-RADAR_HUD_LAYOUT_OFFSET_MAX, min(RADAR_HUD_LAYOUT_OFFSET_MAX, v))
+    return max(-limit, min(limit, v))
 
 
-def normalize_radar_hud_layout(raw) -> dict:
+def normalize_radar_hud_layout(raw, limit: int | None = None) -> dict:
     """Return a clean {key: [dx, dy]} map (missing keys omitted)."""
     out: dict = {}
     if not isinstance(raw, dict):
@@ -312,8 +361,8 @@ def normalize_radar_hud_layout(raw) -> dict:
         pair = raw.get(key)
         if not isinstance(pair, (list, tuple)) or len(pair) < 2:
             continue
-        dx = clamp_radar_hud_layout_offset(pair[0])
-        dy = clamp_radar_hud_layout_offset(pair[1])
+        dx = clamp_radar_hud_layout_offset(pair[0], limit)
+        dy = clamp_radar_hud_layout_offset(pair[1], limit)
         if dx == 0 and dy == 0:
             continue
         out[key] = [dx, dy]
@@ -324,14 +373,24 @@ def normalize_radar_hud_layout(raw) -> dict:
 normalize_radar_hud_layout_top = normalize_radar_hud_layout
 
 
+def copy_radar_hud_layout_default(position: str, profile: str | None = None) -> dict:
+    """Fresh copy of the baked layout for one position on one panel profile."""
+    profile = profile or display_profile.current()
+    pos = "bottom" if position == "bottom" else "top"
+    defaults = RADAR_HUD_LAYOUT_DEFAULTS.get(profile) or RADAR_HUD_LAYOUT_DEFAULTS[
+        display_profile.DEFAULT_PROFILE
+    ]
+    return normalize_radar_hud_layout(defaults[pos], radar_hud_layout_offset_max(profile))
+
+
 def copy_radar_hud_layout_top_default() -> dict:
-    """Fresh copy of the baked top-layout defaults."""
-    return normalize_radar_hud_layout(RADAR_HUD_LAYOUT_TOP_DEFAULT)
+    """Fresh copy of the baked top-layout defaults (active panel)."""
+    return copy_radar_hud_layout_default("top")
 
 
 def copy_radar_hud_layout_bottom_default() -> dict:
-    """Fresh copy of the baked bottom-layout defaults."""
-    return normalize_radar_hud_layout(RADAR_HUD_LAYOUT_BOTTOM_DEFAULT)
+    """Fresh copy of the baked bottom-layout defaults (active panel)."""
+    return copy_radar_hud_layout_default("bottom")
 
 
 def radar_hud_arrange_debug_enabled() -> bool:
@@ -508,8 +567,11 @@ _defaults = {
     # right | left — which rim edge holds the zoom pill.
     "radar_zoom_position": "right",
     "radar_hud_arrange": False,  # legacy; arrange is gated by FLIGHTSCNR_HUD_ARRANGE
-    "radar_hud_layout_top": copy_radar_hud_layout_top_default(),
-    "radar_hud_layout_bottom": copy_radar_hud_layout_bottom_default(),
+    # Per-panel HUD offsets: radar_hud_layout_{top,bottom}[_7in].
+    **{
+        key: copy_radar_hud_layout_default(pos, profile)
+        for key, profile, pos in _all_radar_hud_layout_keys()
+    },
     "hourly_chime_enabled": False,
     "hourly_chime_volume": 80,
     # Daily alarm. Quiet hours and off-hours do not silence or hide it.
@@ -1158,29 +1220,17 @@ def _load():
         migrated = True
     else:
         state["radar_hud_arrange"] = bool(state.get("radar_hud_arrange"))
-    if "radar_hud_layout_top" not in data:
-        state["radar_hud_layout_top"] = copy_radar_hud_layout_top_default()
-        migrated = True
-    else:
-        layout = normalize_radar_hud_layout(
-            drop_legacy_right_icon_offsets(
-                state.get("radar_hud_layout_top"), "radar_hud_layout_top"
-            )
-        )
-        if state.get("radar_hud_layout_top") != layout:
-            state["radar_hud_layout_top"] = layout
+    for layout_key, layout_profile, layout_pos in _all_radar_hud_layout_keys():
+        if layout_key not in data:
+            state[layout_key] = copy_radar_hud_layout_default(layout_pos, layout_profile)
             migrated = True
-    if "radar_hud_layout_bottom" not in data:
-        state["radar_hud_layout_bottom"] = copy_radar_hud_layout_bottom_default()
-        migrated = True
-    else:
-        layout_b = normalize_radar_hud_layout(
-            drop_legacy_right_icon_offsets(
-                state.get("radar_hud_layout_bottom"), "radar_hud_layout_bottom"
-            )
+            continue
+        layout = normalize_radar_hud_layout(
+            drop_legacy_right_icon_offsets(state.get(layout_key), layout_key),
+            radar_hud_layout_offset_max(layout_profile),
         )
-        if state.get("radar_hud_layout_bottom") != layout_b:
-            state["radar_hud_layout_bottom"] = layout_b
+        if state.get(layout_key) != layout:
+            state[layout_key] = layout
             migrated = True
     if "hourly_chime_enabled" not in data:
         state["hourly_chime_enabled"] = False
@@ -1464,20 +1514,16 @@ def _settings_snapshot(state: dict) -> tuple:
         str(state.get("radar_zoom_position") or "right"),
         bool(radar_hud_arrange_debug_enabled()),
         tuple(
-            sorted(
-                (k, tuple(v))
-                for k, v in normalize_radar_hud_layout(
-                    state.get("radar_hud_layout_top")
-                ).items()
+            tuple(
+                sorted(
+                    (k, tuple(v))
+                    for k, v in normalize_radar_hud_layout(
+                        state.get(layout_key),
+                        radar_hud_layout_offset_max(layout_profile),
+                    ).items()
+                )
             )
-        ),
-        tuple(
-            sorted(
-                (k, tuple(v))
-                for k, v in normalize_radar_hud_layout(
-                    state.get("radar_hud_layout_bottom")
-                ).items()
-            )
+            for layout_key, layout_profile, _pos in _all_radar_hud_layout_keys()
         ),
         bool(state.get("hourly_chime_enabled", False)),
         clamp_hourly_chime_volume(state.get("hourly_chime_volume", 80)),
@@ -3961,23 +4007,24 @@ def toggle_radar_hud_arrange() -> bool:
 
 
 def _radar_hud_layout_state_key() -> str:
-    return (
-        "radar_hud_layout_bottom"
-        if radar_hud_position() == "bottom"
-        else "radar_hud_layout_top"
-    )
+    """Key for the active HUD position on the detected panel."""
+    return radar_hud_layout_state_key(radar_hud_position())
 
 
 def radar_hud_layout_top() -> dict:
-    return normalize_radar_hud_layout(_state.get("radar_hud_layout_top"))
+    return normalize_radar_hud_layout(
+        _state.get(radar_hud_layout_state_key("top")), radar_hud_layout_offset_max()
+    )
 
 
 def radar_hud_layout_bottom() -> dict:
-    return normalize_radar_hud_layout(_state.get("radar_hud_layout_bottom"))
+    return normalize_radar_hud_layout(
+        _state.get(radar_hud_layout_state_key("bottom")), radar_hud_layout_offset_max()
+    )
 
 
 def radar_hud_layout() -> dict:
-    """Offsets for the active HUD position (top or bottom)."""
+    """Offsets for the active HUD position (top or bottom) on this panel."""
     if radar_hud_position() == "bottom":
         return radar_hud_layout_bottom()
     return radar_hud_layout_top()
@@ -3998,10 +4045,11 @@ def set_radar_hud_layout_offset(
     global _disk_synced
     if key not in RADAR_HUD_LAYOUT_KEYS:
         return (0, 0)
-    dx = clamp_radar_hud_layout_offset(dx)
-    dy = clamp_radar_hud_layout_offset(dy)
+    limit = radar_hud_layout_offset_max()
+    dx = clamp_radar_hud_layout_offset(dx, limit)
+    dy = clamp_radar_hud_layout_offset(dy, limit)
     state_key = _radar_hud_layout_state_key()
-    layout = dict(normalize_radar_hud_layout(_state.get(state_key)))
+    layout = dict(normalize_radar_hud_layout(_state.get(state_key), limit))
     if dx == 0 and dy == 0:
         layout.pop(key, None)
     else:
@@ -4015,14 +4063,14 @@ def set_radar_hud_layout_offset(
 
 
 def reset_radar_hud_layout_top() -> None:
-    """Restore baked top-pill layout defaults."""
-    _state["radar_hud_layout_top"] = copy_radar_hud_layout_top_default()
+    """Restore baked top-pill layout defaults for this panel."""
+    _state[radar_hud_layout_state_key("top")] = copy_radar_hud_layout_top_default()
     _save(_state)
 
 
 def reset_radar_hud_layout_bottom() -> None:
-    """Restore baked bottom-pill layout defaults."""
-    _state["radar_hud_layout_bottom"] = copy_radar_hud_layout_bottom_default()
+    """Restore baked bottom-pill layout defaults for this panel."""
+    _state[radar_hud_layout_state_key("bottom")] = copy_radar_hud_layout_bottom_default()
     _save(_state)
 
 
