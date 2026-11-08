@@ -24,6 +24,7 @@ import itertools
 import json
 import logging
 import os
+import threading
 from array import array
 from io import StringIO
 
@@ -43,6 +44,9 @@ CACHE_VERSION = 2  # v2: persist runway surface for paved-only filtering
 
 _db: dict[str, list[dict]] = {}
 _loaded = False
+# _load runs on the db-preload thread and on demand (has_paved_runway from a
+# draw); without the lock both would build at once and write runways.json.
+_load_lock = threading.Lock()
 
 _NO_LENGTH = -(2**31)
 
@@ -328,9 +332,17 @@ def _pack_or_keep(db):
 
 
 def _load() -> None:
-    global _db, _loaded
+    global _loaded
     if _loaded:
         return
+    with _load_lock:
+        if _loaded:  # double-check after acquiring the lock
+            return
+        _load_locked()
+
+
+def _load_locked() -> None:
+    global _db, _loaded
     stale: dict | None = None
     if os.path.exists(CACHE_FILE):
         try:

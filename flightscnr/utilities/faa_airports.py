@@ -26,6 +26,7 @@ import itertools
 import json
 import logging
 import os
+import threading
 import time
 import zipfile
 from array import array
@@ -50,6 +51,12 @@ REFRESH_AFTER_S = 35 * 86400
 
 _db: dict[str, dict] = {}
 _loaded = False
+# One loader at a time (db-preload thread and on-demand lookups): a lookup
+# that arrives while the cache is being read and packed waits for it instead
+# of seeing an empty table. Lookups never wait on the network: _loaded is set
+# before the NASR fetch, so they read the cached (possibly stale) table, or
+# get None with no cache at all, as before, while the download runs.
+_load_lock = threading.Lock()
 
 _FUEL, _BEACON, _TOWERED = 1, 2, 4
 
@@ -217,10 +224,22 @@ def _pack_or_keep(db):
 
 
 def _load() -> None:
-    global _db, _loaded
+    global _loaded
     if _loaded:
         return
-    _loaded = True
+    with _load_lock:
+        if _loaded:  # double-check after acquiring the lock
+            return
+        try:
+            _load_locked()
+        finally:
+            # Also on the fresh-cache return and on errors, so a broken load is
+            # not retried by every lookup.
+            _loaded = True
+
+
+def _load_locked() -> None:
+    global _db, _loaded
     cached = None
     text = None
     try:
@@ -251,6 +270,7 @@ def _load() -> None:
                 age = time.time() - float(cached.get("fetched_at") or 0)
                 if age < REFRESH_AFTER_S:
                     return
+    _loaded = True  # serve what we have; do not block lookups on the download
     fetched = _fetch()
     if fetched is not None:
         built, edition = fetched
