@@ -1,8 +1,8 @@
 # FlightScnr Pi
 
-A round **4″ touch display** flight and marine tracker for Raspberry Pi. Dark radar UI, animated sweep, map tiles, gesture navigation, LiveATC audio, and a local **web portal** for setup — no SSH required for day-to-day use. Modeled after [FlightScnr](https://github.com/yashmulgaonkar/FlightScnr).
+A round **4″ or 7″ touch display** flight and marine tracker for Raspberry Pi. Dark radar UI, animated sweep, map tiles, gesture navigation, LiveATC audio, and a local **web portal** for setup — no SSH required for day-to-day use. Modeled after [FlightScnr](https://github.com/yashmulgaonkar/FlightScnr).
 
-**Display:** [Waveshare 4inch DSI LCD (C)](https://www.waveshare.com/4inch-dsi-lcd-c.htm?&aff_id=108718) (720×720) and the newer [4-DSI-TOUCH-C](https://www.waveshare.com/4-dsi-touch-c.htm?&aff_id=108718) (same resolution; different bezel, fits the same housing). The new panel needs a different firmware overlay or it stays black — see [Quick install](#quick-install) and [#207](https://github.com/yashmulgaonkar/FlightScnr_Pi/issues/207). On **4-DSI-TOUCH-C**, the display **power cable is mandatory** (do not rely on DSI power alone).
+**Display:** [Waveshare 4inch DSI LCD (C)](https://www.waveshare.com/4inch-dsi-lcd-c.htm?&aff_id=108718) (720×720) and the newer [4-DSI-TOUCH-C](https://www.waveshare.com/4-dsi-touch-c.htm?&aff_id=108718) (same resolution; different bezel, fits the same housing). The new panel needs a different firmware overlay or it stays black — see [Quick install](#quick-install) and [#207](https://github.com/yashmulgaonkar/FlightScnr_Pi/issues/207). On **4-DSI-TOUCH-C**, the display **power cable is mandatory** (do not rely on DSI power alone). For a bigger screen, the round [Waveshare 7inch 1080×1080 LCD](https://www.waveshare.com/7inch-1080x1080-lcd.htm?&aff_id=108718) (HDMI) is also supported — see [Quick install](#quick-install).
 
 ![FlightScnr Pi on a round display](docs/images/flightscnrpi.jpg)
 
@@ -23,7 +23,7 @@ Current release: **2026.10.1.1** on `main`.
 
 ### Screens
 
-Radar home, flight detail, **tracked flight** with route map, **Follow / Live** map, clock faces (digital, analog, night altimeter, Flieger) plus moon and forecast, an airport METAR card, and a split-flap **arrivals / departures** board — swipe between them on the 720×720 round touch display. **Swipe right** on radar opens Tracked (when a track is active), then again for Follow / Live. **Swipe left** opens the arrivals board. Saved favorite locations open from the HUD **Home** icon or Settings → Options.
+Radar home, flight detail, **tracked flight** with route map, **Follow / Live** map, clock faces (digital, analog, night altimeter, Flieger) plus moon and forecast, an airport METAR card, and a split-flap **arrivals / departures** board — swipe between them on the round touch display (720×720 on 4″, 1080×1080 on 7″). **Swipe right** on radar opens Tracked (when a track is active), then again for Follow / Live. **Swipe left** opens the arrivals board. Saved favorite locations open from the HUD **Home** icon or Settings → Options.
 
 <table>
 <tr>
@@ -270,7 +270,7 @@ dtoverlay=vc4-kms-v3d
 | **4inch DSI LCD (C)** (original) | [waveshare.com/4inch-dsi-lcd-c.htm](https://www.waveshare.com/4inch-dsi-lcd-c.htm?&aff_id=108718) | `dtoverlay=vc4-kms-dsi-waveshare-panel,4_0_inchC` |
 | **4-DSI-TOUCH-C** (newer look; same housing) | [waveshare.com/4-dsi-touch-c.htm](https://www.waveshare.com/4-dsi-touch-c.htm?&aff_id=108718) | `dtoverlay=vc4-kms-dsi-waveshare-panel-v2,4_0_inch_c` |
 
-**7inch 1080×1080 LCD** ([waveshare.com/7inch-1080x1080-lcd.htm](https://www.waveshare.com/7inch-1080x1080-lcd.htm)) is HDMI, so it needs no panel overlay. Instead, add its HDMI timings to `config.txt` (this block is from a working Pi 5):
+**7inch 1080×1080 LCD** ([waveshare.com/7inch-1080x1080-lcd.htm](https://www.waveshare.com/7inch-1080x1080-lcd.htm?&aff_id=108718)) is HDMI, so it needs no panel overlay. Instead, add its HDMI timings to `config.txt` (this block is from a working Pi 5):
 
 ```text
 hdmi_force_hotplug=1
