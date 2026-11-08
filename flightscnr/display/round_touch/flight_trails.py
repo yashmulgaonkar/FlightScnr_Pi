@@ -167,6 +167,11 @@ def draw_trail(
     pts = points(identity)
     if not pts:
         return
+    from display.round_touch import frame_debug
+
+    frame_debug.count("trail_ids")
+    frame_debug.count("trail_pts", len(pts))
+    lines = dots = sleeps = 0
     xy: list[list] = []   # [(x, y) | None, speed, new_segment, age]
     for lat, lon, spd, _alt, t, seg in pts:
         projected = project(lat, lon)
@@ -220,6 +225,7 @@ def draw_trail(
                     col = speed_color(spd if spd is not None else s0)
                 pygame.draw.line(surface, (*col, alpha), (x0, y0), (x1, y1), max(1, width))
                 draws += 1
+                lines += 1
         if dot_radius and alpha >= 3 and age > 0.0:
             if last_dot is None or (p[0] - last_dot[0]) ** 2 + (p[1] - last_dot[1]) ** 2 >= dot_gap_px ** 2:
                 if (p[0] - cx) ** 2 + (p[1] - cy) ** 2 < reach2:
@@ -228,10 +234,16 @@ def draw_trail(
                     pygame.draw.circle(surface, (*light, alpha), p, dot_radius)
                     last_dot = p
                     draws += 1
+                    dots += 1
         # pygame's many short draw calls retain the GIL. Yield a real sweep
         # slice while a dense history is baking instead of monopolizing the
         # interpreter until the complete trail layer is done.
         if draws >= 12:
             draws = 0
+            sleeps += 1
             time.sleep(0.002)
         prev = (p, spd, alpha)
+    frame_debug.count("trail_kept", len(xy))
+    frame_debug.count("trail_lines", lines)
+    frame_debug.count("trail_dots", dots)
+    frame_debug.count("trail_sleeps", sleeps)

@@ -1801,7 +1801,7 @@ def _draw_trails(surface, items) -> None:
     if mode == "off":
         _trail_heads_building = {}
         return
-    from display.round_touch import flight_trails, position_smooth
+    from display.round_touch import flight_trails, frame_debug, position_smooth
 
     import time as _time
 
@@ -1840,6 +1840,7 @@ def _draw_trails(surface, items) -> None:
             continue
         if overlay is None:
             overlay = _trail_overlay_surface(surface.get_size())
+        frame_debug.count("trail_ids_gone")
         flight_trails.draw_trail(
             overlay, ident, project, width=width, now=now,
             base_alpha=_TRAIL_ALPHA, head_xy=None, dot_radius=dot_r,
@@ -2187,6 +2188,7 @@ def _draw_flights(surface, flights, live=None, live_labels=None):
         inner_items.sort(key=_draw_order)
         _t = frame_debug.end("2r_f_sort", _t)
 
+        _sub = frame_debug.mark("2r_f_rim")
         # Hoisted: one config read per pass, not one per rim target.
         rim_style = settings.rim_target_style()
         for _, flight, (x, y) in rim_items:
@@ -2232,7 +2234,9 @@ def _draw_flights(surface, flights, live=None, live_labels=None):
                 flight=flight,
             )
 
+        _sub = frame_debug.end("2r_f_rim", _sub)
         _draw_trails(surface, inner_items)
+        _sub = frame_debug.end("2r_f_trails", _sub)
         from display.round_touch import position_smooth
 
         for _, flight, (x, y) in inner_items:
@@ -2267,6 +2271,7 @@ def _draw_flights(surface, flights, live=None, live_labels=None):
         from display.round_touch.screens import iss as iss_screen
 
         iss_screen.draw_radar_blip(surface)
+        frame_debug.end("2r_f_inner", _sub)
         _t = frame_debug.end("2r_f_icons", _t)
 
         blips = [(x, y) for _, _, (x, y) in inner_items]
