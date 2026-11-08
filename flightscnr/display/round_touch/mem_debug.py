@@ -199,6 +199,12 @@ def gc_report(top: int = 15) -> list[str]:
             lines.append(f"  {n:8d} {name}")
     finally:
         if frozen:
+            # Side effect, accepted for a one-off diagnostic: freeze() moves
+            # every tracked object into the permanent generation, not just the
+            # startup set that run() froze. Objects created since startup move
+            # there too, so any of them that are (or later become) cyclic
+            # garbage are never collected after a report. The unfreeze is
+            # still needed: get_objects() does not list frozen objects.
             gc.freeze()
     return lines
 
