@@ -104,6 +104,21 @@ def prune(now: float) -> None:
 def clear() -> None:
     with _lock:
         _trails.clear()
+    _proj_cache.clear()
+
+
+# Screen positions of trail fixes, reused across layer rebuilds while the
+# projection is unchanged (``proj_key`` from the caller changes with zoom,
+# pan, facing or size). Each rebuild used to re-project every stored fix:
+# ~5000 with ~90 trails, ~80 ms of GIL time on a Pi 4B every 4 s.
+_proj_cache: dict[str, tuple[object, dict]] = {}
+_MISS = object()
+
+
+def prune_projection_cache(keep) -> None:
+    """Drop cached projections for trails not drawn in this pass."""
+    for key in [k for k in _proj_cache.copy() if k not in keep]:
+        _proj_cache.pop(key, None)
 
 
 def identities() -> list[str]:
@@ -153,6 +168,7 @@ def draw_trail(
     head_xy=None,
     dot_radius: int = 0,
     dot_gap_px: int = 14,
+    proj_key=None,
 ) -> None:
     """Paint one aircraft's trail onto an SRCALPHA ``surface``.
 
@@ -161,6 +177,9 @@ def draw_trail(
     it (the marker trails the raw fixes slightly) are dropped and the line is
     joined to the marker. Without ``head_xy`` (aircraft left the display) the
     whole path is drawn and simply keeps fading.
+
+    With ``proj_key`` (any hashable that changes whenever ``project`` would
+    map a point differently) fixes projected in an earlier pass are reused.
     """
     import pygame
 
@@ -172,9 +191,24 @@ def draw_trail(
     frame_debug.count("trail_ids")
     frame_debug.count("trail_pts", len(pts))
     lines = dots = sleeps = 0
+    prior = fresh = None
+    if proj_key is not None:
+        entry = _proj_cache.get(identity)
+        prior = entry[1] if entry is not None and entry[0] == proj_key else {}
+        fresh = {}
+    projected_n = 0
     xy: list[list] = []   # [(x, y) | None, speed, new_segment, age]
     for lat, lon, spd, _alt, t, seg in pts:
-        projected = project(lat, lon)
+        if prior is None:
+            projected = project(lat, lon)
+            projected_n += 1
+        else:
+            ck = (t, lat, lon)
+            projected = prior.get(ck, _MISS)
+            if projected is _MISS:
+                projected = project(lat, lon)
+                projected_n += 1
+            fresh[ck] = projected
         item = [projected, spd, seg, max(0.0, now - t)]
         if projected is None:
             if not xy or xy[-1][0] is not None:
@@ -243,6 +277,9 @@ def draw_trail(
             sleeps += 1
             time.sleep(0.002)
         prev = (p, spd, alpha)
+    if fresh is not None:
+        _proj_cache[identity] = (proj_key, fresh)
+    frame_debug.count("trail_proj", projected_n)
     frame_debug.count("trail_kept", len(xy))
     frame_debug.count("trail_lines", lines)
     frame_debug.count("trail_dots", dots)

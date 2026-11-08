@@ -1268,33 +1268,35 @@ def _basemap_zoom_for_home(home_lat: float) -> int | None:
 
 # Cached constants for a multi-target draw (radar layer rebuild projects
 # ~100 aircraft). Recomputing zoom/home/facing per call dominated 2r_f_vis.
-_proj_batch: dict | None = None
+# Per thread: the layer rebuild (prewarm worker) and the per-frame live icons
+# (display thread) batch at the same time, and one shared slot let either
+# end the other's batch early or hand it constants from another moment.
+_proj_tls = threading.local()
 
 
 def begin_projection_batch(
     center_lat: float | None = None,
     center_lon: float | None = None,
 ) -> None:
-    """Hoist basemap projection constants for a draw pass."""
-    global _proj_batch
+    """Hoist basemap projection constants for this thread's draw pass."""
     try:
         from config import LOCATION_HOME, location_configured
         from display.round_touch import settings
     except ImportError:
-        _proj_batch = None
+        _proj_tls.batch = None
         return
     if not location_configured() and center_lat is None:
-        _proj_batch = None
+        _proj_tls.batch = None
         return
     try:
         home_lat = float(LOCATION_HOME[0] if center_lat is None else center_lat)
         home_lon = float(LOCATION_HOME[1] if center_lon is None else center_lon)
     except (TypeError, ValueError):
-        _proj_batch = None
+        _proj_tls.batch = None
         return
     zoom = _basemap_zoom_for_home(home_lat)
     if zoom is None:
-        _proj_batch = None
+        _proj_tls.batch = None
         return
     render_scale = _basemap_render_scale(home_lat, scale.active_index(), zoom)
     home_px, home_py = _mercator_pixel(home_lat, home_lon, zoom)
@@ -1307,7 +1309,7 @@ def begin_projection_batch(
         rad = math.radians(facing)
         cos_a = math.cos(rad)
         sin_a = math.sin(rad)
-    _proj_batch = {
+    _proj_tls.batch = {
         "zoom": zoom,
         "render_scale": render_scale,
         "home_px": home_px,
@@ -1319,8 +1321,7 @@ def begin_projection_batch(
 
 
 def end_projection_batch() -> None:
-    global _proj_batch
-    _proj_batch = None
+    _proj_tls.batch = None
 
 
 def lat_lon_to_basemap_screen(
@@ -1343,7 +1344,7 @@ def lat_lon_to_basemap_screen(
     except (TypeError, ValueError):
         return None
 
-    batch = _proj_batch
+    batch = getattr(_proj_tls, "batch", None)
     if batch is not None:
         zoom = batch["zoom"]
         render_scale = batch["render_scale"]

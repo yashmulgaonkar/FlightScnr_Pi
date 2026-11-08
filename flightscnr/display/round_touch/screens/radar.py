@@ -1636,42 +1636,50 @@ def live_icon_frame(now: float | None = None) -> list:
             seen.add(ident)
 
     processed_ids = []
-    for ident in update_ids:
-        if processed_ids and time.perf_counter() - started >= _LIVE_FRAME_BUDGET_S:
-            break
-        st = by_id.get(ident)
-        if st is None:
-            continue
-        fx, fy = st["xy"]
-        heading = st["flight"].get("heading") or 0
-        pos = smoother.current(st["id"], now) if smoother is not None else None
-        if pos is not None:
-            lat, lon, hs = pos
+    # One set of projection constants for the whole pass: each target is
+    # projected every few frames, and per-call setup was ~5x the projection.
+    from display.round_touch import map_bg
+
+    map_bg.begin_projection_batch()
+    try:
+        for ident in update_ids:
+            if processed_ids and time.perf_counter() - started >= _LIVE_FRAME_BUDGET_S:
+                break
+            st = by_id.get(ident)
+            if st is None:
+                continue
+            fx, fy = st["xy"]
+            heading = st["flight"].get("heading") or 0
+            pos = smoother.current(st["id"], now) if smoother is not None else None
+            if pos is not None:
+                lat, lon, hs = pos
+                try:
+                    fx, fy = geo.lat_lon_to_screen_f(lat, lon)
+                except Exception:
+                    pass
+                if hs is not None:
+                    heading = hs
+            st["color"] = _flight_icon_color(st["flight"], compact=False)
+            glow = _live_glow_sprite(st["flight"], st.get("color"))
+            glow_item = (
+                _clip_to_display(glow, int(round(fx)), int(round(fy)))
+                if glow is not None
+                else None
+            )
             try:
-                fx, fy = geo.lat_lon_to_screen_f(lat, lon)
+                vis = _icon_vis(st, geo.screen_heading(heading))
+                sprite, ix, iy = _place_sprite(vis, fx, fy)
             except Exception:
-                pass
-            if hs is not None:
-                heading = hs
-        st["color"] = _flight_icon_color(st["flight"], compact=False)
-        glow = _live_glow_sprite(st["flight"], st.get("color"))
-        glow_item = (
-            _clip_to_display(glow, int(round(fx)), int(round(fy)))
-            if glow is not None
-            else None
-        )
-        try:
-            vis = _icon_vis(st, geo.screen_heading(heading))
-            sprite, ix, iy = _place_sprite(vis, fx, fy)
-        except Exception:
-            continue
-        _live_frame_cache[ident] = (
-            (float(fx), float(fy)),
-            _clip_to_display(sprite, ix, iy),
-            glow_item,
-        )
-        processed_ids.append(ident)
-        _live_frame_cursor = (index_by_id[ident] + 1) % count
+                continue
+            _live_frame_cache[ident] = (
+                (float(fx), float(fy)),
+                _clip_to_display(sprite, ix, iy),
+                glow_item,
+            )
+            processed_ids.append(ident)
+            _live_frame_cursor = (index_by_id[ident] + 1) % count
+    finally:
+        map_bg.end_projection_batch()
 
     # The layer-prewarm worker prunes this cache when it publishes a new target
     # set. Iterating the shared dict directly can raise "dictionary changed
@@ -1810,6 +1818,7 @@ def _draw_trails(surface, items) -> None:
     width = max(3, theme.s(2.4))
     dot_r = max(2, theme.s(1.5))
     project = lambda lat, lon: geo.lat_lon_to_screen(lat, lon)
+    proj_key = _trail_projection_key(surface.get_size())
     drawn = set()
     _trail_heads_building = {}
     for _, flight, (x, y) in items:
@@ -1826,6 +1835,7 @@ def _draw_trails(surface, items) -> None:
         flight_trails.draw_trail(
             overlay, ident, project, width=width, now=now,
             base_alpha=_TRAIL_ALPHA, head_xy=(x, y), dot_radius=dot_r,
+            proj_key=proj_key,
         )
         pts = flight_trails.points(ident)
         if pts:
@@ -1833,6 +1843,7 @@ def _draw_trails(surface, items) -> None:
                 (x, y), flight_trails.speed_color(pts[-1][2]), width,
             )
     # Aircraft that already left the display: the path keeps fading out.
+    gone: set = set()
     for ident in flight_trails.identities():
         if ident in drawn:
             continue
@@ -1841,12 +1852,33 @@ def _draw_trails(surface, items) -> None:
         if overlay is None:
             overlay = _trail_overlay_surface(surface.get_size())
         frame_debug.count("trail_ids_gone")
+        gone.add(ident)
         flight_trails.draw_trail(
             overlay, ident, project, width=width, now=now,
             base_alpha=_TRAIL_ALPHA, head_xy=None, dot_radius=dot_r,
+            proj_key=proj_key,
         )
+    flight_trails.prune_projection_cache(drawn | gone)
     if overlay is not None:
         surface.blit(overlay, (0, 0))
+
+
+def _trail_projection_key(size) -> tuple | None:
+    """Changes whenever trail fixes would land on different pixels.
+
+    Three reference points around home capture zoom, pan, facing and the
+    projection mode; home itself (which always lands at the centre) and the
+    surface size complete the mapping.
+    """
+    try:
+        home_lat, home_lon = float(geo.LOCATION_HOME[0]), float(geo.LOCATION_HOME[1])
+        refs = []
+        for dlat, dlon in ((0.0, 0.0), (0.5, 0.0), (0.0, 0.5)):
+            pos = geo.lat_lon_to_screen_f(home_lat + dlat, home_lon + dlon)
+            refs.append(None if pos is None else (round(pos[0], 2), round(pos[1], 2)))
+        return (tuple(size), home_lat, home_lon, *refs)
+    except Exception:
+        return None
 
 
 _TRAIL_ALPHA = int(os.environ.get("FLIGHTSCNR_TRAIL_ALPHA", "125"))
