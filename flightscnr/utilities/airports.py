@@ -267,8 +267,10 @@ class AirportStore:
             wanted_codes = {i for i, t in enumerate(self._types.values) if t in wanted}
             if not wanted_codes:
                 return []
-        # Cheap latitude band first: one degree of latitude is about 111 km.
-        band = radius_km / 111.0 + 1e-6
+        # Cheap latitude band first. _distance_km counts 110.574 km per degree
+        # of latitude, so the band must divide by no more than that or points
+        # right at the edge of the radius are dropped; 110.0 leaves a margin.
+        band = radius_km / 110.0 + 1e-6
         lat_lo = lat - band
         lat_hi = lat + band
         lats = self._lat

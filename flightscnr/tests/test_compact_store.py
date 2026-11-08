@@ -102,6 +102,34 @@ class AirportStoreTests(unittest.TestCase):
         self.assertEqual(new, old)
         self.assertEqual([p["ident"] for p in new], ["KORD", "KPWK"])  # 0J0 has a 3-char ident
 
+    def _near_both(self, db, lat, lon, km):
+        with mock.patch.object(airports, "_db", dict(db)), mock.patch.object(airports, "_loaded", True):
+            old = airports.iter_airports_near(lat, lon, km, set())
+        store = airports.AirportStore.from_items(db.items())
+        with mock.patch.object(airports, "_db", store), mock.patch.object(airports, "_loaded", True):
+            new = airports.iter_airports_near(lat, lon, km, set())
+        return old, new
+
+    def test_near_keeps_an_airport_at_the_edge_of_the_radius(self):
+        # Review repro: 0.9025 deg north of (0, 0) is 99.8 km, inside 100 km;
+        # a 111 km/deg band (0.9009 deg) used to drop it from the packed path.
+        db = {"EDGE": {"lat": 0.9025, "lon": 0.0, "type": "small_airport", "ident": "EDGE"}}
+        old, new = self._near_both(db, 0.0, 0.0, 100)
+        self.assertEqual([p["ident"] for p in old], ["EDGE"])
+        self.assertEqual(new, old)
+
+    def test_near_matches_the_dict_scan_along_the_edge(self):
+        # Points straddling the radius due north and south at several latitudes.
+        for lat0 in (-60.0, -30.0, 0.0, 30.0, 45.0, 60.0):
+            db = {}
+            for n, frac in enumerate((0.990, 0.997, 0.999, 1.001, 1.003)):
+                dlat = 100.0 * frac / 110.574
+                db[f"N{n:03d}"] = {"lat": lat0 + dlat, "lon": 10.0, "type": "small_airport", "ident": f"N{n:03d}"}
+                db[f"S{n:03d}"] = {"lat": lat0 - dlat, "lon": 10.0, "type": "small_airport", "ident": f"S{n:03d}"}
+            old, new = self._near_both(db, lat0, 10.0, 100)
+            self.assertEqual(len(old), 6, lat0)
+            self.assertEqual(new, old, lat0)
+
     def test_icao_to_iata_alias_and_coordinate_fallback(self):
         with mock.patch.object(airports, "_db", self.store), mock.patch.object(airports, "_loaded", True):
             self.assertEqual(airports.icao_to_iata("KORD"), "ORD")
