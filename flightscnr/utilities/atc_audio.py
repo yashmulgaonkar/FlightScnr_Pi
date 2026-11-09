@@ -1436,6 +1436,7 @@ def _start_locked(
     override: bool = False,
 ) -> dict:
     global _proc, _playing_mount, _playing_airport, _quiet_override, _last_error
+    global _deferred_logged
 
     settings = _settings()
 
@@ -1502,13 +1503,18 @@ def _start_locked(
             _quiet_override = False
         with _lock:
             _last_error = "No USB or Bluetooth speaker connected"
-        logger.info(
+        # The quiet-hours tick retries every 30 s while no speaker is
+        # connected: log the deferral once per feed, the repeats at debug.
+        log = logger.info if _deferred_logged != (icao, feed) else logger.debug
+        _deferred_logged = (icao, feed)
+        log(
             "ATC deferred — no USB/Bluetooth speaker (airport=%s mount=%s)",
             icao,
             feed,
         )
         return status()
 
+    _deferred_logged = None
     _stop_locked(clear_override=False)
     # USB/PipeWire sink is often left at ~40%; raise it before starting mpv.
     _ensure_system_output_volume(1.0)
@@ -1870,6 +1876,10 @@ def maybe_resume_after_boot(
 
 
 _last_quiet_check = 0.0
+# Log latches: the quiet-hours tick and the speaker retries repeat every 30 s,
+# so each message is logged at info once per episode and at debug after that.
+_resume_logged = False
+_deferred_logged: tuple | None = None
 
 
 def enforce_quiet_hours() -> None:
@@ -1882,7 +1892,7 @@ def enforce_quiet_hours() -> None:
     override with no end time is cleared here. The lofi bed follows
     is_playing(), so it obeys automatically.
     """
-    global _last_quiet_check
+    global _last_quiet_check, _resume_logged
     now_mono = time.monotonic()
     if now_mono - _last_quiet_check < 30.0:
         return
@@ -1893,18 +1903,24 @@ def enforce_quiet_hours() -> None:
         active = quiet_override_active()
         if not settings.atc_quiet_hours_enabled():
             return
+        if is_playing():
+            _resume_logged = False
         if _play_during_quiet():
             if (
                 settings.atc_want_playing()
                 and settings.atc_enabled()
                 and not is_playing()
             ):
-                logger.info("ATC resuming — quiet hours do not silence audio")
+                (logger.debug if _resume_logged else logger.info)(
+                    "ATC resuming, quiet hours do not silence audio"
+                )
+                _resume_logged = True
                 start(override=False)
             return
         if active:
             return
         if in_quiet_hours():
+            _resume_logged = False
             if is_playing():
                 logger.info("ATC stopped — quiet hours began")
                 stop(clear_override=False)
@@ -1914,7 +1930,8 @@ def enforce_quiet_hours() -> None:
             and settings.atc_enabled()
             and not is_playing()
         ):
-            logger.info("ATC resuming — quiet hours ended")
+            (logger.debug if _resume_logged else logger.info)("ATC resuming, quiet hours ended")
+            _resume_logged = True
             start(override=False)
     except Exception:
         logger.debug("Quiet-hours enforcement failed", exc_info=True)

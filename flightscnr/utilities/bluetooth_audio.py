@@ -1308,6 +1308,7 @@ def _watch_loop() -> None:
     usb_at = 0.0
     bt_ok_at = 0.0
     reconnect_wait = _RECONNECT_POLL_S
+    offline_logged = False
     links_seen = bluetooth_links()
     while not _watch_stop.wait(reconnect_wait):
         if audio_route() == "usb":
@@ -1345,6 +1346,9 @@ def _watch_loop() -> None:
                 # same link: nothing to re-check or re-assert yet.
                 continue
             if is_connected(mac):
+                if offline_logged:
+                    logger.info("Bluetooth speaker %s connected", mac)
+                    offline_logged = False
                 reconnect_wait = _RECONNECT_POLL_S
                 if find_sink_for_mac(mac) is not None:
                     # Keep default sink pointed at BT only while BT route is active.
@@ -1354,7 +1358,12 @@ def _watch_loop() -> None:
                     bt_ok_at = 0.0
                 continue
             bt_ok_at = 0.0
-            logger.info("Bluetooth speaker %s offline, reconnecting", mac)
+            # Retries back off to 32 s and can go on all night with the
+            # speaker switched off: log the outage once, the attempts at debug.
+            (logger.debug if offline_logged else logger.info)(
+                "Bluetooth speaker %s offline, reconnecting", mac
+            )
+            offline_logged = True
             if maybe_reconnect_preferred():
                 reconnect_wait = _RECONNECT_POLL_S
             else:
