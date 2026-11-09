@@ -54,6 +54,33 @@ class TestExpireFrameLayer:
         assert "invalidate_frame_layer()" not in nxt
 
 
+class TestNewAlertExpiresLayer:
+    def test_new_alert_expires_instead_of_invalidating(self):
+        import inspect
+
+        from display.round_touch import app as app_mod
+
+        src = inspect.getsource(app_mod.RoundTouchDisplay._tick_data)
+        hit = src.index("check_new_aircraft(")
+        nxt = src[hit:hit + 500]
+        assert "expire_frame_layer()" in nxt
+        assert "invalidate_frame_layer()" not in nxt
+
+    def test_layer_stays_on_screen_and_rebuild_is_due_during_flash(self, monkeypatch):
+        from utilities import aircraft_alert
+
+        layer = pygame.Surface((8, 8))
+        monkeypatch.setattr(radar, "_frame_layer", layer)
+        monkeypatch.setattr(radar, "_frame_layer_at", 1e12)
+        monkeypatch.setattr(radar, "_rim_baked_in_layer", False)
+        monkeypatch.setattr(aircraft_alert, "_rim_flash_until", 0.0)
+        monkeypatch.setattr(aircraft_alert, "_attention_until", 0.0)
+        aircraft_alert.start_rim_flash()
+        radar.expire_frame_layer()
+        assert radar._frame_layer is layer
+        assert radar.frame_layer_due() is True
+
+
 class TestLofiTickGate:
     def test_bed_off_never_asks_atc(self):
         from display.round_touch import settings

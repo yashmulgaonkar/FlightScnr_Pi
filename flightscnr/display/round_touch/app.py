@@ -6346,7 +6346,12 @@ class RoundTouchDisplay:
             if not self.overhead.processing:
                 self.overhead.grab_data()
             if aircraft_alert.check_new_aircraft(self.flights):
-                radar.invalidate_frame_layer()
+                # Expire, don't invalidate: dropping the layer made the next
+                # frame rebuild it on the display thread (~400 ms freeze).
+                # The worker bakes the rim flash into the next layer, about
+                # one build (~0.5 s) into the 12 s flash; the sound is not
+                # delayed.
+                radar.expire_frame_layer()
                 # Don't bury attention on Idle clock / forecast — jump back to radar.
                 if self.screen in (
                     SCREEN_CLOCK,
