@@ -203,8 +203,55 @@ def _run_as_audio_user(
         )
 
 
+_RFKILL_SYSFS = "/sys/class/rfkill"
+_PROC = "/proc"
+
+
+def _bluetooth_soft_blocked() -> bool | None:
+    """True/False from sysfs rfkill state; None when sysfs cannot tell."""
+    try:
+        names = os.listdir(_RFKILL_SYSFS)
+    except OSError:
+        return None
+    seen = False
+    for name in names:
+        base = os.path.join(_RFKILL_SYSFS, name)
+        try:
+            with open(os.path.join(base, "type"), encoding="ascii") as fh:
+                if fh.read().strip() != "bluetooth":
+                    continue
+            with open(os.path.join(base, "soft"), encoding="ascii") as fh:
+                soft = fh.read().strip()
+        except OSError:
+            return None
+        seen = True
+        if soft != "0":
+            return True
+    return False if seen else None
+
+
+def _bluetoothd_running() -> bool | None:
+    """True when a ``bluetoothd`` process exists; None when /proc is unreadable."""
+    try:
+        pids = [p for p in os.listdir(_PROC) if p.isdigit()]
+    except OSError:
+        return None
+    for pid in pids:
+        try:
+            with open(os.path.join(_PROC, pid, "comm"), encoding="utf-8", errors="replace") as fh:
+                if fh.read().strip() == "bluetoothd":
+                    return True
+        except OSError:
+            continue
+    return False
+
+
 def _rfkill_unblock_bluetooth() -> None:
     """Clear soft rfkill blocks so ``bluetoothctl power on`` can succeed."""
+    # The reconnect watch calls this every attempt while a speaker is away;
+    # skip the spawn when sysfs already shows the radio unblocked.
+    if _bluetooth_soft_blocked() is False:
+        return
     if not shutil.which("rfkill"):
         return
     try:
@@ -221,6 +268,9 @@ def _rfkill_unblock_bluetooth() -> None:
 
 def _ensure_bluetooth_service() -> None:
     """Start ``bluetooth.service`` when inactive (fresh images / after rfkill)."""
+    # A running bluetoothd answers this without spawning systemctl.
+    if _bluetoothd_running():
+        return
     if not shutil.which("systemctl"):
         return
     try:
