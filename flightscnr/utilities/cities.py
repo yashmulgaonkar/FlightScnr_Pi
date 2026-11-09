@@ -22,14 +22,18 @@ Usage:
     # {"name": "New York City", "distance_km": 18.3}
 """
 
+import itertools
 import json
 import math
 import os
 import threading
 import zipfile
+from array import array
 from io import BytesIO
 
 import requests
+
+from utilities import compact_store
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 CACHE_FILE = os.path.join(BASE_DIR, "cities.json")
@@ -40,6 +44,57 @@ CACHE_VERSION = 1
 # In-memory list: [[name, lat, lon], ...]
 _db = []
 _loaded = False
+
+
+class CityStore:
+    """Packed city list: latitude and longitude arrays plus one name blob.
+
+    Built from ``[name, lat, lon]`` rows, the cache's own shape, so the JSON
+    file streams straight into it (see ``compact_store``).
+    """
+
+    def __init__(self):
+        self._lat = array("d")
+        self._lon = array("d")
+        self._names = compact_store.TextBlob()
+
+    def add(self, row) -> None:
+        """Pack one ``[name, lat, lon]`` row, or raise ``StoreFormatError``
+        when the row is not exactly that shape."""
+        if not isinstance(row, list) or len(row) != 3:
+            raise compact_store.StoreFormatError(f"city row {row!r} is not [name, lat, lon]")
+        name = row[0]
+        if not isinstance(name, str):
+            raise compact_store.StoreFormatError(f"city name {name!r} is not a string")
+        lat = compact_store.check_number(row[1], -90.0, 90.0, f"city {name!r} lat")
+        lon = compact_store.check_number(row[2], -180.0, 180.0, f"city {name!r} lon")
+        self._lat.append(lat)
+        self._lon.append(lon)
+        self._names.add(name)
+
+    def build(self) -> "CityStore":
+        self._names.build()
+        return self
+
+    @classmethod
+    def from_rows(cls, rows) -> "CityStore":
+        store = cls()
+        for row in rows:
+            store.add(row)
+        return store.build()
+
+    def __len__(self) -> int:
+        return len(self._lat)
+
+    def __iter__(self):
+        for i in range(len(self._lat)):
+            yield [self._names.get(i), self._lat[i], self._lon[i]]
+
+    def nearest(self, lat: float, lon: float) -> tuple[str, float] | None:
+        i, km = compact_store.nearest_index(self._lat, self._lon, lat, lon)
+        if i < 0:
+            return None
+        return self._names.get(i), km
 _load_lock = threading.Lock()
 
 
@@ -89,6 +144,35 @@ def _download_and_build():
         return []
 
 
+def _packed_from_text(text: str) -> "CityStore | None":
+    """Packed list when the cache is the current version and every row is
+    exactly ``[name, lat, lon]``; else None with the reason logged."""
+    try:
+        meta, items = compact_store.split_cache(text, "cities")
+        if meta.get("_version") != CACHE_VERSION:
+            return None
+        first = next(items, None)
+        if first is None:
+            return CityStore.from_rows(())
+        if first[0] is not None:
+            raise compact_store.StoreFormatError("cities member is not a list")
+        rows = itertools.chain((first[1],), (row for _, row in items))
+        return CityStore.from_rows(rows)
+    except Exception as exc:
+        print(f"[Cities] Packed store not used ({exc}) - loading the plain list")
+        return None
+
+
+def _pack_or_keep(rows):
+    if not isinstance(rows, list) or not rows:
+        return rows
+    try:
+        return CityStore.from_rows(rows)
+    except Exception as exc:
+        print(f"[Cities] Packed store not used ({exc}) - keeping the plain list")
+        return rows
+
+
 def _load():
     """Load from cache file or download if not present. Thread-safe."""
     global _db, _loaded
@@ -102,7 +186,15 @@ def _load():
         if os.path.exists(CACHE_FILE):
             try:
                 with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                    raw = json.load(f)
+                    text = f.read()
+                store = _packed_from_text(text)
+                if store is not None:
+                    del text
+                    _db = store
+                    _loaded = True
+                    return
+                raw = json.loads(text)
+                del text
 
                 if isinstance(raw, dict) and raw.get("_version") == CACHE_VERSION:
                     _db = raw.get("cities", [])
@@ -119,7 +211,7 @@ def _load():
             except Exception as e:
                 print(f"[Cities] Cache load failed: {e} - re-downloading")
 
-        _db = _download_and_build()
+        _db = _pack_or_keep(_download_and_build())
         _loaded = True
 
 
@@ -137,6 +229,12 @@ def get_nearest_city(latitude, longitude):
     _load()
     if not _db:
         return None
+
+    if isinstance(_db, CityStore):
+        found = _db.nearest(float(latitude), float(longitude))
+        if found is None:
+            return None
+        return {"name": found[0], "distance_km": found[1]}
 
     best_name = None
     best_dist = float("inf")

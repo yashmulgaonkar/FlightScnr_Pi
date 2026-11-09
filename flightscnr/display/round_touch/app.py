@@ -35,6 +35,7 @@ from display.round_touch import (
     follow_overlays,
     frame_debug,
     flap_sound,
+    mem_debug,
     ghost_touch_filter,
     gesture_handler,
     hourly_chime,
@@ -123,6 +124,33 @@ SECONDARY_TIMEOUT_S = 45
 # FLIGHTSCNR_FRAME_DEBUG=1 logs draw cost and achieved frame interval every 2s.
 # The sweep turns 60°/s, so anything past ~20ms/frame shows as a stepping beam.
 FRAME_DEBUG = os.environ.get("FLIGHTSCNR_FRAME_DEBUG", "").lower() in ("1", "true", "yes")
+
+
+def _preload_local_databases() -> None:
+    """Build the packed airports, cities, runways and FAA stores off the UI thread.
+
+    They are loaded on first use otherwise, and the first user can be a draw
+    on the main thread (route labels, the ATC airport picker); on a Pi 4B the
+    airports build takes about 3 s.
+
+    Only modules whose cache file already exists are preloaded, so the
+    preload never starts a download: a device that has never needed a
+    database (FAA NASR off the US, cities5000.zip, ...) still fetches it only
+    when a screen first asks for it, as before.
+    """
+
+    def _work():
+        from utilities import airports, cities, faa_airports, runways
+
+        for mod in (airports, cities, runways, faa_airports):
+            if not os.path.exists(mod.CACHE_FILE):
+                continue
+            try:
+                mod._load()
+            except Exception:
+                logger.debug("preload of %s failed", mod.__name__, exc_info=True)
+
+    Thread(target=_work, daemon=True, name="db-preload").start()
 # Always-on hitch probe (no journald): one line per visible sweep stall.
 _HITCH_LOG = os.environ.get("FLIGHTSCNR_HITCH_LOG", "/tmp/flightscnr-hitch.log")
 _HITCH_GAP_S = float(os.environ.get("FLIGHTSCNR_HITCH_GAP_MS", "48")) / 1000.0
@@ -6718,6 +6746,13 @@ class RoundTouchDisplay:
             except (OSError, ValueError):
                 # Not the main thread, or the platform lacks this signal.
                 logger.warning("Could not install a handler for %s", sig)
+        # kill -USR1 <pid> logs a one-shot memory report on the next tick.
+        usr1 = getattr(signal, "SIGUSR1", None)
+        if usr1 is not None:
+            try:
+                signal.signal(usr1, lambda _s, _f: mem_debug.request())
+            except (OSError, ValueError):
+                logger.warning("Could not install a handler for SIGUSR1")
 
     def run(self):
         import gc
@@ -6732,6 +6767,7 @@ class RoundTouchDisplay:
         gc.collect()
         gc.freeze()
         self._install_signal_handlers()
+        _preload_local_databases()
 
         logger.info(
             "Round touch display starting (%dx%d framebuffer, rotation=%d°, visible radius=%d)",
@@ -7318,6 +7354,7 @@ class RoundTouchDisplay:
                     self._tick_off_hours_clock()
                 self._apply_brightness()
                 self._tick_pixel_shift()
+                mem_debug.maybe_report(self)
                 if not self._slider_drag_armed():
                     settings.flush_pending()
                 self._loop_stage("loop_misc", _lt)
