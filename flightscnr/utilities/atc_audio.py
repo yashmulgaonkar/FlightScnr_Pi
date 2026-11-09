@@ -1082,6 +1082,38 @@ def quiet_override_end_label(*, active: bool | None = None) -> str:
 # clears it so a fresh mpv is seen at once.
 _ORPHAN_SCAN_INTERVAL_S = 1.0
 _orphan_scan_clear_at = 0.0
+# Each of the ~200 cmdline reads releases the GIL. On the display thread, with
+# the layer worker busy, getting it back after every read added up to 250 to
+# 580 ms (FRAME_DEBUG, Pi 4B). The display turns on the background scan: callers
+# get the last answer and a stale one starts a fresh scan on a worker.
+_orphan_scan_background = False
+_orphan_seen = False
+_orphan_thread: threading.Thread | None = None
+
+
+def set_background_orphan_scan(enabled: bool) -> None:
+    """Run the orphan /proc walk on a worker instead of the calling thread."""
+    global _orphan_scan_background
+    _orphan_scan_background = bool(enabled)
+
+
+def _orphan_scan_worker() -> None:
+    global _orphan_seen
+    _orphan_seen = bool(_atc_mpv_pids())
+
+
+def _orphan_alive_background(now: float) -> bool:
+    global _orphan_thread, _orphan_scan_clear_at
+    thread = _orphan_thread
+    if now - _orphan_scan_clear_at >= _ORPHAN_SCAN_INTERVAL_S and (
+        thread is None or not thread.is_alive()
+    ):
+        _orphan_scan_clear_at = now
+        _orphan_thread = threading.Thread(
+            target=_orphan_scan_worker, name="atc-orphan-scan", daemon=True
+        )
+        _orphan_thread.start()
+    return _orphan_seen
 
 
 def _mpv_alive() -> bool:
@@ -1106,6 +1138,8 @@ def _mpv_alive() -> bool:
         return True
     # Orphan: socket was unlinked (or never reachable) but mpv still streams.
     now = time.monotonic()
+    if _orphan_scan_background:
+        return _orphan_alive_background(now)
     if now - _orphan_scan_clear_at < _ORPHAN_SCAN_INTERVAL_S:
         return False
     if _atc_mpv_pids():
@@ -2158,8 +2192,12 @@ def reset_runtime_for_tests() -> None:
     global _seed_cache, _seed_mtime, _index_cache, _index_mtime
     global _discovered, _discover_thread
     global _keepalive_next_at, _keepalive_failures, _orphan_scan_clear_at
+    global _orphan_seen, _orphan_scan_background, _orphan_thread
     with _lock:
         _orphan_scan_clear_at = 0.0
+        _orphan_seen = False
+        _orphan_thread = None
+        _orphan_scan_background = False
         _proc = None
         _playing_mount = None
         _playing_airport = None

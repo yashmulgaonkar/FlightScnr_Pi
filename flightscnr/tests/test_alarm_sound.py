@@ -244,9 +244,13 @@ class LofiBedStepsAsideTests(unittest.TestCase):
         from utilities import atc_audio, lofi_audio
 
         lofi_audio._last_app_tick = 0.0
+        from display.round_touch import settings
+
         with mock.patch.object(atc_audio, "is_playing", return_value=atc_playing), mock.patch.object(
             alarm_clock, "playing_lofi", return_value=alarm_lofi
-        ), mock.patch.object(lofi_audio, "tick") as tick:
+        ), mock.patch.object(settings, "lofi_enabled", return_value=True), mock.patch.object(
+            lofi_audio, "tick"
+        ) as tick:
             lofi_audio.app_tick()
         return tick.call_args.kwargs["atc_playing"]
 

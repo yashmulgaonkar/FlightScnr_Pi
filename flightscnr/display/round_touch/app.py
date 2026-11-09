@@ -6766,6 +6766,14 @@ class RoundTouchDisplay:
         # glibc keeps freed heap in its arenas; hand it back every 10 min so
         # the kiosk does not creep up on 1-2 GB Pis (FLIGHTSCNR_MALLOC_TRIM_S).
         heap_trim.start()
+        # The HUD, lofi and OTA ticks ask ATC whether it plays; keep its
+        # /proc walk for stray mpv instances off this thread.
+        try:
+            from utilities import atc_audio
+
+            atc_audio.set_background_orphan_scan(True)
+        except Exception:
+            logger.debug("ATC background orphan scan not enabled", exc_info=True)
         # Startup objects (modules, fonts, icon/tile caches) are permanent —
         # freeze them so gen-2 collections stop scanning them (~90ms pauses).
         gc.collect()
