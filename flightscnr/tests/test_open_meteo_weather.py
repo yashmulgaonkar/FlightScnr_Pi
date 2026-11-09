@@ -11,9 +11,11 @@
 
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
+import os
 import time
+from zoneinfo import ZoneInfo
 
 import pytest
 from requests.exceptions import ConnectionError, HTTPError, Timeout
@@ -37,14 +39,34 @@ class Response:
         return deepcopy(self.payload)
 
 
+# The device runs in the zone it reports weather for, so these tests pin the
+# process zone to the fixture's provider zone. With a UTC-midnight first day and
+# the machine's own zone, the first day read as yesterday whenever the local and
+# UTC dates matched (all day until 19:00 US Eastern), and 9 tests failed.
+PROVIDER_TZ = "Europe/Paris"
+
+
+@pytest.fixture
+def provider_local_time():
+    saved = os.environ.get("TZ")
+    os.environ["TZ"] = PROVIDER_TZ
+    time.tzset()
+    yield
+    if saved is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = saved
+    time.tzset()
+
+
 def open_payload():
-    day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    day = datetime.now(ZoneInfo(PROVIDER_TZ)).replace(hour=0, minute=0, second=0, microsecond=0)
     stamp = int(day.timestamp())
     return {
-        "timezone": "Europe/Paris",
+        "timezone": PROVIDER_TZ,
         "current": {"temperature_2m": 20, "relative_humidity_2m": 55,
                     "weather_code": 0, "wind_speed_10m": 4, "wind_direction_10m": 0},
-        "daily": {"time": [stamp, stamp + 86400, stamp + 172800],
+        "daily": {"time": [int((day + timedelta(days=i)).timestamp()) for i in range(3)],
                   "temperature_2m_min": [10, 11, 12], "temperature_2m_max": [20, 21, 22],
                   "weather_code": [0, 61, 95], "precipitation_probability_mean": [0, 20, 50],
                   "sunrise": [stamp + 21600] * 3, "sunset": [stamp + 64800] * 3},
@@ -86,7 +108,7 @@ class Session:
 
 
 @pytest.fixture(autouse=True)
-def isolated_weather(monkeypatch, tmp_path):
+def isolated_weather(monkeypatch, tmp_path, provider_local_time):
     import weather_prefs
 
     monkeypatch.setattr(weather_prefs, "temperature_units", lambda: "metric")
