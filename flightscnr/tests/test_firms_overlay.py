@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
@@ -114,7 +115,7 @@ class TestFirmsOverlay(unittest.TestCase):
 
         # Pin the projection inputs: other suites move the home location, leave
         # a per-frame projection batch behind, or rotate the dial.
-        with mock.patch.object(map_bg, "_proj_batch", None), mock.patch.object(
+        with mock.patch.object(map_bg, "_proj_tls", threading.local()), mock.patch.object(
             settings, "effective_facing_deg", return_value=0.0
         ):
             pos = map_bg.lat_lon_to_basemap_screen(
