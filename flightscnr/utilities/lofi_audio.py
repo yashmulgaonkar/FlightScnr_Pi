@@ -846,6 +846,17 @@ def app_tick() -> None:
         return
     _last_app_tick = now
     try:
+        from display.round_touch import settings
+
+        enabled = bool(settings.lofi_enabled())
+    except Exception:
+        enabled = False
+    if not enabled:
+        # Asking ATC whether it plays can walk /proc; with the bed off the
+        # answer changes nothing.
+        _stop_scheduler()
+        return
+    try:
         from utilities import atc_audio
 
         playing = bool(atc_audio.is_playing())

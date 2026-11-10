@@ -228,6 +228,21 @@ def invalidate_frame_layer() -> None:
     # instead of the one present may still be reading.
 
 
+def expire_frame_layer() -> None:
+    """Ask for a fresh layer without dropping the current one.
+
+    invalidate_frame_layer() leaves no layer to present, so the next frame
+    rebuilds it on the display thread (300 to 440 ms in busy traffic). For
+    changes that can wait a moment, such as the HUD clock minute, this only
+    ages the layer: frames keep showing it while the prewarm worker builds
+    the new one. A rebuild already in flight may publish first, which can
+    hold the change back by one layer interval (about 4 s).
+    """
+    global _frame_layer_at
+    frame_debug.count("layer_expire")
+    _frame_layer_at = 0.0
+
+
 def invalidate_backdrop() -> None:
     """Force map/precip/airport backdrop rebuild (async airport cache ready)."""
     global _backdrop, _backdrop_key, _backdrop_gen
@@ -588,7 +603,9 @@ def draw_radar(
         from display.round_touch import radar_hud
 
         if radar_hud.needs_minute_invalidate():
-            invalidate_frame_layer()
+            # The clock text can arrive a frame or two late; dropping the
+            # layer here froze the sweep for a third of a second every minute.
+            expire_frame_layer()
         layer = _ensure_frame_layer(backdrop, flights, offset)
         # Volume popover needs a live overlay — leave the fast path.
         if layer is not None and radar_hud.volume_popover_open():
