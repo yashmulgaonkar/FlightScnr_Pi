@@ -7183,7 +7183,11 @@ class RoundTouchDisplay:
                 ):
                     self._weather_redraw_pending = False
                     if self.screen == SCREEN_RADAR:
-                        radar.invalidate_frame_layer()
+                        # Expire, don't invalidate: the scheduled refresh at
+                        # :01 and :31 froze the sweep for 250 to 370 ms while
+                        # the next frame rebuilt the layer inline. The worker
+                        # picks up the new HUD overlay instead.
+                        radar.expire_frame_layer()
                     self._safe_draw()
 
                 # Re-open captive setup if known Wi-Fi stays down past the grace window.

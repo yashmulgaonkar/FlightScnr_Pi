@@ -81,6 +81,19 @@ class TestNewAlertExpiresLayer:
         assert radar.frame_layer_due() is True
 
 
+class TestWeatherRedrawExpiresLayer:
+    def test_weather_redraw_expires_instead_of_invalidating(self):
+        import inspect
+
+        from display.round_touch import app as app_mod
+
+        src = inspect.getsource(app_mod.RoundTouchDisplay)
+        hit = src.index("if self._weather_redraw_pending and self.screen in (")
+        nxt = src[hit:hit + 700]
+        assert "expire_frame_layer()" in nxt
+        assert "invalidate_frame_layer()" not in nxt
+
+
 class TestLofiTickGate:
     def test_bed_off_never_asks_atc(self):
         from display.round_touch import settings
