@@ -1043,6 +1043,11 @@ def vessel_to_radar_entry(vessel: dict[str, Any]) -> dict[str, Any] | None:
 
 
 _last_snapshot_log = 0.0
+# The 10 s snapshot line logs at info on the first pass, when the stream
+# connects or drops, and every _SNAPSHOT_INFO_S; the passes between are debug.
+_SNAPSHOT_INFO_S = 600.0
+_last_snapshot_info = 0.0
+_last_snapshot_connected: bool | None = None
 
 
 def fetch_ais_radar_entries(
@@ -1051,7 +1056,7 @@ def fetch_ais_radar_entries(
     range_nm: float | None = None,
 ) -> list[dict[str, Any]]:
     """Vessels as radar-compatible dicts (empty when AIS is off)."""
-    global _last_snapshot_log
+    global _last_snapshot_log, _last_snapshot_info, _last_snapshot_connected
     raw = fetch_ais_vessels(lat, lon, range_nm)
     out: list[dict[str, Any]] = []
     for v in raw:
@@ -1063,6 +1068,17 @@ def fetch_ais_radar_entries(
         if now - _last_snapshot_log >= 10.0:
             _last_snapshot_log = now
             client = get_client()
+            connected = bool(client.connected)
+            level = logging.DEBUG
+            if (
+                connected != _last_snapshot_connected
+                or now - _last_snapshot_info >= _SNAPSHOT_INFO_S
+            ):
+                level = logging.INFO
+                _last_snapshot_info = now
+                _last_snapshot_connected = connected
+            if not logger.isEnabledFor(level):
+                return out
             near = 0
             try:
                 from display.round_touch import geo
@@ -1077,11 +1093,12 @@ def fetch_ais_radar_entries(
                         near += 1
             except Exception:
                 near = -1
-            logger.info(
+            logger.log(
+                level,
                 "[ais] snapshot: %d vessels (%d in radar range, connected=%s last_msg=%.0fs ago)",
                 len(out),
                 near,
-                client.connected,
+                connected,
                 (now - client.last_msg_ts) if client.last_msg_ts else -1,
             )
     return out

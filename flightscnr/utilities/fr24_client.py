@@ -103,6 +103,36 @@ def _ensure_env_credentials() -> None:
         os.environ.setdefault("fr24_subscription_key", FR24_API_KEY)
 
 
+class _LoginNoteOnce(logging.Filter):
+    """Pass each fr24 login note once; drop the repeats.
+
+    FR24Client opens a fresh session (and login) for every API call, and
+    fr24.login() logs its auth mode at info each time: about three identical
+    lines every 90 s poll.
+    """
+
+    _NOTES = ("no authentication provided", "using username and password", "subscription_key")
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._seen: set[str] = set()
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno != logging.INFO:
+            return True
+        msg = record.getMessage()
+        if not any(note in msg for note in self._NOTES):
+            return True
+        if msg in self._seen:
+            return False
+        if len(self._seen) < 8:
+            self._seen.add(msg)
+        return True
+
+
+_login_note_filter = _LoginNoteOnce()
+logging.getLogger("fr24").addFilter(_login_note_filter)
+
 # Inject credentials before importing fr24
 _ensure_env_credentials()
 
