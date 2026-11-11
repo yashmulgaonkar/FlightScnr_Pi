@@ -727,7 +727,7 @@
   "tracked.breadcrumb_track": "Volgen",
   "common.cancel": "Annuleren",
   "flight.follow_this": "Volg deze vlucht",
-  "flight.following": "Wordt gevolgd",
+  "flight.stop_following": "Stop met volgen",
   "flight.confirm.title": "{id} volgen?",
   "flight.confirm.body": "Dit stopt het volgen van {id}.",
   "flight.confirm.follow": "Volgen",

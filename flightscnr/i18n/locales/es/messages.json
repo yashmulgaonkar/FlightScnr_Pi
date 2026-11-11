@@ -727,7 +727,7 @@
   "tracked.breadcrumb_track": "Track",
   "common.cancel": "Cancel",
   "flight.follow_this": "Follow this Flight",
-  "flight.following": "Following",
+  "flight.stop_following": "Stop following",
   "flight.confirm.title": "Follow {id}?",
   "flight.confirm.body": "This stops following {id}.",
   "flight.confirm.follow": "Follow",
