@@ -11,6 +11,7 @@
 
 import logging
 import math
+import math
 import os
 import time
 import weakref
@@ -40,6 +41,14 @@ _prev_radial_rect: pygame.Rect | None = None
 _prev_location_toast_rect: pygame.Rect | None = None
 # Rects of the live aircraft icons drawn last frame (erased from the base).
 _prev_icon_rects: list = []
+# Alert rim drawn straight onto the display each frame (Smooth motion). The
+# layer only rebuilds every few seconds there, so a rim baked into it could
+# not pulse. One box around the ring is the whole screen, so the ring is
+# pushed as arc segments, and only on the frames where it turns on or off.
+_RIM_SEGMENTS = 48
+_rim_prev_spec = None  # (color, radius, width) drawn last frame, or None
+_rim_prev_rects: list = []
+_rim_rects_cache: dict = {}
 # Rotated copies of live sprites, keyed by the sprite object. A bare id()
 # collides when pygame reuses a freed Surface address, which painted one
 # aircraft type with another's silhouette.
@@ -169,10 +178,13 @@ def to_logical(x: float, y: float) -> tuple[int, int]:
 def present(display: pygame.Surface, frame: pygame.Surface) -> None:
     """Blit the logical frame onto the physical display, applying rotation."""
     global _prev_sweep_rect, _pending_key, _needs_full
+    global _rim_prev_spec, _rim_prev_rects
     # Full-frame present invalidates the dirty-sweep erase rect.
     _prev_sweep_rect = None
     _pending_key = None
     _needs_full = True
+    _rim_prev_spec = None
+    _rim_prev_rects = []
     rotation = rotation_degrees()
     if rotation == 0:
         rotated = frame
@@ -196,6 +208,7 @@ def present_radar_sweep(
     draw_sweep: bool = True,
     live_icons: list | None = None,
     live_connectors: list | None = None,
+    live_rim: tuple | None = None,
 ) -> None:
     """Blit a cached rotated radar base, then optionally draw the sweep.
 
@@ -204,13 +217,16 @@ def present_radar_sweep(
     rebuilds; each frame restores the previous sweep AABB from the cached
     base and paints a new wedge. Uses display.update(dirty) so X11 doesn't
     re-push the whole framebuffer.
+
+    ``live_rim`` is ``(color, radius, width)`` for an alert rim drawn this
+    frame, or None for no rim (see radar.live_rim_spec).
     """
     global _rot_base, _rot_base_key, _prev_sweep_rect, _pending_key, _needs_full
     global _next_base, _next_base_key, _prev_hud_rect, _prev_bubble_rect
     global _prev_airport_callout_rect, _prev_location_toast_rect
     global _prev_airport_tile_rect, _prev_lofi_rect, _prev_radial_rect
     global _prev_lofi_tile_rect, _prev_favourite_tile_rect, _prev_icon_rects
-    global _upload_y
+    global _upload_y, _rim_prev_spec, _rim_prev_rects
     from display.round_touch import draw
 
     had_layer = _rot_base is not None
@@ -415,10 +431,32 @@ def present_radar_sweep(
     # the targets. Tips are short lines — a per-frame sprite here was a
     # dirty rectangle big enough to chop the wedge on X11.
     old_icons = _prev_icon_rects
+    # Rim off (or changed): restore last frame's ring from the base, which has
+    # no rim in it. Before the icons so this cannot wipe one drawn this frame.
+    # A swap-in or full refresh already repainted the whole base.
+    rim_changed = live_rim != _rim_prev_spec
+    if rim_changed and _rim_prev_spec is not None and not (swap_in or full_refresh):
+        for r in _rim_prev_rects:
+            src = pygame.Rect(r.x - origin_off[0], r.y - origin_off[1], r.w, r.h)
+            display.blit(_rot_base, r.topleft, src)
     conn_rects = _blit_live_connectors(display, origin_off, rotation, live_connectors)
     icon_rects = _blit_live_icons(display, origin_off, rotation, live_icons)
     new_icons = conn_rects + icon_rects
     _prev_icon_rects = new_icons
+    # Redraw the ring every frame it is on: the erases above restore rects
+    # from the rim-less base. Those rects are pushed anyway, so the whole ring
+    # only needs pushing when it turns on or off, or the base was swapped.
+    rim_rects: list = []
+    if live_rim is not None:
+        rim_rects = _blit_live_rim(display, origin_off, live_rim)
+    rim_dirty: list = []
+    if rim_changed or swap_in:
+        if _rim_prev_spec is not None:
+            rim_dirty.extend(_rim_prev_rects)
+        if rim_rects and rim_rects is not _rim_prev_rects:
+            rim_dirty.extend(rim_rects)
+    _rim_prev_spec = live_rim
+    _rim_prev_rects = rim_rects
     if frame_debug.ENABLED:
         frame_debug.stage("4p_live", time.perf_counter() - _t)
         _t = time.perf_counter()
@@ -500,6 +538,7 @@ def present_radar_sweep(
                 radial_dirty,
                 *old_icons,
                 *new_icons,
+                *rim_dirty,
                 *_take_upload_bands(display.get_width(), display.get_height()),
             )
             if r is not None
@@ -625,6 +664,55 @@ def _alpha_line(display, p0, p1, color, width: int):
     )
     display.blit(_line_scratch, rect.topleft, area)
     return rect
+
+
+def _rim_segment_rects(
+    cx: int, cy: int, radius: int, width: int, bounds: pygame.Rect
+) -> list:
+    """Boxes around ``_RIM_SEGMENTS`` arcs of a ring, clipped to ``bounds``.
+
+    pygame.draw.circle paints a ``width`` ring inward from ``radius``. Cached:
+    the geometry only changes with the pixel shift or the theme size.
+    """
+    key = (cx, cy, radius, width, tuple(bounds))
+    cached = _rim_rects_cache.get(key)
+    if cached is not None:
+        return cached
+    outer = radius + 1
+    inner = max(0, radius - width - 1)
+    rects = []
+    steps = 8
+    for i in range(_RIM_SEGMENTS):
+        a0 = 2.0 * math.pi * i / _RIM_SEGMENTS
+        a1 = 2.0 * math.pi * (i + 1) / _RIM_SEGMENTS
+        xs = []
+        ys = []
+        for k in range(steps + 1):
+            a = a0 + (a1 - a0) * k / steps
+            ca, sa = math.cos(a), math.sin(a)
+            for rr in (inner, outer):
+                xs.append(cx + rr * ca)
+                ys.append(cy + rr * sa)
+        x0, y0 = math.floor(min(xs)) - 1, math.floor(min(ys)) - 1
+        x1, y1 = math.ceil(max(xs)) + 1, math.ceil(max(ys)) + 1
+        rect = pygame.Rect(x0, y0, x1 - x0 + 1, y1 - y0 + 1).clip(bounds)
+        if rect.w > 0 and rect.h > 0:
+            rects.append(rect)
+    if len(_rim_rects_cache) > 8:
+        _rim_rects_cache.clear()
+    _rim_rects_cache[key] = rects
+    return rects
+
+
+def _blit_live_rim(display, origin_off, spec) -> list:
+    """Draw the alert rim on the display; return its segment rects."""
+    color, radius, width = spec
+    base = _rot_base
+    w, h = (base.get_size() if base is not None else display.get_size())
+    cx = origin_off[0] + w // 2
+    cy = origin_off[1] + h // 2
+    pygame.draw.circle(display, color, (cx, cy), radius, width)
+    return _rim_segment_rects(cx, cy, radius, width, display.get_rect())
 
 
 def _blit_live_icons(display, origin_off, rotation: int, icons) -> list:

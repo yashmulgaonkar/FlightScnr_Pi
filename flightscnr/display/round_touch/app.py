@@ -1022,6 +1022,7 @@ class RoundTouchDisplay:
                     _t = time.perf_counter()
                 live_icons = radar.live_icon_frame()
                 live_connectors = radar.live_trail_connectors()
+                live_rim = radar.live_rim_spec()
                 if FRAME_DEBUG:
                     self._stage("4L_live_frame", time.perf_counter() - _t)
                 sweep_angle = radar.current_sweep_angle()
@@ -1036,6 +1037,7 @@ class RoundTouchDisplay:
                         draw_sweep=show_sweep,
                         live_icons=live_icons,
                         live_connectors=live_connectors,
+                        live_rim=live_rim,
                     )
                     self._stage("4_present", time.perf_counter() - _t)
                 else:
@@ -1048,6 +1050,7 @@ class RoundTouchDisplay:
                         draw_sweep=show_sweep,
                         live_icons=live_icons,
                         live_connectors=live_connectors,
+                        live_rim=live_rim,
                     )
                 return
 
@@ -6349,7 +6352,8 @@ class RoundTouchDisplay:
                 # Expire, don't invalidate: dropping the layer made the next
                 # frame rebuild it on the display thread (~400 ms freeze).
                 # The worker bakes the rim flash into the next layer, about
-                # one build (~0.5 s) into the 12 s flash; the sound is not
+                # one build (~0.5 s) into the 12 s flash; with Smooth motion
+                # the rim is drawn per frame instead. The sound is not
                 # delayed.
                 radar.expire_frame_layer()
                 # Don't bury attention on Idle clock / forecast — jump back to radar.
