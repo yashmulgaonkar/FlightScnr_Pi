@@ -369,7 +369,9 @@ def _build_frame_layer(build: pygame.Surface, backdrop, flights, offset) -> bool
     # full-frame rotate/flip and strobed the display).
     draw.apply_round_bezel(build)
     rim_baked = False
-    if aircraft_alert.rim_flash_active():
+    # Smooth motion draws the rim per frame instead (live_rim_spec): this
+    # layer only rebuilds every few seconds there, so a baked rim froze on.
+    if aircraft_alert.rim_flash_active() and not live_icons_enabled():
         color = aircraft_alert.rim_flash_color()
         if color is not None:
             _draw_alert_rim_flash(build)
@@ -597,6 +599,7 @@ def draw_radar(
                 if "locked" not in str(exc).lower():
                     raise
             draw_live_icons(surface)
+            _draw_live_rim_on_frame(surface)
             bezel_applied = True
         _draw_pan_commit_overlay(surface)
     else:
@@ -615,6 +618,7 @@ def draw_radar(
                 if "locked" not in str(exc).lower():
                     raise
             draw_live_icons(surface)
+            _draw_live_rim_on_frame(surface)
             # Pill is no longer baked into the layer — draw full HUD + popover.
             radar_hud.draw_hud(surface, include_popover=True, draw_pill=True)
             from display.round_touch import update_bubble
@@ -2428,14 +2432,41 @@ def _draw_status(surface, flights):
         y = draw.draw_center_line(surface, line, y, font, color)
 
 
+def _alert_rim_geometry() -> tuple[int, int]:
+    """(radius, width) of the alert rim stroke."""
+    width = max(6, theme.s(7))
+    # Match timeout-ring placement so the bezel does not clip the stroke.
+    return theme.VISIBLE_RADIUS - width // 2 - theme.s(1), width
+
+
+def live_rim_spec() -> tuple | None:
+    """Alert rim for rotation.present_radar_sweep to draw this frame.
+
+    Only with Smooth motion, where the layer rebuilds too rarely to carry the
+    pulse. Returns ``(color, radius, width)``, or None for no ring (no alert,
+    the pulse's off half, or the rim is baked into the layer instead).
+    """
+    if not live_icons_enabled() or not aircraft_alert.rim_flash_active():
+        return None
+    color = aircraft_alert.rim_flash_color()
+    if color is None:
+        return None
+    r, width = _alert_rim_geometry()
+    return (tuple(color), r, width)
+
+
+def _draw_live_rim_on_frame(surface) -> None:
+    """Rim for frames built from the layer outside the fast present path."""
+    if live_icons_enabled() and aircraft_alert.rim_flash_active():
+        _draw_alert_rim_flash(surface)
+
+
 def _draw_alert_rim_flash(surface):
     """Pulse the visible rim so a new mil/squawk/watch alert is hard to miss."""
     color = aircraft_alert.rim_flash_color()
     if color is None:
         return
-    width = max(6, theme.s(7))
-    # Match timeout-ring placement so the bezel does not clip the stroke.
-    r = theme.VISIBLE_RADIUS - width // 2 - theme.s(1)
+    r, width = _alert_rim_geometry()
     pygame.draw.circle(
         surface,
         color,
