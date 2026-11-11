@@ -1684,6 +1684,11 @@ class Overhead:
             # Tracked / Follow / Radar all consume ``tracked_data`` from here.
             # Follow must not open a parallel LiveFeed for the same callsign.
             tracked_callsign = load_tracked_callsign()
+            if not tracked_callsign:
+                # Cleared (device Stop following, or the portal): forget the
+                # last pin so following the same flight again starts fresh
+                # instead of inheriting its miss count and auto-clearing early.
+                self._tracked_last_callsign = ""
             if tracked_callsign:
                 stats["tracked_callsign"] = tracked_callsign
 
@@ -1844,6 +1849,9 @@ class Overhead:
             except Exception:
                 pass
 
+            # Follow was stopped while this poll ran: don't bring it back.
+            if tracked_data is not None and not load_tracked_callsign():
+                tracked_data = None
             with self._lock:
                 self._data = overhead_data
                 self._data_all = overhead_data_all
@@ -1889,6 +1897,18 @@ class Overhead:
         with self._lock:
             self._tracked_data = None
             self._tracking_cleared_notice = TRACKING_CLEARED_NOTICE
+
+    def stop_tracking(self) -> None:
+        """Stop following from the device (flight detail "Stop following").
+
+        Writes the same empty tracked_flight.json as the portal's clear, and
+        drops the in-memory pin so Radar and Follow lose it now instead of on
+        the next poll. No auto-clear popup: the user asked for this.
+        """
+        set_tracked_callsign("")
+        with self._lock:
+            self._tracked_data = None
+            self._new_data = True
 
     def take_tracking_cleared_notice(self) -> str | None:
         """Return and clear the one-shot auto-clear popup message, if any."""

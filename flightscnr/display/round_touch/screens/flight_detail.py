@@ -26,8 +26,11 @@ except ImportError:
 FOOTER_BUTTONS = ("prev", "next", "radar")
 FOOTER_EMPTY = ("radar",)
 
-# "Follow this Flight" pill + its confirm popup (replace-follow warning).
+# "Follow this Flight" / "Stop following" pill + its confirm popup
+# (replace-follow warning).
 _follow_btn_rect = None
+# True when the pill reads "Stop following" (the shown flight is followed).
+_follow_btn_stops = False
 _confirm_follow_rect = None
 _confirm_cancel_rect = None
 
@@ -36,6 +39,13 @@ def follow_button_hit(x: int, y: int) -> bool:
     if _follow_btn_rect is None:
         return False
     return _follow_btn_rect.collidepoint(int(x), int(y))
+
+
+def follow_button_action(x: int, y: int) -> str | None:
+    """"follow" or "stop" when the pill is hit, else None."""
+    if not follow_button_hit(x, y):
+        return None
+    return "stop" if _follow_btn_stops else "follow"
 
 
 def follow_confirm_hit(x: int, y: int) -> str | None:
@@ -55,9 +65,14 @@ def _draw_follow_row(
     chrome_top: int,
     bottom: int,
 ) -> int:
-    """Follow pill as the last scrollable row — below telemetry, not over it."""
-    global _follow_btn_rect
+    """Follow pill as the last scrollable row — below telemetry, not over it.
+
+    Reads "Stop following" when the shown flight is the followed one, so the
+    device can end a follow without the web portal.
+    """
+    global _follow_btn_rect, _follow_btn_stops
     _follow_btn_rect = None
+    _follow_btn_stops = False
     callsign = str(flight.get("callsign") or "").strip()
     if not callsign or flight.get("kind") == "vessel":
         return y
@@ -67,7 +82,7 @@ def _draw_follow_row(
         already = load_tracked_callsign() == callsign.upper()
     except Exception:
         already = False
-    label_text = tr("flight.following") if already else tr("flight.follow_this")
+    label_text = tr("flight.stop_following") if already else tr("flight.follow_this")
     try:
         font = draw.load_font(theme.s(13), bold=True)
         label = font.render(label_text, True, theme.LABEL if already else theme.MUTED)
@@ -84,8 +99,8 @@ def _draw_follow_row(
             surface, theme.GRID, rect, width=1, border_radius=rect.height // 2
         )
         surface.blit(label, label.get_rect(center=rect.center))
-        if not already:
-            _follow_btn_rect = pygame.Rect(rect).inflate(theme.s(8), theme.s(8))
+        _follow_btn_rect = pygame.Rect(rect).inflate(theme.s(8), theme.s(8))
+        _follow_btn_stops = already
     return y + rect.height + gap
 
 

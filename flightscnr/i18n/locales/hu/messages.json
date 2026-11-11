@@ -727,7 +727,7 @@
   "tracked.breadcrumb_track": "Követés",
   "common.cancel": "Mégse",
   "flight.follow_this": "Járat követése",
-  "flight.following": "Követés",
+  "flight.stop_following": "Követés leállítása",
   "flight.confirm.title": "Követed: {id}?",
   "flight.confirm.body": "Ezzel megszűnik a(z) {id} követése.",
   "flight.confirm.follow": "Követés",

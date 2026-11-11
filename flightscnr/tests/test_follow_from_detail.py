@@ -144,7 +144,7 @@ class TestAppWiring:
         from display.round_touch import app as app_mod
 
         src = inspect.getsource(app_mod)
-        assert "follow_button_hit" in src
+        assert "follow_button_action" in src
         assert "follow_confirm_hit" in src
         assert "set_tracked_callsign" in src
 
