@@ -341,11 +341,12 @@ class TestDraw(unittest.TestCase):
         inject_fix_for_tests(PositionSample(0.0, 10.0, 420.0, 27600.0, 0.0), 0.0)
         iss_screen.draw_iss(surface, now=0.0)
         rect = iss_screen.map_rect()
+        accent = iss_screen._accent()
         bright = 0
         for x in range(rect.left, rect.right, 2):
             for y in range(rect.top, rect.bottom, 2):
-                red, green, blue, _alpha = surface.get_at((x, y))
-                if green > 180 and red < 90 and blue < 160:
+                pixel = surface.get_at((x, y))
+                if all(abs(pixel[i] - accent[i]) < 40 for i in range(3)):
                     bright += 1
         self.assertGreater(bright, 20, "the ground track should cross the chart")
 
@@ -445,6 +446,93 @@ class TestDraw(unittest.TestCase):
         iss_screen.tick_over_marquee(14.0)
         iss_screen.draw_iss(surface, now=14.0)
         self.assertNotEqual(before, pygame.image.tostring(surface, "RGB"))
+
+    def _with_side(self, side, fn):
+        original = theme.SIZE
+        try:
+            theme.set_framebuffer_side(side)
+            iss_screen._layout_cache = None
+            fn()
+        finally:
+            theme.set_framebuffer_side(original)
+            iss_screen._layout_cache = None
+
+    def test_hud_rows_run_top_to_bottom_at_both_sizes(self):
+        order = [
+            "over_y", "place_y", "coord_y", "telem_y", "value_y",
+            "rule_y", "next_y", "schedule_y", "detail_y",
+        ]
+
+        def check():
+            layout = iss_screen._tracker_layout()
+            ys = [int(layout[key]) for key in order]
+            self.assertEqual(ys, sorted(set(ys)), f"rows out of order at {theme.SIZE}: {ys}")
+            rect = layout["map"]
+            self.assertGreater(rect.top, int(layout["coord_y"]))
+            self.assertLess(rect.bottom, int(layout["telem_y"]))
+
+        for side in (720, 1080):
+            self._with_side(side, check)
+
+    def test_hud_text_stays_off_the_footer_pills(self):
+        from display.round_touch import nav
+
+        def check():
+            inject_fix_for_tests(PositionSample(-50.5, 34.9, 436.0, 27537.0, 0.0), 0.0)
+            remember_place_for_tests(-50.5, 34.9, "Gqeberha")
+            full = self._surface()
+            iss_screen.draw_iss(full, now=0.0)
+            footer_only = self._surface()
+            footer_only.fill((0, 0, 0))
+            nav.draw_curved_footer(
+                footer_only, list(iss_screen.FOOTER_BUTTONS), pin_active=False, crew_open=False
+            )
+            for kind in ("pin", "astronaut"):
+                box = iss_screen._pill_rect(kind).clip(full.get_rect())
+                self.assertEqual(
+                    pygame.image.tostring(full.subsurface(box), "RGB"),
+                    pygame.image.tostring(footer_only.subsurface(box), "RGB"),
+                    f"HUD ink inside the {kind} pill at {theme.SIZE}",
+                )
+
+        for side in (720, 1080):
+            self._with_side(side, check)
+
+    def test_accent_follows_the_radar_theme_colour(self):
+        inject_fix_for_tests(PositionSample(0.0, 10.0, 420.0, 27600.0, 0.0), 0.0)
+        original = theme.SWEEP
+        try:
+            theme.SWEEP = (200, 40, 220)
+            self.assertEqual(iss_screen._accent(), (200, 40, 220))
+            surface = self._surface()
+            iss_screen.draw_iss(surface, now=0.0)
+            rect = iss_screen.map_rect()
+            hits = sum(
+                1
+                for x in range(rect.left, rect.right, 2)
+                for y in range(rect.top, rect.bottom, 2)
+                if all(abs(surface.get_at((x, y))[i] - (200, 40, 220)[i]) < 40 for i in range(3))
+            )
+            self.assertGreater(hits, 20, "the track should use the theme colour")
+        finally:
+            theme.SWEEP = original
+
+    def test_flown_track_has_a_soft_glow_inside_the_chart(self):
+        inject_fix_for_tests(PositionSample(-31.5, 149.6, 426.0, 27567.0, 0.0), 23.0)
+        with_glow = self._surface()
+        iss_screen.draw_iss(with_glow, now=23.0)
+        without = self._surface()
+        with mock.patch.object(iss_screen, "_draw_track_glow"):
+            iss_screen.draw_iss(without, now=23.0)
+        rect = iss_screen.map_rect()
+        self.assertNotEqual(
+            pygame.image.tostring(with_glow, "RGB"), pygame.image.tostring(without, "RGB")
+        )
+        # The halo never leaks outside the chart.
+        for y in range(theme.SIZE):
+            for x in range(0, theme.SIZE, 3):
+                if not rect.collidepoint(x, y):
+                    self.assertEqual(with_glow.get_at((x, y)), without.get_at((x, y)))
 
     def test_astronaut_pill_sits_right_of_the_radar(self):
         from display.round_touch import nav

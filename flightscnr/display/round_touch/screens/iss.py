@@ -10,10 +10,11 @@
 """ISS tracker for the round dial, to the right of the flip board.
 
 A still world map in the same tile style as the tracked-flight route map,
-with the station's ground track and the station icon. HUD colors follow
-the Boeing-style palette of filbot/iss-tracker (green labels, white
-values). The astronaut pill, or a tap, swaps the map for the crew list. Tiles arrive in the
-background; the track and HUD are drawn on every refresh.
+with the station's ground track (a soft glow under a solid line) and the
+station icon. The HUD is white values on muted labels with one accent colour
+that follows the user's Radar Theme colour (``theme.SWEEP``).
+The astronaut pill, or a tap, swaps the map for the crew list. Tiles arrive
+in the background; the track and HUD are drawn on every refresh.
 """
 
 from __future__ import annotations
@@ -28,11 +29,20 @@ from display.round_touch import draw, flags, nav, route_map, settings, theme
 from i18n import tr
 from utilities import iss as iss_feed
 
-# Boeing primary-flight-display colors from the reference theme.
-LABEL_GREEN = (0, 255, 0)
 VALUE_WHITE = (255, 255, 255)
+LABEL_MUTED = (132, 146, 160)
+RULE_DIM = (70, 80, 92)
 OVER_PINK = (252, 129, 208)
 AGE_AMBER = (247, 220, 84)
+
+
+def _accent() -> tuple[int, int, int]:
+    """Labels, track and highlights: the user's Radar Theme colour.
+
+    Read at draw time, because ``settings.apply_theme_colors`` reassigns
+    ``theme.SWEEP`` whenever the portal changes the theme.
+    """
+    return tuple(int(c) for c in theme.SWEEP[:3])  # type: ignore[return-value]
 _ICON_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "assets", "iss.png")
 )
@@ -141,20 +151,30 @@ _layout_key: tuple | None = None
 
 
 def _tracker_layout() -> dict[str, int | pygame.Rect]:
-    """Map plus readout centers. The chart fills the dial above the pin."""
+    """Rows of the clean HUD, top to bottom.
+
+    OVER label, place, coordinates, the chart, ALT / VEL / UPDATED, a rule,
+    then the NEXT PASS block. The lower rows sit between the footer pills and
+    are raised until they clear them; the chart takes the space left over.
+    """
     global _layout_cache, _layout_key
     key = (theme.SIZE, theme.VISIBLE_RADIUS)
     if _layout_cache is not None and _layout_key == key:
         return _layout_cache
-    label_h = draw.load_font(theme.s(12), bold=True).get_height()
-    coord_h = draw.load_font(theme.s(15), bold=True).get_height()
-    over_h = draw.load_font(theme.s(16), bold=True).get_height()
-    value_h = draw.load_font(theme.s(16), bold=True).get_height()
-    pass_font = draw.load_font(theme.s(13), bold=True)
+    label_font = draw.load_font(theme.s(11), bold=True)
+    place_font = draw.load_font(theme.s(21), bold=True)
+    coord_font = draw.load_font(theme.s(12))
+    value_font = draw.load_font(theme.s(19), bold=True)
+    pass_font = draw.load_font(theme.s(14), bold=True)
+    detail_font = draw.load_font(theme.s(12))
+    label_h = label_font.get_height()
+    place_h = place_font.get_height()
+    coord_h = coord_font.get_height()
+    value_h = value_font.get_height()
     pass_h = pass_font.get_height()
-    label_font = draw.load_font(theme.s(12), bold=True)
-    coord_font = draw.load_font(theme.s(15), bold=True)
-    gps_w = label_font.size(tr("iss.label.coordinates"))[0]
+    detail_h = detail_font.get_height()
+    radius = theme.VISIBLE_RADIUS
+    over_w = label_font.size(tr("iss.label.over"))[0]
     coord_w = coord_font.size("-180.00000, -180.00000")[0]
     sample = tr(
         "iss.pass.on_date",
@@ -162,24 +182,25 @@ def _tracker_layout() -> dict[str, int | pygame.Rect]:
         day="30",
         clock="12:00PM PDT",
     )
-    schedule_w = pass_font.size(tr("iss.label.next_pass") + " " + sample)[0]
-    detail_w = pass_font.size(
+    schedule_w = pass_font.size(sample)[0]
+    detail_w = detail_font.size(
         tr("iss.pass.detail", when="03h 59m", elev="88", length="59m", where="NW")
     )[0]
+    # Three readout columns plus their dividers; used to keep the row off the pills.
+    telem_half = int(radius * 0.70)
 
     pin = _pin_rect()
     astronaut = _pill_rect("astronaut")
-    footer_r = int(theme.VISIBLE_RADIUS * 0.84)
+    footer_r = int(radius * 0.84)
     radar_top = theme.CENTER_Y + footer_r - theme.s(23)
-    detail_y = radar_top - theme.s(8) - pass_h // 2
-    schedule_y = detail_y - theme.s(2) - pass_h
-    value_y = schedule_y - pass_h // 2 - theme.s(6) - value_h // 2
-    telem_y = value_y - value_h // 2 - theme.s(2) - label_h // 2
+    detail_y = radar_top - theme.s(8) - detail_h // 2
     block_cx = theme.CENTER_X
-    # The date line is the widest row. Raise it until it clears both side pills.
-    for _ in range(80):
-        schedule_y = detail_y - theme.s(2) - pass_h
-        value_y = schedule_y - pass_h // 2 - theme.s(6) - value_h // 2
+    gap = theme.s(2)
+    for _ in range(120):
+        schedule_y = detail_y - detail_h // 2 - gap - pass_h // 2
+        next_y = schedule_y - pass_h // 2 - gap - label_h // 2
+        rule_y = next_y - label_h // 2 - theme.s(7)
+        value_y = rule_y - theme.s(8) - value_h // 2
         telem_y = value_y - value_h // 2 - theme.s(2) - label_h // 2
         block_cx = _block_center(schedule_y, schedule_w, pin, astronaut)
         chord = _chord_half(schedule_y)
@@ -188,29 +209,39 @@ def _tracker_layout() -> dict[str, int | pygame.Rect]:
         detail_left = block_cx - detail_w // 2
         detail_right = block_cx + detail_w // 2
         half = pass_h // 2
+        telem_left = theme.CENTER_X - telem_half
+        telem_right = theme.CENTER_X + telem_half
         clear = (
             _misses_pill(schedule_y, half, left, right, pin)
             and _misses_pill(schedule_y, half, left, right, astronaut)
             and _misses_pill(detail_y, half, detail_left, detail_right, pin)
             and _misses_pill(detail_y, half, detail_left, detail_right, astronaut)
+            and _misses_pill(value_y, value_h // 2, telem_left, telem_right, pin)
+            and _misses_pill(value_y, value_h // 2, telem_left, telem_right, astronaut)
         )
-        in_chord = left >= theme.CENTER_X - chord + theme.s(4) and right <= theme.CENTER_X + chord - theme.s(4)
+        in_chord = (
+            left >= theme.CENTER_X - chord + theme.s(4)
+            and right <= theme.CENTER_X + chord - theme.s(4)
+        )
         if clear and in_chord:
             break
         detail_y -= 4
-    # The chart ends above the altitude row. Nothing is drawn on top of it.
+    # The chart ends above the readout labels. Nothing is drawn on top of it.
     map_bottom = telem_y - label_h // 2 - theme.s(8)
 
-    gps_y = _min_center(label_h, gps_w)
+    over_y = max(
+        _min_center(label_h, over_w), theme.CENTER_Y - int(radius * 0.80)
+    )
+    place_y = max(
+        over_y + label_h // 2 + theme.s(2) + place_h // 2,
+        theme.CENTER_Y - int(radius * 0.70),
+    )
     coord_y = max(
-        gps_y + label_h // 2 + theme.s(1) + coord_h // 2,
+        place_y + place_h // 2 + theme.s(1) + coord_h // 2,
         _min_center(coord_h, coord_w),
     )
-    gps_y = coord_y - coord_h // 2 - theme.s(1) - label_h // 2
-    over_y = coord_y + coord_h // 2 + theme.s(2) + label_h // 2
-    place_y = over_y + label_h // 2 + theme.s(1) + over_h // 2
-    map_top = place_y + over_h // 2 + theme.s(6)
-    limit = float(theme.VISIBLE_RADIUS - theme.s(3))
+    map_top = coord_y + coord_h // 2 + theme.s(7)
+    limit = float(radius - theme.s(3))
 
     def room(y: int) -> float:
         dy = y - theme.CENTER_Y
@@ -234,11 +265,13 @@ def _tracker_layout() -> dict[str, int | pygame.Rect]:
     rect.midbottom = (theme.CENTER_X, bottom)
     _layout_cache = {
         "map": rect,
-        "gps_y": gps_y,
-        "coord_y": coord_y,
         "over_y": over_y,
         "place_y": place_y,
+        "coord_y": coord_y,
         "telem_y": telem_y,
+        "value_y": value_y,
+        "rule_y": rule_y,
+        "next_y": next_y,
         "schedule_y": schedule_y,
         "detail_y": detail_y,
         "block_cx": block_cx,
@@ -415,7 +448,7 @@ def _clip_rounded(chart: pygame.Surface) -> None:
 
 def _draw_chart_border(surface: pygame.Surface, rect: pygame.Rect) -> None:
     style = route_map._route_map_style()
-    border = (40, 60, 80) if style in _LIGHT_STYLES else route_map._PANEL_BORDER
+    border = (40, 60, 80) if style in _LIGHT_STYLES else (52, 66, 80)
     pygame.draw.rect(
         surface,
         border,
@@ -571,22 +604,21 @@ def _cell_width(
 
 def _draw_hud_row(
     surface: pygame.Surface,
-    y: int,
+    label_y: int,
+    value_y: int,
     cells: list[tuple[str, str, str, tuple[int, int, int]]],
     cx: int | None = None,
 ) -> None:
-    """Place a readout row so every glyph stays inside the round dial."""
-    label_font = draw.load_font(theme.s(12), bold=True)
-    value_font = draw.load_font(theme.s(16), bold=True)
-    unit_font = draw.load_font(theme.s(11), bold=True)
+    """Muted labels over large values, split by thin rules, inside the dial."""
+    label_font = draw.load_font(theme.s(11), bold=True)
+    value_font = draw.load_font(theme.s(19), bold=True)
+    unit_font = draw.load_font(theme.s(10), bold=True)
     label_h = label_font.get_height()
     value_h = value_font.get_height()
-    label_y = y
-    value_y = y + label_h + theme.s(2)
     label_half = draw.circle_half_width_at_row(label_y - label_h // 2, label_h)
     value_half = draw.circle_half_width_at_row(value_y - value_h // 2, value_h)
     avail = max(0, min(label_half, value_half) * 2)
-    gap = theme.s(12)
+    gap = theme.s(22)
     widths = [
         _cell_width(label, value, unit, label_font, value_font, unit_font)
         for label, value, unit, _color in cells
@@ -603,13 +635,20 @@ def _draw_hud_row(
     for width in widths:
         centers.append((cursor + width / 2.0, width))
         cursor += width + gap
+    rule_top = label_y - label_h // 2
+    rule_bottom = value_y + value_h // 2
+    for (x, width), (next_x, next_width) in zip(centers, centers[1:]):
+        edge = int((x + width / 2.0 + next_x - next_width / 2.0) / 2.0)
+        pygame.draw.line(
+            surface, RULE_DIM, (edge, rule_top), (edge, rule_bottom), max(1, theme.s(1))
+        )
     for (x, width), (label, value, unit, value_color) in zip(centers, cells):
         _blit_outlined(
             surface,
             label_font,
             draw.fit_text(label, label_font, width),
             (int(x), label_y),
-            LABEL_GREEN,
+            LABEL_MUTED,
         )
         unit_w = (theme.s(3) + unit_font.size(unit)[0]) if unit else 0
         fitted = draw.fit_text(value, value_font, max(1, width - unit_w))
@@ -617,7 +656,7 @@ def _draw_hud_row(
             _blit_outlined(surface, value_font, fitted, (int(x), value_y), value_color)
             continue
         number = value_font.render(fitted, True, value_color)
-        unit_ink = unit_font.render(unit, True, value_color)
+        unit_ink = unit_font.render(unit, True, LABEL_MUTED)
         number_shadow = value_font.render(fitted, True, (0, 0, 0))
         unit_shadow = unit_font.render(unit, True, (0, 0, 0))
         unit_gap = theme.s(3)
@@ -651,7 +690,7 @@ def _telemetry_cells(
     return [
         (tr("iss.label.alt"), alt, alt_unit, VALUE_WHITE),
         (tr("iss.label.vel"), vel, vel_unit, VALUE_WHITE),
-        (tr("iss.label.last"), age, "", AGE_AMBER),
+        (tr("iss.label.last"), age, "", _accent()),
     ]
 
 
@@ -807,67 +846,71 @@ def _pin_rect() -> pygame.Rect | None:
     return _pill_rect("pin")
 
 
-def _draw_mixed_center(
-    surface: pygame.Surface,
-    y: int,
-    lead: str,
-    rest: str,
-    font: pygame.font.Font,
-    cx: int | None = None,
-) -> None:
-    """Green label and white remainder, centered as one line."""
-    origin = theme.CENTER_X if cx is None else cx
-    gap = font.size(" ")[0] if lead and rest else 0
-    half = _chord_half(y)
-    avail = max(theme.s(80), half * 2 - theme.s(4))
-    lead_w = font.size(lead)[0] if lead else 0
-    fitted = draw.fit_text(rest, font, max(theme.s(40), avail - lead_w - gap)) if rest else ""
-    rest_w = font.size(fitted)[0] if fitted else 0
-    total = lead_w + gap + rest_w
-    left = origin - total // 2
-    if lead:
-        _blit_outlined(surface, font, lead, (left + lead_w // 2, y), LABEL_GREEN)
-    if fitted:
-        _blit_outlined(surface, font, fitted, (left + lead_w + gap + rest_w // 2, y), VALUE_WHITE)
-
-
 def _draw_tracker_hud(surface: pygame.Surface, fix: iss_feed.ISSFix, now: float) -> None:
     layout = _tracker_layout()
-    coord_font = draw.load_font(theme.s(15), bold=True)
-    label_font = draw.load_font(theme.s(12), bold=True)
-    over_font = draw.load_font(theme.s(16), bold=True)
+    coord_font = draw.load_font(theme.s(12))
+    label_font = draw.load_font(theme.s(11), bold=True)
+    over_font = draw.load_font(theme.s(21), bold=True)
+    pass_font = draw.load_font(theme.s(14), bold=True)
+    detail_font = draw.load_font(theme.s(12))
+    accent = _accent()
     coord = "—" if not fix.has_fix else iss_feed.format_coordinates(fix.latitude, fix.longitude)
     over, over_color = _over_copy(fix)
     _blit_outlined(
         surface,
         label_font,
-        tr("iss.label.coordinates"),
-        (theme.CENTER_X, int(layout["gps_y"])),
-        LABEL_GREEN,
-    )
-    _draw_centered(surface, coord_font, coord, int(layout["coord_y"]), VALUE_WHITE)
-    _blit_outlined(
-        surface,
-        label_font,
         tr("iss.label.over"),
         (theme.CENTER_X, int(layout["over_y"])),
-        LABEL_GREEN,
+        accent,
     )
     place_top = int(layout["place_y"]) - over_font.get_height() // 2
     _draw_over_value(surface, place_top, over, over_font, over_color, now)
+    _draw_centered(surface, coord_font, coord, int(layout["coord_y"]), LABEL_MUTED)
     block_cx = int(layout["block_cx"])
-    _draw_hud_row(surface, int(layout["telem_y"]), _telemetry_cells(fix), block_cx)
-    schedule, detail = _pass_lines(fix, now)
-    pass_font = draw.load_font(theme.s(13), bold=True)
-    _draw_mixed_center(
+    _draw_hud_row(
         surface,
-        int(layout["schedule_y"]),
-        tr("iss.label.next_pass"),
-        schedule,
-        pass_font,
-        block_cx,
+        int(layout["telem_y"]),
+        int(layout["value_y"]),
+        _telemetry_cells(fix),
+        theme.CENTER_X,
     )
-    _draw_centered(surface, pass_font, detail, int(layout["detail_y"]), VALUE_WHITE, block_cx)
+    rule_half = int(theme.VISIBLE_RADIUS * 0.46)
+    rule_y = int(layout["rule_y"])
+    pygame.draw.line(
+        surface,
+        RULE_DIM,
+        (theme.CENTER_X - rule_half, rule_y),
+        (theme.CENTER_X + rule_half, rule_y),
+        max(1, theme.s(1)),
+    )
+    schedule, detail = _pass_lines(fix, now)
+    _blit_outlined(
+        surface, label_font, tr("iss.label.next_pass"), (block_cx, int(layout["next_y"])), accent
+    )
+    if schedule:
+        _draw_centered(surface, pass_font, schedule, int(layout["schedule_y"]), VALUE_WHITE, block_cx)
+    _draw_centered(surface, detail_font, detail, int(layout["detail_y"]), LABEL_MUTED, block_cx)
+
+
+def _draw_track_glow(
+    chart: pygame.Surface,
+    segments: list[list[tuple[int, int]]],
+    color: tuple[int, int, int],
+    line_w: int,
+) -> None:
+    """Soft halo under the flown track: two wide translucent strokes."""
+    if not any(len(points) >= 2 for points in segments):
+        return
+    glow = pygame.Surface(chart.get_size(), pygame.SRCALPHA)
+    for width, alpha in ((line_w * 6, 26), (line_w * 3, 48)):
+        for points in segments:
+            if len(points) < 2:
+                continue
+            pygame.draw.lines(glow, (*color, alpha), False, points, width)
+            # Thick polylines leave notches at the joints; round them off.
+            for point in points:
+                pygame.draw.circle(glow, (*color, alpha), point, width // 2)
+    chart.blit(glow, (0, 0))
 
 
 def _draw_map(surface: pygame.Surface, now: float) -> None:
@@ -879,15 +922,18 @@ def _draw_map(surface: pygame.Surface, now: float) -> None:
     if track is not None:
         past, future = track
         line_w = max(2, theme.s(2))
+        accent = _accent()
 
         def local(segment: list[tuple[int, int]]) -> list[tuple[int, int]]:
             return [(x - rect.left, y - rect.top) for x, y in segment]
 
-        for segment in _track_segments(_trail_behind(past)):
-            pygame.draw.lines(chart, route_map._FLOWN, False, local(segment), line_w)
+        flown = [local(seg) for seg in _track_segments(_trail_behind(past))]
+        _draw_track_glow(chart, flown, accent, line_w)
+        for points in flown:
+            pygame.draw.lines(chart, accent, False, points, line_w)
         for segment in _track_segments(future):
             route_map._draw_dashed_polyline(
-                chart, local(segment), route_map._REMAINING, width=line_w
+                chart, local(segment), (*accent, 200), width=line_w
             )
     _clip_rounded(chart)
     surface.blit(chart, rect.topleft)
@@ -1174,7 +1220,7 @@ def _draw_crew(surface: pygame.Surface, scroll_offset: int, now: float) -> int:
     surface.set_clip(pygame.Rect(0, top, surface.get_width(), viewport))
     y = top - max(0, int(scroll_offset))
     y = draw.draw_center_line(
-        surface, tr("iss.crew.title"), y, title_font, LABEL_GREEN
+        surface, tr("iss.crew.title"), y, title_font, _accent()
     )
     y += theme.s(4)
     groups = _crew_groups()
