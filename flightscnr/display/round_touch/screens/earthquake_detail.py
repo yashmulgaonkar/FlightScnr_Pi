@@ -14,9 +14,10 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 
-from display.round_touch import aircraft_photos, draw, earthquake_overlay, geo, nav, theme
+from display.round_touch import aa_shapes as aa
+from display.round_touch import draw, earthquake_overlay, geo, nav, theme
 from i18n import tr
-from display.round_touch.screens import common
+from display.round_touch.screens import common, detail_style as style
 
 FOOTER_BUTTONS = ("prev", "next", "radar")
 FOOTER_EMPTY = ("radar",)
@@ -26,6 +27,12 @@ _PAGER_LABELS = {
     "yellow": "PAGER Yellow",
     "orange": "PAGER Orange",
     "red": "PAGER Red",
+}
+_PAGER_DOTS = {
+    "green": (70, 214, 110),
+    "yellow": (246, 214, 70),
+    "orange": (255, 150, 50),
+    "red": (255, 70, 60),
 }
 
 
@@ -50,102 +57,99 @@ def _fmt_mag(quake: dict) -> str:
     return bit
 
 
-def _fmt_depth(depth) -> str | None:
-    try:
-        val = float(depth)
-    except (TypeError, ValueError):
-        return None
-    return tr("quake.depth", km=f"{val:.1f}")
-
-
-def _fmt_time(time_ms, *, now: float | None = None) -> str | None:
+def _rel_time(time_ms, *, now: float | None = None) -> str | None:
+    """Localised "3 h ago" for the hero kicker."""
     try:
         ms = int(time_ms)
     except (TypeError, ValueError):
         return None
-    dt = datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
     age_s = (time.time() if now is None else now) - (ms / 1000.0)
     if age_s < 45:
-        rel = tr("quake.time.just_now")
-    elif age_s < 3600:
-        mins = max(1, int(age_s / 60))
-        rel = tr("quake.time.min_ago", mins=mins)
-    elif age_s < 86400:
-        hours = max(1, int(age_s / 3600))
-        rel = tr("quake.time.h_ago", hours=hours)
-    else:
-        days = max(1, int(age_s / 86400))
-        rel = tr("quake.time.d_ago", days=days)
-    return f"{dt.strftime('%Y-%m-%d %H:%M UTC')} · {rel}"
+        return tr("quake.time.just_now")
+    if age_s < 3600:
+        return tr("quake.time.min_ago", mins=max(1, int(age_s / 60)))
+    if age_s < 86400:
+        return tr("quake.time.h_ago", hours=max(1, int(age_s / 3600)))
+    return tr("quake.time.d_ago", days=max(1, int(age_s / 86400)))
 
 
-def _quake_rows(
-    quake: dict, title_font, body_font, detail_font
-) -> list[tuple[str, object, tuple]]:
-    rows: list[tuple[str, object, tuple]] = [
-        (_fmt_mag(quake), title_font, theme.LABEL),
-    ]
-    place = (quake.get("place") or "").strip()
-    if place:
-        rows.append((place, body_font, theme.MUTED))
-
-    when = _fmt_time(quake.get("time_ms"))
-    if when:
-        rows.append((when, detail_font, theme.MUTED))
-
-    depth = _fmt_depth(quake.get("depth_km"))
-    if depth:
-        rows.append((depth, body_font, theme.LABEL))
-
+def _title(quake: dict) -> str:
     try:
-        dist = common.format_local_distance(
-            geo.local_offset_km(quake["lat"], quake["lon"])[2]
-        )
-        rows.append((dist, detail_font, theme.MUTED))
+        return f"M {float(quake.get('mag')):.1f}"
+    except (TypeError, ValueError):
+        return tr("quake.earthquake_default")
+
+
+def _stat(caption: str, value: str, unit: str, icon: str):
+    return (caption, value, unit, icon) if value else None
+
+
+def _quake_stats(quake: dict):
+    stats = []
+    try:
+        stats.append(_stat(tr("detail.cap.depth"), f"{float(quake.get('depth_km')):.1f}", "km", "depth"))
+    except (TypeError, ValueError):
+        pass
+    try:
+        dist = common.format_local_distance(geo.local_offset_km(quake["lat"], quake["lon"])[2])
+        parts = dist.split(" ", 1)
+        stats.append(_stat(tr("detail.cap.dist"), parts[0], parts[1] if len(parts) > 1 else "", "dist"))
     except Exception:
         pass
-
-    alert = str(quake.get("alert") or "").strip().lower()
-    pager = _PAGER_LABELS.get(alert)
-    if pager:
-        rows.append((pager, body_font, theme.LABEL))
-
-    if int(quake.get("tsunami") or 0) == 1:
-        rows.append((tr("quake.tsunami"), body_font, theme.LABEL))
-
-    felt = quake.get("felt")
-    mmi = quake.get("mmi")
-    felt_bits = []
     try:
+        felt = quake.get("felt")
         if felt is not None and int(felt) > 0:
-            felt_bits.append(tr("quake.felt", count=int(felt)))
+            stats.append(_stat(tr("detail.cap.felt"), f"{int(felt):,}", "", "felt"))
     except (TypeError, ValueError):
         pass
     try:
-        if mmi is not None:
-            felt_bits.append(f"MMI {float(mmi):.1f}")
+        if quake.get("mmi") is not None:
+            stats.append(_stat("MMI", f"{float(quake.get('mmi')):.1f}", "", "pager"))
     except (TypeError, ValueError):
         pass
-    if felt_bits:
-        rows.append((" · ".join(felt_bits), detail_font, theme.MUTED))
+    return stats
 
+
+def _quake_body(surface, quake: dict, y: int, band) -> int:
+    chips = []
+    if int(quake.get("tsunami") or 0) == 1:
+        chips.append((tr("detail.chip.tsunami"), (255, 70, 60)))
+    alert = str(quake.get("alert") or "").strip().lower()
+    if alert in _PAGER_DOTS:
+        chips.append(("PAGER", _PAGER_DOTS[alert]))
+    mag_type = (quake.get("mag_type") or "").strip()
+    kicker = " · ".join(b for b in (mag_type.upper(), _rel_time(quake.get("time_ms"))) if b)
+    map_path = (quake.get("map_path") or "").strip()
+    y = style.draw_hero(
+        surface,
+        y,
+        band,
+        image_path=map_path,
+        title=_title(quake),
+        kicker=kicker,
+        chips=chips,
+        watermark=earthquake_overlay.quake_icon(style.px(0.5)),
+        image_frac=0.52,
+    )
+    when = ""
+    try:
+        when = datetime.fromtimestamp(int(quake.get("time_ms")) / 1000.0, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    except (TypeError, ValueError):
+        pass
+    place = (quake.get("place") or "").strip()
+    if place:
+        y = style.draw_headline(surface, y, band, when, place)
+    y = style.draw_stats(surface, y, band, _quake_stats(quake))
     status = (quake.get("status") or "").strip()
-    if status:
-        rows.append((status, detail_font, theme.HINT))
-
-    rows.append(("USGS", detail_font, theme.HINT))
-    return rows
+    return style.draw_note(surface, y, band, f"{status} · USGS" if status else "USGS")
 
 
 def draw_earthquake_detail(
     surface, quakes, selected_index, scroll_offset: int = 0
 ) -> int:
     draw.fill_background_textured(surface)
-    title_font = draw.load_font(theme.s(18), bold=True)
     body_font = draw.load_font(theme.s(14))
-    detail_font = draw.load_font(theme.s(13))
     chrome_top = nav.content_top_y(has_dots=True)
-    line_gap = theme.s(1)
     bottom = nav.content_bottom_y()
 
     if not quakes:
@@ -162,37 +166,13 @@ def draw_earthquake_detail(
     nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("quake.breadcrumb"), crumb])
     nav.draw_curved_page_dots(surface, idx, len(quakes), active_color=theme.LABEL)
 
-    rows = _quake_rows(quake, title_font, body_font, detail_font)
-    map_path = (quake.get("map_path") or "").strip()
-    has_map = bool(map_path)
-
+    lead = style.lead_pad(
+        chrome_top, bottom, _quake_body(surface, quake, 0, style.NOWHERE), scroll_offset
+    )
     clip_prev = common.begin_detail_body_clip(surface, chrome_top, bottom)
+    y = chrome_top - scroll_offset + lead
     try:
-        y = chrome_top - scroll_offset
-        if has_map:
-            max_h = theme.s(108)
-            max_w = int(theme.VISIBLE_RADIUS * 1.45)
-            photo = aircraft_photos.load_photo_surface(
-                map_path, max_h, max_w=max_w, radius=theme.s(8)
-            )
-            if photo is not None:
-                rect = photo.get_rect(midtop=(theme.CENTER_X, int(y)))
-                if rect.bottom > chrome_top and rect.top < bottom:
-                    surface.blit(photo, rect)
-                y = rect.bottom + theme.s(3)
-            else:
-                y = _draw_quake_icon_header(surface, int(y))
-        else:
-            y = _draw_quake_icon_header(surface, int(y))
-
-        y = common.draw_detail_rows(
-            surface,
-            rows,
-            y,
-            chrome_top=chrome_top,
-            bottom=bottom,
-            line_gap=line_gap,
-        )
+        y = _quake_body(surface, quake, y, (chrome_top, bottom))
     finally:
         max_scroll = common.finish_detail_scroll(
             surface,
@@ -206,12 +186,3 @@ def draw_earthquake_detail(
 
     nav.draw_curved_footer(surface, list(FOOTER_BUTTONS))
     return max_scroll
-
-
-def _draw_quake_icon_header(surface, y: int) -> int:
-    icon = earthquake_overlay.quake_icon(theme.s(28))
-    if icon is None:
-        return y
-    rect = icon.get_rect(midtop=(theme.CENTER_X, y))
-    surface.blit(icon, rect)
-    return y + rect.height + theme.s(3)
