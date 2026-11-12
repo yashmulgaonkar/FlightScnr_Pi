@@ -28,6 +28,15 @@ from utilities.app_logging import configure_app_logging
 configure_app_logging()
 logger = logging.getLogger("flightscnr")
 
+# Prefer newer bundled timezone rules over a stale OS tzdata (DST law changes).
+# Must run before the web portal is spawned so it inherits TZDIR.
+try:
+    from utilities.tz_data import apply_newest_tzdata
+
+    apply_newest_tzdata()
+except Exception:
+    logger.debug("tzdata selection skipped", exc_info=True)
+
 
 def validate_config():
     """Check that required configuration is present and log status."""

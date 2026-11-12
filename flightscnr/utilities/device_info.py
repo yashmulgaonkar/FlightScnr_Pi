@@ -222,6 +222,13 @@ def collect_device_info(
     except Exception as exc:
         info["live_stats"] = {"error": str(exc)}
 
+    try:
+        from utilities import tz_data
+
+        info["timezone_data"] = tz_data.describe()
+    except Exception as exc:
+        info["timezone_data"] = {"error": str(exc)}
+
     disk_root = _disk_usage("/")
     disk_data = _disk_usage(root)
     info["disk"] = {"root": disk_root, "data_dir": disk_data}
