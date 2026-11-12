@@ -37,10 +37,11 @@ PAGE_TIMEOUT_S = 20
 # California mainland + roughly coastal waters (WFIGS covers other USA/Canada).
 _CA_LAT = (32.52, 42.02)
 _CA_LON = (-124.48, -114.12)
-# ArcGIS World Topo — same family as the Esri map embedded on incident pages.
-_TOPO_EXPORT = (
+# Esri World Imagery: real satellite photography. The old World Topo basemap was
+# nearly white, which washed out the detail screen's title and fade.
+_SATELLITE_EXPORT = (
     "https://services.arcgisonline.com/ArcGIS/rest/services/"
-    "World_Topo_Map/MapServer/export"
+    "World_Imagery/MapServer/export"
 )
 
 _lock = threading.Lock()
@@ -386,12 +387,12 @@ def _write_map_file(fire_id: str, data: bytes, *, suffix: str = ".png") -> str |
         return None
 
 
-def _topo_export_map(lat: float, lon: float, fire_id: str) -> str | None:
-    """Static topo snapshot similar to the Esri map on CAL FIRE incident pages."""
+def _satellite_export_map(lat: float, lon: float, fire_id: str) -> str | None:
+    """Static Esri satellite snapshot with the radar's fire icon on the incident."""
     west, south, east, north = _bbox_around(lat, lon)
     try:
         resp = _session().get(
-            _TOPO_EXPORT,
+            _SATELLITE_EXPORT,
             params={
                 "bbox": f"{west},{south},{east},{north}",
                 "bboxSR": "4326",
@@ -406,7 +407,7 @@ def _topo_export_map(lat: float, lon: float, fire_id: str) -> str | None:
         resp.raise_for_status()
         data = resp.content
     except Exception as exc:
-        logger.debug("Topo export failed: %s", exc)
+        logger.debug("Satellite export failed: %s", exc)
         return None
     if not data or len(data) < 200:
         return None
@@ -445,12 +446,12 @@ def _topo_export_map(lat: float, lon: float, fire_id: str) -> str | None:
         image.save(buf, format="PNG")
         data = buf.getvalue()
     except Exception:
-        logger.debug("Could not overlay fire icon on topo map", exc_info=True)
+        logger.debug("Could not overlay fire icon on satellite map", exc_info=True)
     return _write_map_file(fire_id, data, suffix=".png")
 
 
 def fetch_map_for_fire(fire: dict[str, Any]) -> str | None:
-    """Download a map image for a CAL FIRE incident when available; else topo snapshot."""
+    """A posted incident map when there is one (it shows the fire perimeter); else satellite."""
     fire_id = str(fire.get("id") or "").strip()
     if not fire_id:
         return None
@@ -476,9 +477,9 @@ def fetch_map_for_fire(fire: dict[str, Any]) -> str | None:
             if path:
                 return path
 
-    # Incident pages embed an Esri topo map; synthesize the same style when no still is posted.
+    # No posted still: synthesise an Esri satellite snapshot instead.
     if lat is not None and lon is not None:
-        return _topo_export_map(lat, lon, fire_id)
+        return _satellite_export_map(lat, lon, fire_id)
     return None
 
 

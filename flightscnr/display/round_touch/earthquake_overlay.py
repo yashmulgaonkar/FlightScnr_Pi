@@ -76,9 +76,11 @@ _VOICE_PATH = os.path.join(
 # white disc at 16–28px under pygame smoothscale; it is used on the detail page.
 _ICON_HEIGHT = 16
 _ICON_RED = (237, 29, 36)
-_TOPO_EXPORT = (
+# Esri World Imagery: real satellite photography. The old World Topo basemap was
+# nearly white, which washed out the detail screen's title and fade.
+_SATELLITE_EXPORT = (
     "https://services.arcgisonline.com/ArcGIS/rest/services/"
-    "World_Topo_Map/MapServer/export"
+    "World_Imagery/MapServer/export"
 )
 
 _lock = threading.Lock()
@@ -673,8 +675,14 @@ def _maps_dir() -> str:
     return path
 
 
+# Degrees of latitude / longitude the satellite snapshot covers: bigger is further
+# zoomed out. The value is part of the cached file's name, so changing it just
+# fetches fresh snapshots (the first one was 0.35, then 0.525).
+MAP_SPAN_DEG = 1.0
+
+
 def bbox_around(
-    lat: float, lon: float, *, span_deg: float = 0.35
+    lat: float, lon: float, *, span_deg: float = MAP_SPAN_DEG
 ) -> tuple[float, float, float, float]:
     """Return west, south, east, north around an epicenter."""
     half = max(0.08, float(span_deg) / 2.0)
@@ -704,12 +712,28 @@ def _write_map_file(
         return None
 
 
+def _safe_id(quake_id: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]+", "_", quake_id)[:80] or "quake"
+
+
+def _satellite_basename(quake_id: str) -> str:
+    # The span is part of the name: a change of zoom must not reuse an older snapshot.
+    return f"{_safe_id(quake_id)}_esri_sat_{int(round(MAP_SPAN_DEG * 1000))}"
+
+
+def _shakemap_basename(quake_id: str) -> str:
+    return f"{_safe_id(quake_id)}_shake"
+
+
 def _cached_map_path(quake_id: str) -> str | None:
-    safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", quake_id)[:80] or "quake"
-    for suffix in (".png", ".jpg"):
-        path = os.path.join(_maps_dir(), f"{safe}{suffix}")
-        if os.path.isfile(path) and os.path.getsize(path) > 200:
-            return path
+    """A cached map, best source first. Plain ``<id>.png`` files are older Esri
+    topo snapshots (very pale) and are deliberately not reused."""
+    safe = _safe_id(quake_id)
+    for stem in (_satellite_basename(quake_id), _shakemap_basename(quake_id)):
+        for suffix in (".png", ".jpg"):
+            path = os.path.join(_maps_dir(), f"{stem}{suffix}")
+            if os.path.isfile(path) and os.path.getsize(path) > 200:
+                return path
     try:
         from display.round_touch import map_bg
 
@@ -772,12 +796,12 @@ def _overlay_epicenter_on_map(
     _ring(outer)
 
 
-def _topo_export_map(lat: float, lon: float, quake_id: str) -> str | None:
-    """Static Esri World Topo snapshot with an epicenter marker."""
+def _satellite_export_map(lat: float, lon: float, quake_id: str) -> str | None:
+    """Static Esri satellite snapshot with an epicenter marker."""
     west, south, east, north = bbox_around(lat, lon)
     try:
         resp = _http_get(
-            _TOPO_EXPORT,
+            _SATELLITE_EXPORT,
             params={
                 "bbox": f"{west},{south},{east},{north}",
                 "bboxSR": "4326",
@@ -792,14 +816,14 @@ def _topo_export_map(lat: float, lon: float, quake_id: str) -> str | None:
         resp.raise_for_status()
         data = resp.content
     except Exception as exc:
-        logger.warning("Earthquake Esri topo failed for %s: %s", quake_id, exc)
+        logger.warning("Earthquake Esri satellite failed for %s: %s", quake_id, exc)
         return None
     ctype = (resp.headers.get("content-type") or "").lower()
     if b"<html" in data[:200].lower() or "json" in ctype:
-        logger.warning("Earthquake Esri topo returned %s for %s", ctype or "html", quake_id)
+        logger.warning("Earthquake Esri satellite returned %s for %s", ctype or "html", quake_id)
         return None
     if not data or not data.startswith(b"\x89PNG"):
-        logger.warning("Earthquake Esri topo: unexpected payload for %s", quake_id)
+        logger.warning("Earthquake Esri satellite: unexpected payload for %s", quake_id)
         return None
     try:
         from io import BytesIO
@@ -814,8 +838,10 @@ def _topo_export_map(lat: float, lon: float, quake_id: str) -> str | None:
         image.save(buf, format="PNG")
         data = buf.getvalue()
     except Exception:
-        logger.warning("Could not overlay epicenter on Esri topo for %s", quake_id, exc_info=True)
-    return _write_map_file(quake_id, data, suffix=".png")
+        logger.warning("Could not overlay epicenter on Esri satellite for %s", quake_id, exc_info=True)
+    return _write_map_file(
+        quake_id, data, suffix=".png", basename=_satellite_basename(quake_id)
+    )
 
 
 def _usgs_shakemap(quake: dict[str, Any]) -> str | None:
@@ -856,7 +882,9 @@ def _usgs_shakemap(quake: dict[str, Any]) -> str | None:
             logger.debug("Earthquake ShakeMap image failed for %s: %s", quake_id, exc)
             continue
         suffix = ".jpg" if img.content.startswith(b"\xff\xd8\xff") else ".png"
-        path = _write_map_file(quake_id, img.content, suffix=suffix)
+        path = _write_map_file(
+            quake_id, img.content, suffix=suffix, basename=_shakemap_basename(quake_id)
+        )
         if path:
             return path
     return None
@@ -971,9 +999,9 @@ def fetch_map_for_quake(quake: dict[str, Any]) -> str | None:
         lon = float(quake["lon"])
     except (KeyError, TypeError, ValueError):
         return None
-    path = _topo_export_map(lat, lon, quake_id)
+    path = _satellite_export_map(lat, lon, quake_id)
     if path:
-        logger.info("Earthquake map: Esri topo for %s", quake_id)
+        logger.info("Earthquake map: Esri satellite for %s", quake_id)
         return path
     path = _carto_export_map(lat, lon, quake_id)
     if path:

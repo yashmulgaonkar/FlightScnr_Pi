@@ -31,6 +31,17 @@ import pygame  # noqa: E402
 pygame.init()
 pygame.display.set_mode((1, 1))
 
+
+def _ensure_display():
+    """Other test files call pygame.quit(); bring the display back for ours."""
+    if not pygame.get_init():
+        pygame.init()
+    if pygame.display.get_surface() is None:
+        pygame.display.set_mode((1, 1))
+    if not pygame.font.get_init():
+        pygame.font.init()
+
+
 from display.round_touch import draw, settings, theme  # noqa: E402
 from display.round_touch.screens import alarm as ui  # noqa: E402
 
@@ -43,6 +54,10 @@ def _in_memory_settings():
 
 
 class AlarmEditorTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        _ensure_display()
+
     def setUp(self):
         self._save = _in_memory_settings()
         self._save.start()

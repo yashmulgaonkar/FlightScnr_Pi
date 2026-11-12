@@ -110,7 +110,7 @@ def _quake_stats(quake: dict):
     return stats
 
 
-def _quake_body(surface, quake: dict, y: int, band) -> int:
+def _quake_body(surface, quake: dict, y: int, band, hero_frac: float = 0.46) -> int:
     chips = []
     if int(quake.get("tsunami") or 0) == 1:
         chips.append((tr("detail.chip.tsunami"), (255, 70, 60)))
@@ -129,7 +129,7 @@ def _quake_body(surface, quake: dict, y: int, band) -> int:
         kicker=kicker,
         chips=chips,
         watermark=earthquake_overlay.quake_icon(style.px(0.5)),
-        image_frac=0.52,
+        image_frac=hero_frac,
     )
     when = ""
     try:
@@ -149,11 +149,11 @@ def draw_earthquake_detail(
 ) -> int:
     draw.fill_background_textured(surface)
     body_font = draw.load_font(theme.s(14))
-    chrome_top = nav.content_top_y(has_dots=True)
-    bottom = nav.content_bottom_y()
+    chrome_top = style.detail_top()
+    bottom = style.detail_bottom()
 
     if not quakes:
-        nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("quake.breadcrumb")])
+        nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("quake.breadcrumb")], **style.crumb_kwargs())
         nav.draw_curved_footer(surface, list(FOOTER_EMPTY))
         common.draw_center_row(
             surface, tr("quake.no_earthquakes"), chrome_top, body_font, theme.MUTED
@@ -163,16 +163,17 @@ def draw_earthquake_detail(
     idx = max(0, min(selected_index, len(quakes) - 1))
     quake = quakes[idx]
     crumb = _fmt_mag(quake)
-    nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("quake.breadcrumb"), crumb])
-    nav.draw_curved_page_dots(surface, idx, len(quakes), active_color=theme.LABEL)
+    nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("quake.breadcrumb"), crumb], **style.crumb_kwargs())
 
+    viewport = bottom - chrome_top
+    frac = style.fit_hero_frac(lambda fr: _quake_body(surface, quake, 0, style.NOWHERE, fr), viewport)
     lead = style.lead_pad(
-        chrome_top, bottom, _quake_body(surface, quake, 0, style.NOWHERE), scroll_offset
+        chrome_top, bottom, _quake_body(surface, quake, 0, style.NOWHERE, frac), scroll_offset
     )
     clip_prev = common.begin_detail_body_clip(surface, chrome_top, bottom)
     y = chrome_top - scroll_offset + lead
     try:
-        y = _quake_body(surface, quake, y, (chrome_top, bottom))
+        y = _quake_body(surface, quake, y, (chrome_top, bottom), frac)
     finally:
         max_scroll = common.finish_detail_scroll(
             surface,

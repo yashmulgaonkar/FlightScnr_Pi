@@ -46,9 +46,11 @@ POLL_TTL_S = 15 * 60
 PAGE_TIMEOUT_S = 20
 MAX_FEATURES = 200
 BBOX_MARGIN = firms_overlay.BBOX_MARGIN
-_TOPO_EXPORT = (
+# Esri World Imagery: real satellite photography. The old World Topo basemap was
+# nearly white, which washed out the detail screen's title and fade.
+_SATELLITE_EXPORT = (
     "https://services.arcgisonline.com/ArcGIS/rest/services/"
-    "World_Topo_Map/MapServer/export"
+    "World_Imagery/MapServer/export"
 )
 
 _lock = threading.Lock()
@@ -378,12 +380,12 @@ def _write_map_file(fire_id: str, data: bytes, *, suffix: str = ".png") -> str |
         return None
 
 
-def _topo_export_map(lat: float, lon: float, fire_id: str) -> str | None:
-    """Static topo snapshot with fire_icon.png marker."""
+def _satellite_export_map(lat: float, lon: float, fire_id: str) -> str | None:
+    """Static Esri satellite snapshot with the fire_icon.png marker."""
     west, south, east, north = _bbox_around(lat, lon)
     try:
         resp = _session().get(
-            _TOPO_EXPORT,
+            _SATELLITE_EXPORT,
             params={
                 "bbox": f"{west},{south},{east},{north}",
                 "bboxSR": "4326",
@@ -398,7 +400,7 @@ def _topo_export_map(lat: float, lon: float, fire_id: str) -> str | None:
         resp.raise_for_status()
         data = resp.content
     except Exception as exc:
-        logger.debug("WFIGS topo export failed: %s", exc)
+        logger.debug("WFIGS satellite export failed: %s", exc)
         return None
     if not data or len(data) < 200:
         return None
@@ -435,7 +437,7 @@ def _topo_export_map(lat: float, lon: float, fire_id: str) -> str | None:
         image.save(buf, format="PNG")
         data = buf.getvalue()
     except Exception:
-        logger.debug("Could not overlay fire icon on WFIGS topo map", exc_info=True)
+        logger.debug("Could not overlay fire icon on WFIGS satellite map", exc_info=True)
     return _write_map_file(fire_id, data, suffix=".png")
 
 
@@ -447,11 +449,11 @@ def fetch_map_for_fire(fire: dict[str, Any]) -> str | None:
     lon = _as_float(fire.get("lon"))
     if lat is None or lon is None:
         return None
-    return _topo_export_map(lat, lon, fire_id)
+    return _satellite_export_map(lat, lon, fire_id)
 
 
 def request_map(fire: dict[str, Any], on_done=None) -> None:
-    """Background-fetch a topo map image; optional callback(path|None)."""
+    """Background-fetch a satellite map image; optional callback(path|None)."""
     fire_id = str(fire.get("id") or "").strip()
     if not fire_id:
         if on_done:

@@ -37,7 +37,7 @@ def _acres_stat(acres):
     except (TypeError, ValueError):
         return None
     text = f"{val:,.0f}" if val >= 10 else f"{val:.1f}"
-    return _stat(tr("detail.cap.acres"), text, "acres", "area")
+    return _stat(tr("detail.cap.acres"), text, "", "area")
 
 
 def _fire_stats(fire: dict):
@@ -47,9 +47,6 @@ def _fire_stats(fire: dict):
         stats.append(_stat(tr("detail.cap.contained"), f"{pct:.0f}", "%", "shield"))
     except (TypeError, ValueError):
         pass
-    started = (fire.get("started") or "").strip().split("T", 1)[0]
-    if started:
-        stats.append(_stat(tr("detail.cap.started"), started, "", "clock"))
     try:
         dist = common.format_local_distance(geo.local_offset_km(fire["lat"], fire["lon"])[2])
         parts = dist.split(" ", 1)
@@ -74,7 +71,7 @@ def _source_label(fire: dict) -> str:
 _FIRE_RED = (255, 120, 50)
 
 
-def _fire_body(surface, fire: dict, y: int, band) -> int:
+def _fire_body(surface, fire: dict, y: int, band, hero_frac: float = 0.35) -> int:
     name = (fire.get("name") or tr("fire.wildfire_default")).strip()
     county = (fire.get("county") or "").strip()
     chips = []
@@ -90,13 +87,16 @@ def _fire_body(surface, fire: dict, y: int, band) -> int:
         kicker=county,
         chips=chips,
         watermark=wildfire_overlay.fire_icon(style.px(0.5)),
-        image_frac=0.52,
+        image_frac=hero_frac,
     )
     location = (fire.get("location") or "").strip()
     if location:
         y = style.draw_headline(surface, y, band, "", location)
     y = style.draw_stats(surface, y, band, _fire_stats(fire))
     y = style.draw_meter(surface, y, band, fire.get("containment"), tint=_FIRE_RED)
+    started = (fire.get("started") or "").strip().split("T", 1)[0]
+    if started:
+        y = style.draw_note(surface, y, band, tr("fire.started", when=started), color=style.TXT2, max_lines=1)
     admin = (fire.get("admin_unit") or "").strip()
     return style.draw_note(surface, y, band, admin, color=style.TXT2, max_lines=3)
 
@@ -104,11 +104,11 @@ def _fire_body(surface, fire: dict, y: int, band) -> int:
 def draw_fire_detail(surface, fires, selected_index, scroll_offset: int = 0) -> int:
     draw.fill_background_textured(surface)
     body_font = draw.load_font(theme.s(14))
-    chrome_top = nav.content_top_y(has_dots=True)
-    bottom = nav.content_bottom_y()
+    chrome_top = style.detail_top()
+    bottom = style.detail_bottom()
 
     if not fires:
-        nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("fire.breadcrumb")])
+        nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("fire.breadcrumb")], **style.crumb_kwargs())
         nav.draw_curved_footer(surface, list(FOOTER_EMPTY))
         common.draw_center_row(surface, tr("fire.no_wildfires"), chrome_top, body_font, theme.MUTED)
         return 0
@@ -116,16 +116,17 @@ def draw_fire_detail(surface, fires, selected_index, scroll_offset: int = 0) -> 
     idx = max(0, min(selected_index, len(fires) - 1))
     fire = fires[idx]
     crumb = (fire.get("name") or tr("fire.breadcrumb")).strip()
-    nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("fire.breadcrumb"), crumb])
-    nav.draw_curved_page_dots(surface, idx, len(fires), active_color=theme.LABEL)
+    nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("fire.breadcrumb"), crumb], **style.crumb_kwargs())
 
+    viewport = bottom - chrome_top
+    frac = style.fit_hero_frac(lambda fr: _fire_body(surface, fire, 0, style.NOWHERE, fr), viewport)
     lead = style.lead_pad(
-        chrome_top, bottom, _fire_body(surface, fire, 0, style.NOWHERE), scroll_offset
+        chrome_top, bottom, _fire_body(surface, fire, 0, style.NOWHERE, frac), scroll_offset
     )
     clip_prev = common.begin_detail_body_clip(surface, chrome_top, bottom)
     y = chrome_top - scroll_offset + lead
     try:
-        y = _fire_body(surface, fire, y, (chrome_top, bottom))
+        y = _fire_body(surface, fire, y, (chrome_top, bottom), frac)
     finally:
         max_scroll = common.finish_detail_scroll(
             surface,

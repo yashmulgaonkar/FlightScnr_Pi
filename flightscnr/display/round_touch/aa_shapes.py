@@ -278,6 +278,21 @@ def icon(name: str, size: int, color) -> pygame.Surface:
     return aa(("icon", name, tuple(color)), size, size, paint)
 
 
+def dial_mask(radius_frac: float = 0.94) -> pygame.Surface:
+    """Full-screen white-inside / clear-outside circle for clipping cards to the dial."""
+    key = ("dial", theme.SIZE, theme.VISIBLE_RADIUS, round(radius_frac, 3))
+    surf = _cache.get(key)
+    if surf is None:
+        size = theme.SIZE
+        big = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+        pygame.draw.circle(
+            big, (255, 255, 255, 255), (size, size), int(theme.VISIBLE_RADIUS * radius_frac * 2)
+        )
+        surf = pygame.transform.smoothscale(big, (size, size))
+        _cache[key] = surf
+    return surf
+
+
 # ------------------------------------------------------------------- images
 _cover_cache: dict = {}
 

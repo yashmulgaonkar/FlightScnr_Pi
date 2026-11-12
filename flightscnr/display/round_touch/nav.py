@@ -1011,6 +1011,8 @@ def _curved_breadcrumb_items(
     parts: list[str],
     *,
     active_color=None,
+    scale: float = 1.0,
+    max_span: float | None = None,
 ) -> tuple[list[pygame.Surface], int]:
     """(rendered glyph items, radius) fitted to the top-arc angular budget.
 
@@ -1020,10 +1022,11 @@ def _curved_breadcrumb_items(
     parts (callsigns, place names) ellipsize via the fitter's fallback.
     """
     active = active_color if active_color is not None else theme.SWEEP
-    font = draw.load_font(theme.FONT_DETAIL)
+    font = draw.load_font(max(8, int(theme.FONT_DETAIL * scale)))
     r = int(theme.VISIBLE_RADIUS * 0.90)
     sep = " › "
-    budget = int(_BREADCRUMB_MAX_SPAN * r)
+    limit = _BREADCRUMB_MAX_SPAN if max_span is None else float(max_span)
+    budget = int(limit * r)
     items: list[pygame.Surface] = []
     for _ in range(4):
         display = _fit_breadcrumb_parts(parts, font, budget)
@@ -1035,9 +1038,9 @@ def _curved_breadcrumb_items(
                 is_sep = i > 0 and j < len(sep)
                 items.append(font.render(ch, True, theme.HINT if is_sep else color))
         span = arc_ui.arc_span([it.get_width() for it in items], r)
-        if span <= _BREADCRUMB_MAX_SPAN:
+        if span <= limit:
             break
-        budget -= max(theme.s(6), int((span - _BREADCRUMB_MAX_SPAN) * r) + 2)
+        budget -= max(theme.s(6), int((span - limit) * r) + 2)
     return items, r
 
 
@@ -1105,12 +1108,15 @@ def draw_curved_breadcrumb(
     *,
     active_color=None,
     with_scrim: bool = False,
+    scale: float = 1.0,
+    max_span: float | None = None,
 ) -> None:
-    key = (tuple(parts), repr(active_color), bool(with_scrim))
+    """``scale`` below 1 draws a smaller trail, ``max_span`` (radians) a shorter one."""
+    key = (tuple(parts), repr(active_color), bool(with_scrim), round(float(scale), 2), max_span)
     surf_pos = _overlay_cached(
         _crumb_cache, key,
         lambda tmp: _draw_curved_breadcrumb_uncached(
-            tmp, parts, active_color=active_color, with_scrim=with_scrim),
+            tmp, parts, active_color=active_color, with_scrim=with_scrim, scale=scale, max_span=max_span),
     )
     if surf_pos and surf_pos[0] is not None:
         surface.blit(surf_pos[0], surf_pos[1])
@@ -1122,6 +1128,8 @@ def _draw_curved_breadcrumb_uncached(
     *,
     active_color=None,
     with_scrim: bool = False,
+    scale: float = 1.0,
+    max_span: float | None = None,
 ) -> None:
     """Breadcrumb trail curved along the top rim, active part highlighted.
 
@@ -1130,7 +1138,9 @@ def _draw_curved_breadcrumb_uncached(
     """
     if not parts:
         return
-    items, r = _curved_breadcrumb_items(parts, active_color=active_color)
+    items, r = _curved_breadcrumb_items(
+        parts, active_color=active_color, scale=scale, max_span=max_span
+    )
     if with_scrim and items:
         from display.round_touch import radar_hud
 

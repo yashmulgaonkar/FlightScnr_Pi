@@ -180,7 +180,7 @@ def _is_military(f: dict) -> bool:
         return False
 
 
-def _draw_flight_hero(surface, f: dict, y: int, band, *, military: bool) -> int:
+def _draw_flight_hero(surface, f: dict, y: int, band, *, military: bool, image_frac: float = 0.42) -> int:
     """Aircraft photo card with the callsign and airline over it."""
     if military:
         callsign = (f.get("callsign") or display_flight_id_for_flight(f) or "—").strip()
@@ -215,13 +215,14 @@ def _draw_flight_hero(surface, f: dict, y: int, band, *, military: bool) -> int:
         badge_backing=True,
         watermark=aa.plane(style.px(0.5), heading, (255, 255, 255)),
         focus_y=0.45,
-        image_frac=0.42,
+        image_frac=image_frac,
+        credit=(f.get("photo_credit") or "").strip(),
     )
 
 
-def _flight_body(surface, f: dict, y: int, band) -> int:
+def _flight_body(surface, f: dict, y: int, band, hero_frac: float = 0.42) -> int:
     military = _is_military(f)
-    y = _draw_flight_hero(surface, f, y, band, military=military)
+    y = _draw_flight_hero(surface, f, y, band, military=military, image_frac=hero_frac)
     origin_label, dest_label = route_endpoint_labels(f.get("origin") or "—", f.get("destination") or "—")
     y = style.draw_route(surface, y, band, origin_label, dest_label, tr("flight.route_unknown"))
     heading = _as_int(f.get("heading"))
@@ -234,11 +235,10 @@ def _flight_body(surface, f: dict, y: int, band) -> int:
         _stat("detail.cap.dist", _distance_text(f), "dist"),
     ]
     y = style.draw_stats(surface, y, band, stats)
-    y = _draw_follow_row(surface, f, y, band)
-    return style.draw_note(surface, y, band, f.get("photo_credit") or "")
+    return _draw_follow_row(surface, f, y, band)
 
 
-def _vessel_body(surface, f: dict, y: int, band) -> int:
+def _vessel_body(surface, f: dict, y: int, band, hero_frac: float = 0.42) -> int:
     global _follow_btn_rect
     _follow_btn_rect = None
     name = (f.get("name") or f.get("callsign") or tr("flight.vessel_default")).strip()
@@ -267,7 +267,8 @@ def _vessel_body(surface, f: dict, y: int, band) -> int:
         badge=badge,
         watermark=aa.ship(style.px(0.5), heading, (255, 255, 255)),
         focus_y=0.5,
-        image_frac=0.42,
+        image_frac=hero_frac,
+        credit=(f.get("photo_credit") or "").strip(),
     )
     dest = (f.get("destination") or "").strip()
     nav_name = (f.get("nav_status_name") or "").strip()
@@ -303,23 +304,23 @@ def _vessel_body(surface, f: dict, y: int, band) -> int:
             bits.append(f"{draught:.1f} m D")
     except (TypeError, ValueError):
         pass
-    y = style.draw_note(surface, y, band, " · ".join(bits), color=style.TXT2, frac=0.040)
+    y = style.draw_note(surface, y, band, " · ".join(bits), color=style.TXT2, frac=0.052)
     if dest and nav_name:
         y = style.draw_note(surface, y, band, nav_name)
-    return style.draw_note(surface, y, band, (f.get("photo_credit") or "").strip())
+    return y
 
 
 def draw_flight_detail(surface, flights, selected_index, scroll_offset: int = 0) -> int:
     draw.fill_background_textured(surface)
     body_font = draw.load_font(theme.s(14))
-    chrome_top = nav.content_top_y(has_dots=True)
-    bottom = nav.content_bottom_y()
+    chrome_top = style.detail_top()
+    bottom = style.detail_bottom()
     band = (chrome_top, bottom)
 
     global _follow_btn_rect
     if not flights:
         _follow_btn_rect = None
-        nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("flight.breadcrumb.detail")])
+        nav.draw_curved_breadcrumb(surface, [tr("common.radar"), tr("flight.breadcrumb.detail")], **style.crumb_kwargs())
         nav.draw_curved_footer(surface, list(FOOTER_EMPTY))
         common.draw_center_row(surface, tr("flight.no_traffic"), chrome_top, body_font, theme.MUTED)
         return 0
@@ -339,15 +340,17 @@ def draw_flight_detail(surface, flights, selected_index, scroll_offset: int = 0)
             tr("flight.breadcrumb.vessel") if is_vessel else tr("flight.breadcrumb.flight"),
             crumb,
         ],
+        **style.crumb_kwargs(),
     )
-    nav.draw_curved_page_dots(surface, idx, len(flights), active_color=theme.LABEL)
 
     body = _vessel_body if is_vessel else _flight_body
-    lead = style.lead_pad(chrome_top, bottom, body(surface, f, 0, style.NOWHERE), scroll_offset)
+    viewport = bottom - chrome_top
+    frac = style.fit_hero_frac(lambda fr: body(surface, f, 0, style.NOWHERE, fr), viewport)
+    lead = style.lead_pad(chrome_top, bottom, body(surface, f, 0, style.NOWHERE, frac), scroll_offset)
     clip_prev = common.begin_detail_body_clip(surface, chrome_top, bottom)
     y = chrome_top - scroll_offset + lead
     try:
-        y = body(surface, f, y, band)
+        y = body(surface, f, y, band, frac)
     finally:
         max_scroll = common.finish_detail_scroll(
             surface,
