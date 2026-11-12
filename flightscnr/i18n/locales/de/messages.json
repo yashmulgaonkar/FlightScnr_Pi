@@ -1078,6 +1078,7 @@
   "alarm.volume": "Lautstärke",
   "alarm.snooze": "Schlummern",
   "alarm.snooze_value": "{minutes} Min.",
+  "alarm.rings_in": "Klingelt in {when}",
   "alarm.enabled": "Alarm",
   "alarm.sound": "Klang",
   "alarm.sound.tones": "Töne",

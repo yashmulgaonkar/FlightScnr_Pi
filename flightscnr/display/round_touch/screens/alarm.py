@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import io
 import logging
+import math
 import os
 import time
+from datetime import datetime, timedelta
 
 import pygame
 
@@ -49,10 +51,17 @@ _ring_hits: list[tuple[str, pygame.Rect]] = []
 _col_px = {"hour": 0.0, "minute": 0.0, "ampm": 0.0}
 _col_vel = {"hour": 0.0, "minute": 0.0, "ampm": 0.0}
 _scroll_tick = 0.0
-# Same chip colors as the settings rows.
-_CARD_FILL = (18, 24, 20)
-_CARD_FILL_FOCUS = (24, 34, 27)
-_CARD_BORDER = (44, 58, 48)
+# Editor palette. The accent is the user's Radar Theme colour, read at draw time.
+_TXT = (246, 248, 250)
+_TXT2 = (150, 160, 170)
+_TXT3 = (96, 104, 112)
+_DARK = (8, 16, 10)
+_SS = 3  # supersampling for the cached shapes
+_aa_cache: dict = {}
+_label_cache: dict = {}
+_header_cache: dict = {}
+_layout_cache: dict | None = None
+_layout_key: tuple | None = None
 
 
 def editor_open() -> bool:
@@ -198,8 +207,8 @@ def draw_clock_icon(surface, top: int) -> None:
 
 
 def _row_h() -> int:
-    """Chip pitch. Close to a settings row, short enough for three visible values."""
-    return theme.s(40)
+    """Pixels of finger travel per wheel row."""
+    return max(1, int(theme.VISIBLE_RADIUS * 0.20))
 
 
 def _reset_column_scroll() -> None:
@@ -303,42 +312,331 @@ def _wheel_label(kind: str, offset: int) -> str:
     return "PM" if _draft["pm"] else "AM"
 
 
+def _accent() -> tuple[int, int, int]:
+    return tuple(int(c) for c in theme.SWEEP[:3])  # type: ignore[return-value]
+
+
+def _mix(a, b, t):
+    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+
+def _font(frac: float, bold: bool = False) -> pygame.font.Font:
+    return draw.load_font(max(8, int(theme.VISIBLE_RADIUS * frac)), bold=bold)
+
+
+# --------------------------------------------------------------------------
+# Cached, anti-aliased shapes. Each is drawn once at 3x and scaled down.
+# --------------------------------------------------------------------------
+def _aa(key: tuple, w: int, h: int, painter) -> pygame.Surface:
+    cache_key = (key, w, h, tuple(theme.SWEEP[:3]))
+    surf = _aa_cache.get(cache_key)
+    if surf is None:
+        big = pygame.Surface((max(1, w * _SS), max(1, h * _SS)), pygame.SRCALPHA)
+        painter(big, _SS)
+        surf = pygame.transform.smoothscale(big, (max(1, w), max(1, h)))
+        if len(_aa_cache) > 96:
+            _aa_cache.clear()
+        _aa_cache[cache_key] = surf
+    return surf
+
+
+def _blur(surf: pygame.Surface, k: int = 8) -> pygame.Surface:
+    w, h = surf.get_size()
+    small = pygame.transform.smoothscale(surf, (max(1, w // k), max(1, h // k)))
+    return pygame.transform.smoothscale(small, (w, h))
+
+
+def _glass(w: int, h: int, radius: int, tint: int = 16, stroke: int = 34, sheen: int = 24):
+    """Frosted pill: faint fill, a soft sheen across the top, a hairline edge."""
+
+    def paint(big, ss):
+        bw, bh = big.get_size()
+        rad = radius * ss
+        pygame.draw.rect(big, (255, 255, 255, tint), big.get_rect(), border_radius=rad)
+        glow = pygame.Surface((bw, bh), pygame.SRCALPHA)
+        for y in range(bh // 2):
+            a = int(sheen * (1 - y / (bh / 2)) ** 2)
+            pygame.draw.line(glow, (255, 255, 255, a), (0, y), (bw, y))
+        mask = pygame.Surface((bw, bh), pygame.SRCALPHA)
+        pygame.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(), border_radius=rad)
+        glow.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+        big.blit(glow, (0, 0))
+        pygame.draw.rect(
+            big, (255, 255, 255, stroke), big.get_rect(), width=max(2, ss), border_radius=rad
+        )
+
+    return _aa(("glass", radius, tint, stroke, sheen), w, h, paint)
+
+
+def _outline(w: int, h: int, radius: int, color, width: int, fill_alpha: int = 0):
+    def paint(big, ss):
+        rad = radius * ss
+        if fill_alpha:
+            pygame.draw.rect(big, (*color, fill_alpha), big.get_rect(), border_radius=rad)
+        pygame.draw.rect(big, color, big.get_rect(), width=max(2, width * ss), border_radius=rad)
+
+    return _aa(("outline", radius, color, width, fill_alpha), w, h, paint)
+
+
+def _shadow(w: int, h: int, radius: int, alpha: int = 110):
+    key = ("shadow", w, h, radius, alpha)
+    surf = _aa_cache.get(key)
+    if surf is None:
+        margin = max(6, radius // 2)
+        layer = pygame.Surface((w + 2 * margin, h + 2 * margin), pygame.SRCALPHA)
+        pygame.draw.rect(layer, (0, 0, 0, alpha), pygame.Rect(margin, margin, w, h), border_radius=radius)
+        surf = _blur(layer, 6)
+        _aa_cache[key] = surf
+    return surf
+
+
+def _blit_shadow(surface, rect: pygame.Rect, radius: int, alpha: int = 110) -> None:
+    sh = _shadow(rect.width, rect.height, radius, alpha)
+    margin = (sh.get_width() - rect.width) // 2
+    surface.blit(sh, (rect.left - margin, rect.top - margin + max(2, radius // 6)))
+
+
+def _switch_surface(w: int, h: int, on: bool) -> pygame.Surface:
+    accent = _accent()
+
+    def paint(big, ss):
+        bw, bh = big.get_size()
+        pygame.draw.rect(
+            big, accent if on else (58, 62, 66), big.get_rect(), border_radius=bh // 2
+        )
+        pad = max(2, bh // 9)
+        k = bh // 2 - pad
+        kx = bw - k - pad if on else k + pad
+        pygame.draw.circle(big, (0, 0, 0, 90), (kx, bh // 2 + ss * 2), k)
+        pygame.draw.circle(big, (255, 255, 255), (kx, bh // 2), k)
+
+    return _aa(("switch", on), w, h, paint)
+
+
+def _draw_switch(surface, rect: pygame.Rect, on: bool) -> None:
+    if on:
+        glow = pygame.Surface((rect.width + rect.height, rect.height * 2), pygame.SRCALPHA)
+        inner = pygame.Rect(0, 0, rect.width, rect.height)
+        inner.center = glow.get_rect().center
+        pygame.draw.rect(glow, (*_accent(), 120), inner.inflate(rect.height // 3, rect.height // 3),
+                         border_radius=rect.height)
+        surface.blit(_blur(glow, 6), glow.get_rect(center=rect.center))
+    surface.blit(_switch_surface(rect.width, rect.height, on), rect.topleft)
+
+
+# Small vector icons, drawn at 3x.
+def _icon(name: str, size: int, color) -> pygame.Surface:
+    def paint(big, ss):
+        s = big.get_width()
+        c = s // 2
+        if name == "note":
+            w = max(2, int(.10 * s))
+            pygame.draw.line(big, color, (int(c + .14 * s), int(c - .36 * s)), (int(c + .14 * s), int(c + .20 * s)), w)
+            pygame.draw.ellipse(big, color, pygame.Rect(int(c - .30 * s), int(c + .08 * s), int(.46 * s), int(.34 * s)))
+            pygame.draw.polygon(big, color, [
+                (c + .14 * s, c - .40 * s), (c + .42 * s, c - .20 * s),
+                (c + .42 * s, c - .04 * s), (c + .14 * s, c - .22 * s)])
+        elif name == "zzz":
+            big_f = draw.load_font(int(.66 * s), bold=True)
+            small_f = draw.load_font(int(.42 * s), bold=True)
+            a = big_f.render("Z", True, color)
+            b = small_f.render("z", True, color)
+            big.blit(a, a.get_rect(center=(int(c - .10 * s), int(c + .10 * s))))
+            big.blit(b, b.get_rect(center=(int(c + .28 * s), int(c - .24 * s))))
+        elif name == "speaker":
+            pygame.draw.polygon(big, color, [
+                (c - .46 * s, c - .16 * s), (c - .22 * s, c - .16 * s), (c + .04 * s, c - .40 * s),
+                (c + .04 * s, c + .40 * s), (c - .22 * s, c + .16 * s), (c - .46 * s, c + .16 * s)])
+            for k in range(2):
+                r = (.26 + .20 * k) * s
+                rect = pygame.Rect(0, 0, int(2 * r), int(2 * r))
+                rect.center = (int(c + .04 * s), c)
+                pygame.draw.arc(big, color, rect, -0.75, 0.75, max(3, int(.08 * s)))
+        elif name in ("minus", "plus"):
+            w = max(3, int(.12 * s))
+            a = int(.28 * s)
+            pygame.draw.line(big, color, (c - a, c), (c + a, c), w)
+            if name == "plus":
+                pygame.draw.line(big, color, (c, c - a), (c, c + a), w)
+
+    return _aa(("icon", name, color), size, size, paint)
+
+
+def _caption(text: str, color, tracking: int, frac: float = 0.040):
+    """Small spaced capitals, cached per string."""
+    key = ("cap", text, color, tracking, frac, theme.VISIBLE_RADIUS)
+    surf = _label_cache.get(key)
+    if surf is None:
+        font = _font(frac, bold=True)
+        glyphs = [font.render(ch, True, color) for ch in text]
+        widths = [g.get_width() for g in glyphs]
+        total = sum(widths) + tracking * max(0, len(text) - 1)
+        surf = pygame.Surface((max(1, total), font.get_height()), pygame.SRCALPHA)
+        x = 0
+        for g, w in zip(glyphs, widths):
+            surf.blit(g, (x, 0))
+            x += w + tracking
+        _label_cache[key] = surf
+    return surf
+
+
+def _label_img(text: str, step: int) -> pygame.Surface:
+    """A wheel label rendered once per brightness step."""
+    key = ("wheel", text, step, theme.VISIBLE_RADIUS)
+    img = _label_cache.get(key)
+    if img is None:
+        color = _mix(_TXT2, _TXT, step / 8.0)
+        img = _font(.20).render(text, True, color)
+        _label_cache[key] = img
+    return img
+
+
+# --------------------------------------------------------------------------
+# Layout
+# --------------------------------------------------------------------------
 def _layout() -> dict:
+    global _layout_cache, _layout_key
+    key = (theme.SIZE, theme.VISIBLE_RADIUS)
+    if _layout_cache is not None and _layout_key == key:
+        return _layout_cache
+    radius = theme.VISIBLE_RADIUS
+    cx, cy = theme.CENTER_X, theme.CENTER_Y
     row_h = _row_h()
-    wheel_h = row_h * 3
-    wheel_w = theme.s(230)
-    header_y = theme.CENTER_Y - theme.s(158)
-    wheel = pygame.Rect(0, 0, wheel_w, wheel_h)
-    # Title, then the Cancel / Save pills, then the wheel.
-    wheel.midtop = (
-        theme.CENTER_X,
-        header_y + theme.s(18) + theme.s(6) + theme.s(34) + theme.s(8),
-    )
-    col_w = wheel_w // 3
-    columns = []
-    for index, kind in enumerate(("hour", "minute", "ampm")):
-        rect = pygame.Rect(wheel.left + index * col_w, wheel.top, col_w, wheel_h)
-        columns.append((kind, rect))
-    volume = pygame.Rect(0, 0, theme.s(200), theme.s(22))
-    volume.midtop = (theme.CENTER_X, wheel.bottom + theme.s(14))
-    snooze = pygame.Rect(0, 0, theme.s(210), theme.s(32))
-    snooze.midtop = (theme.CENTER_X, volume.bottom + theme.s(8))
-    # Sound row: label on the left, Tones | LoFi segmented control on the right.
-    sound = pygame.Rect(0, 0, theme.s(210), theme.s(26))
-    sound.midtop = (theme.CENTER_X, snooze.bottom + theme.s(4))
-    return {
+    wheel_cy = cy - int(radius * 0.14)
+
+    # The lens is sized from the widest things that can sit inside it.
+    num_font = _font(.20)
+    digits_w = max(num_font.size("88")[0], num_font.size("00")[0])
+    ampm_w = max(num_font.size("AM")[0], num_font.size("PM")[0])
+    colon_w = num_font.size(":")[0] + 2 * int(radius * 0.03)
+    gap = int(radius * 0.07)
+    total = digits_w + colon_w + digits_w + gap + ampm_w
+    left = cx - total // 2
+    hour_x = left + digits_w // 2
+    colon_x = left + digits_w + colon_w // 2
+    minute_x = left + digits_w + colon_w + digits_w // 2
+    ampm_x = left + digits_w + colon_w + digits_w + gap + ampm_w // 2
+    pad = int(radius * 0.11)
+    lens = pygame.Rect(left - pad, 0, total + 2 * pad, int(radius * 0.24))
+    lens.centery = wheel_cy
+
+    top = wheel_cy - int(radius * 0.40)
+    height = int(radius * 0.80)
+    b1 = left + digits_w + colon_w // 2
+    b2 = left + digits_w + colon_w + digits_w + gap // 2
+    columns = [
+        ("hour", pygame.Rect(lens.left, top, b1 - lens.left, height)),
+        ("minute", pygame.Rect(b1, top, b2 - b1, height)),
+        ("ampm", pygame.Rect(b2, top, lens.right - b2, height)),
+    ]
+    wheel = pygame.Rect(lens.left, top, lens.width, height)
+
+    dock = pygame.Rect(0, 0, int(radius * 1.36), int(radius * 0.31))
+    dock.center = (cx, cy + int(radius * 0.45))
+    cell_w = dock.width // 3
+    cells = [
+        pygame.Rect(dock.left + i * cell_w, dock.top, cell_w, dock.height) for i in range(3)
+    ]
+    pad_c = int(radius * 0.03)
+    track = pygame.Rect(0, 0, cell_w - 2 * pad_c, max(4, int(radius * 0.014)))
+    track.midbottom = (cells[2].centerx, dock.bottom - int(radius * 0.055))
+    switch = pygame.Rect(0, 0, int(radius * 0.17), int(radius * 0.09))
+    switch_y = cy + int(radius * 0.72)
+
+    _layout_cache = {
         "wheel": wheel,
+        "lens": lens,
         "columns": columns,
+        "col_x": {"hour": hour_x, "minute": minute_x, "ampm": ampm_x},
+        "colon_x": colon_x,
+        "wheel_cy": wheel_cy,
         "row_h": row_h,
-        "header_y": header_y,
-        "volume": volume,
-        "snooze": snooze,
-        "sound": sound,
+        "cyl": row_h / (math.pi / 6.0),
+        "dock": dock,
+        "sound": cells[0],
+        "snooze": cells[1],
+        "volume_cell": cells[2],
+        "volume": track,
+        "pad_c": pad_c,
+        "switch": switch,
+        "switch_y": switch_y,
+        "header_r": int(radius * 0.855),
+        "rings_y": cy - int(radius * 0.64),
     }
+    _layout_key = key
+    return _layout_cache
 
 
 def _hit(action: str, value: str, rect: pygame.Rect) -> None:
     _hits.append((action, value, rect))
+
+
+def _minutes_until_ring() -> int:
+    hour, minute = alarm_clock.parse_hhmm(
+        alarm_clock.from_12h(int(_draft["hour12"]), int(_draft["minute"]), bool(_draft["pm"]))
+    )
+    now = datetime.now()
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return int((target - now).total_seconds() // 60)
+
+
+def _rings_in_text() -> str:
+    total = _minutes_until_ring()
+    hours, minutes = divmod(total, 60)
+    part = tr("alarm.snooze_value", minutes=minutes)
+    when = f"{hours} h {part}" if hours else part
+    return tr("alarm.rings_in", when=when)
+
+
+def _polar(r: float, deg: float) -> tuple[int, int]:
+    a = math.radians(deg)
+    return (
+        int(theme.CENTER_X + r * math.cos(a)),
+        int(theme.CENTER_Y + r * math.sin(a)),
+    )
+
+
+def _arc_word(layer, text: str, font, color, r: int, mid_deg: float) -> None:
+    glyphs = [font.render(ch, True, color) for ch in text]
+    track = max(1, int(theme.VISIBLE_RADIUS * 0.004))
+    adv = [g.get_width() + track for g in glyphs]
+    total = math.degrees(sum(adv) / r)
+    angle = mid_deg - total / 2
+    for g, w in zip(glyphs, adv):
+        da = math.degrees(w / r)
+        mid = angle + da / 2
+        rot = pygame.transform.rotozoom(g, -(mid + 90), 1.0)
+        layer.blit(rot, rot.get_rect(center=_polar(r, mid)))
+        angle += da
+
+
+def _header() -> tuple[pygame.Surface, tuple[int, int]]:
+    """Cancel / title / Save curved along the top rim. Rendered once per language."""
+    layout = _layout()
+    key = (
+        theme.SIZE,
+        theme.VISIBLE_RADIUS,
+        tuple(theme.SWEEP[:3]),
+        tr("common.cancel"),
+        tr("alarm.editor.title"),
+        tr("common.save"),
+    )
+    cached = _header_cache.get("v")
+    if cached is not None and cached[0] == key:
+        return cached[1], cached[2]
+    layer = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
+    r = layout["header_r"]
+    small = _font(.056, bold=True)
+    mid = _font(.060, bold=True)
+    _arc_word(layer, tr("common.cancel"), small, _TXT2, r, -128)
+    _arc_word(layer, tr("alarm.editor.title"), mid, _TXT, r, -90)
+    _arc_word(layer, tr("common.save"), mid, _mix(_accent(), (255, 255, 255), 0.25), r, -52)
+    box = layer.get_bounding_rect()
+    surf = layer.subsurface(box).copy()
+    _header_cache["v"] = (key, surf, box.topleft)
+    return surf, box.topleft
 
 
 def draw_editor(surface) -> None:
@@ -346,144 +644,177 @@ def draw_editor(surface) -> None:
     _hits = []
     draw.fill_background_textured(surface)
     layout = _layout()
-    wheel = layout["wheel"]
-    row_h = layout["row_h"]
-    title_font = draw.load_font(theme.s(16), bold=True)
-    num_font = draw.load_font(theme.s(22), bold=True)
-    small_font = draw.load_font(theme.s(13), bold=True)
-    body_font = draw.load_font(theme.s(13), bold=True)
+    accent = _accent()
+    radius = theme.VISIBLE_RADIUS
 
-    header_y = layout["header_y"]
-    title = title_font.render(tr("alarm.editor.title"), True, (255, 255, 255))
-    title_rect = title.get_rect(midtop=(theme.CENTER_X, header_y))
-    surface.blit(title, title_rect)
-    gap = theme.s(12)
-    cancel_label = tr("common.cancel")
-    save_label = tr("common.save")
-    pair_w = (
-        _pill_width(cancel_label, title_font)
-        + gap
-        + _pill_width(save_label, title_font)
-    )
-    pill_h = title.get_height() + theme.s(12)
-    pill_cy = title_rect.bottom + theme.s(6) + pill_h // 2
-    left = theme.CENTER_X - pair_w // 2
-    cancel = _draw_pill_anchored(
-        surface,
-        cancel_label,
-        title_font,
-        (left, pill_cy),
-        (52, 54, 58),
-        theme.LABEL,
-        to_right=True,
-    )
-    save = _draw_pill_anchored(
-        surface,
-        save_label,
-        title_font,
-        (cancel.right + gap, pill_cy),
-        theme.SWEEP,
-        (16, 18, 20),
-        to_right=True,
-    )
-    _hit("cancel", "", cancel)
-    _hit("save", "", save)
+    # Header along the rim, with generous touch targets under Cancel and Save.
+    header, origin = _header()
+    surface.blit(header, origin)
+    target_w, target_h = int(radius * 0.30), int(radius * 0.14)
+    for action, deg in (("cancel", -128), ("save", -52)):
+        rect = pygame.Rect(0, 0, target_w, target_h)
+        rect.center = _polar(layout["header_r"] - int(radius * 0.01), deg)
+        _hit(action, "", rect)
 
-    prev_clip = surface.get_clip()
-    surface.set_clip(wheel)
+    if _draft["enabled"]:
+        rings = _font(.040).render(_rings_in_text(), True, _TXT2)
+        surface.blit(rings, rings.get_rect(center=(theme.CENTER_X, layout["rings_y"])))
+
+    # Wheel: lens first, then the drum on top of it.
+    lens = layout["lens"]
+    corner = lens.height // 2
+    _blit_shadow(surface, lens, corner, 90)
+    surface.blit(_glass(lens.width, lens.height, corner, tint=18, stroke=40, sheen=30), lens.topleft)
+    surface.blit(_outline(lens.width, lens.height, corner, accent, 2), lens.topleft)
     for kind, rect in layout["columns"]:
-        _draw_column(surface, kind, rect, wheel, row_h, num_font)
+        _draw_column(surface, kind, layout)
         _hit("wheel", kind, rect)
-    surface.set_clip(prev_clip)
-
-    vol_rect = layout["volume"]
-    label = small_font.render(tr("alarm.volume"), True, theme.HINT)
-    surface.blit(label, label.get_rect(midbottom=(vol_rect.centerx, vol_rect.top)))
-    track = pygame.Rect(0, 0, vol_rect.width, theme.s(6))
-    track.midleft = (vol_rect.left, vol_rect.bottom - theme.s(8))
-    pygame.draw.rect(surface, (70, 74, 80), track, border_radius=track.height // 2)
-    volume = max(0, min(100, int(_draft["volume"])))
-    fill = track.copy()
-    fill.width = max(track.height, int(track.width * volume / 100))
-    pygame.draw.rect(surface, theme.SWEEP, fill, border_radius=track.height // 2)
-    knob_x = track.left + int(track.width * volume / 100)
-    pygame.draw.circle(surface, theme.LABEL, (knob_x, track.centery), theme.s(9))
-    _hit("volume", "", track.inflate(0, theme.s(22)))
-
-    snooze = layout["snooze"]
-    snooze_label = body_font.render(tr("alarm.snooze"), True, theme.LABEL)
-    value = body_font.render(
-        tr("alarm.snooze_value", minutes=int(_draft["snooze"])),
-        True,
-        theme.SWEEP,
-    )
-    minus = body_font.render("–", True, theme.LABEL)
-    plus = body_font.render("+", True, theme.LABEL)
-    surface.blit(snooze_label, snooze_label.get_rect(midleft=(snooze.left, snooze.centery)))
-    minus_rect = minus.get_rect(midright=(snooze.right - theme.s(54), snooze.centery))
-    plus_rect = plus.get_rect(midright=(snooze.right, snooze.centery))
-    value_rect = value.get_rect(midright=(minus_rect.left - theme.s(10), snooze.centery))
-    surface.blit(minus, minus_rect)
-    surface.blit(plus, plus_rect)
-    surface.blit(value, value_rect)
-    _hit("snooze_dec", "", minus_rect.inflate(theme.s(16), theme.s(12)))
-    _hit("snooze_inc", "", plus_rect.inflate(theme.s(16), theme.s(12)))
-
-    sound_row = layout["sound"]
-    _draw_sound_row(surface, sound_row, body_font)
-
-    switch = pygame.Rect(0, 0, theme.s(36), theme.s(20))
-    switch.midtop = (theme.CENTER_X + theme.s(28), sound_row.bottom + theme.s(6))
-    on = bool(_draft["enabled"])
-    pygame.draw.rect(
-        surface,
-        theme.SWEEP if on else (70, 74, 80),
-        switch,
-        border_radius=switch.height // 2,
-    )
-    knob = theme.s(8)
-    kx = switch.right - knob - theme.s(2) if on else switch.left + knob + theme.s(2)
-    pygame.draw.circle(surface, (16, 18, 20), (kx, switch.centery), knob)
-    enabled_label = small_font.render(tr("alarm.enabled"), True, theme.HINT)
+    colon = _font(.17).render(":", True, _mix(accent, (255, 255, 255), 0.25))
     surface.blit(
-        enabled_label,
-        enabled_label.get_rect(midright=(switch.left - theme.s(8), switch.centery)),
+        colon,
+        colon.get_rect(center=(layout["colon_x"], layout["wheel_cy"] - int(radius * 0.02))),
     )
-    _hit("enabled", "", switch.inflate(theme.s(8), theme.s(8)))
+
+    _draw_dock(surface, layout, accent)
+
+    # Alarm on / off.
+    label = _font(.046, bold=True).render(tr("alarm.enabled"), True, _TXT)
+    sw = layout["switch"].copy()
+    total = label.get_width() + int(radius * 0.04) + sw.width
+    left = theme.CENTER_X - total // 2
+    surface.blit(label, label.get_rect(midleft=(left, layout["switch_y"])))
+    sw.midright = (left + total, layout["switch_y"])
+    _draw_switch(surface, sw, bool(_draft["enabled"]))
+    _hit("enabled", "", sw.inflate(int(radius * 0.10), int(radius * 0.08)))
 
 
-def _draw_sound_row(surface, row: pygame.Rect, font) -> None:
-    """``Sound`` label, then a two-segment Tones | LoFi control on the right."""
-    label = font.render(tr("alarm.sound"), True, theme.LABEL)
-    surface.blit(label, label.get_rect(midleft=(row.left, row.centery)))
-    choices = (
-        ("tones", tr("alarm.sound.tones")),
-        ("lofi", tr("alarm.sound.lofi")),
-    )
-    # Each segment fits its own text; long translations ("Hangjelzés") give
-    # up padding before they reach the label.
-    text_w = [font.size(text)[0] for _key, text in choices]
-    room = row.width - label.get_width() - theme.s(8) - sum(text_w)
-    pad = max(theme.s(4), min(theme.s(10), room // (2 * len(choices))))
-    widths = [w + 2 * pad for w in text_w]
-    seg_h = row.height
-    control = pygame.Rect(0, 0, sum(widths), seg_h)
-    control.midright = (row.right, row.centery)
-    radius = seg_h // 2
-    pygame.draw.rect(surface, _CARD_FILL, control, border_radius=radius)
+def _draw_column(surface, kind: str, layout: dict) -> None:
+    """One column of the drum: rows turn away from the viewer and fade out."""
+    row_h = layout["row_h"]
+    cyl = layout["cyl"]
+    cx = layout["col_x"][kind]
+    cy = layout["wheel_cy"]
+    scroll = float(_col_px.get(kind, 0.0))
+    offsets = _ampm_rows() if kind == "ampm" else range(-3, 4)
+    for offset in offsets:
+        pos = (offset * row_h + scroll) / row_h  # rows from the centre
+        theta = math.radians(30.0 * pos)
+        if abs(theta) > math.radians(76):
+            continue
+        facing = math.cos(theta)
+        near = max(0.0, 1.0 - abs(pos))
+        scale = 0.74 + 0.26 * near
+        img = _label_img(_wheel_label(kind, offset), int(round(near * 8)))
+        w = max(1, int(img.get_width() * scale))
+        h = max(1, int(img.get_height() * scale * max(0.10, facing)))
+        shown = pygame.transform.smoothscale(img, (w, h))
+        shown.set_alpha(int(255 * facing ** 2.4))
+        surface.blit(shown, shown.get_rect(center=(cx, int(cy + cyl * math.sin(theta)))))
+
+
+def _draw_dock(surface, layout: dict, accent) -> None:
+    radius = theme.VISIBLE_RADIUS
+    dock = layout["dock"]
+    corner = int(radius * 0.08)
+    _blit_shadow(surface, dock, corner, 100)
+    surface.blit(_glass(dock.width, dock.height, corner), dock.topleft)
+    sound, snooze, vol = layout["sound"], layout["snooze"], layout["volume_cell"]
+    for cell in (sound, snooze):
+        pygame.draw.line(
+            surface, (62, 72, 66),
+            (cell.right, dock.top + int(radius * 0.05)),
+            (cell.right, dock.bottom - int(radius * 0.05)),
+        )
+    tracking = max(1, int(radius * 0.008))
+    icon_px = int(radius * 0.062)
+    cap_y = dock.top + int(radius * 0.066)
+    soft = _mix(accent, (255, 255, 255), 0.25)
+    for cell, name, text in (
+        (sound, "note", tr("alarm.sound")),
+        (snooze, "zzz", tr("alarm.snooze")),
+        (vol, "speaker", tr("alarm.volume")),
+    ):
+        icon = _icon(name, icon_px, soft)
+        room = cell.width - 2 * layout["pad_c"] - icon_px - int(radius * 0.02)
+        for frac in (0.040, 0.037, 0.034, 0.031, 0.028, 0.025, 0.022):
+            cap = _caption(text.upper(), _TXT3, tracking, frac)
+            if cap.get_width() <= room:
+                break
+        total = icon_px + int(radius * 0.02) + cap.get_width()
+        left = cell.centerx - total // 2
+        surface.blit(icon, icon.get_rect(midleft=(left, cap_y)))
+        surface.blit(cap, cap.get_rect(midleft=(left + icon_px + int(radius * 0.02), cap_y)))
+    row_y = dock.top + int(radius * 0.18)
+    pad = layout["pad_c"]
+
+    # Sound: Tones | LoFi.
+    choices = (("tones", tr("alarm.sound.tones")), ("lofi", tr("alarm.sound.lofi")))
+    inner = sound.width - 2 * pad
+    seg_h = int(radius * 0.105)
+    for frac in (.054, .050, .046, .042, .038, .034, .030, .026):
+        font = _font(frac, bold=True)
+        widths = [font.size(label)[0] + int(radius * 0.06) for _k, label in choices]
+        if sum(widths) <= inner:
+            break
+    scale = inner / max(1, sum(widths))
+    if scale > 1.0:
+        scale = 1.0
+    widths = [int(w * scale) for w in widths]
+    total = sum(widths)
+    seg = pygame.Rect(0, 0, total, seg_h)
+    seg.center = (sound.centerx, row_y + int(radius * 0.01))
+    surface.blit(_glass(seg.width, seg.height, seg.height // 2, tint=14, stroke=40, sheen=14), seg.topleft)
     selected = str(_draft.get("sound") or "tones")
-    left = control.left
-    for (key, text), seg_w in zip(choices, widths):
-        seg = pygame.Rect(left, control.top, seg_w, seg_h)
-        left += seg_w
+    x = seg.left
+    for (key, label), w in zip(choices, widths):
+        cell_rect = pygame.Rect(x, seg.top, w, seg.height)
+        x += w
         on = key == selected
         if on:
-            pygame.draw.rect(surface, theme.SWEEP, seg, border_radius=radius)
-        img = font.render(text, True, (16, 18, 20) if on else theme.MUTED)
-        surface.blit(img, img.get_rect(center=seg.center))
-        # No vertical padding: the Alarm switch's touch target sits just below.
-        _hit("sound", key, seg)
-    pygame.draw.rect(surface, _CARD_BORDER, control, width=1, border_radius=radius)
+            pill = cell_rect.inflate(-int(radius * 0.016), -int(radius * 0.016))
+            surface.blit(
+                _aa(("pill", accent), pill.width, pill.height,
+                    lambda big, ss: pygame.draw.rect(big, accent, big.get_rect(), border_radius=big.get_height() // 2)),
+                pill.topleft,
+            )
+        img = font.render(label, True, _DARK if on else _TXT2)
+        surface.blit(img, img.get_rect(center=cell_rect.center))
+        _hit("sound", key, cell_rect)
+
+    # Snooze: round minus / plus either side of the value.
+    d = int(radius * 0.095)
+    value = tr("alarm.snooze_value", minutes=int(_draft["snooze"]))
+    vfont = _font(.054, bold=True)
+    for frac in (.054, .050, .046, .042, .038, .034, .030):
+        vfont = _font(frac, bold=True)
+        if vfont.size(value)[0] + 2 * d + 2 * int(radius * 0.015) <= snooze.width - 2 * pad:
+            break
+    for side, name in ((-1, "minus"), (1, "plus")):
+        c = (snooze.left + pad + d // 2, row_y) if side < 0 else (snooze.right - pad - d // 2, row_y)
+        btn = pygame.Rect(0, 0, d, d)
+        btn.center = c
+        surface.blit(_glass(d, d, d // 2, tint=18, stroke=44, sheen=18), btn.topleft)
+        icon = _icon(name, int(d * 0.62), _TXT)
+        surface.blit(icon, icon.get_rect(center=btn.center))
+        _hit("snooze_dec" if side < 0 else "snooze_inc", "", btn.inflate(int(radius * 0.05), int(radius * 0.05)))
+    img = vfont.render(value, True, _TXT)
+    surface.blit(img, img.get_rect(center=(snooze.centerx, row_y)))
+
+    # Volume: percentage over a draggable bar.
+    track = layout["volume"]
+    level = max(0, min(100, int(_draft["volume"])))
+    pct = _font(.058, bold=True).render(f"{level}%", True, _TXT)
+    surface.blit(pct, pct.get_rect(center=(vol.centerx, row_y)))
+    pygame.draw.rect(surface, (60, 68, 64), track, border_radius=track.height // 2)
+    fill = track.copy()
+    fill.width = max(track.height, int(track.width * level / 100))
+    pygame.draw.rect(surface, accent, fill, border_radius=track.height // 2)
+    knob_x = track.left + int(track.width * level / 100)
+    glow = pygame.Surface((track.height * 8, track.height * 8), pygame.SRCALPHA)
+    pygame.draw.circle(glow, (*accent, 70), glow.get_rect().center, track.height * 3)
+    surface.blit(_blur(glow, 4), glow.get_rect(center=(knob_x, track.centery)))
+    pygame.draw.circle(surface, _TXT, (knob_x, track.centery), int(radius * 0.022))
+    _hit("volume", "", track.inflate(0, int(radius * 0.13)))
 
 
 def _control_at(x: int, y: int) -> tuple[str, str] | None:
@@ -491,45 +822,6 @@ def _control_at(x: int, y: int) -> tuple[str, str] | None:
         if rect.collidepoint(x, y):
             return action, value
     return None
-
-
-def _draw_column(surface, kind: str, rect: pygame.Rect, wheel: pygame.Rect, row_h: int, font) -> None:
-    """One column of settings-style chips, shifted by the live scroll offset."""
-    scroll_px = float(_col_px.get(kind, 0.0))
-    offsets = _ampm_rows() if kind == "ampm" else range(-3, 4)
-    card_h = max(theme.s(18), row_h - theme.s(4))
-    card_w = max(theme.s(28), rect.width - theme.s(6))
-    nearest = None
-    nearest_dist = 10**9
-    placed: list[tuple[int, str, pygame.Rect]] = []
-    for offset in offsets:
-        label = _wheel_label(kind, offset)
-        cy = wheel.centery + offset * row_h + scroll_px
-        card = pygame.Rect(0, 0, card_w, card_h)
-        card.center = (rect.centerx, int(cy))
-        if card.bottom < wheel.top or card.top > wheel.bottom:
-            continue
-        dist = abs(card.centery - wheel.centery)
-        placed.append((dist, label, card))
-        if dist < nearest_dist:
-            nearest_dist = dist
-            nearest = card
-    for _dist, label, card in placed:
-        focused = card is nearest
-        radius = card.height // 2
-        fill = _CARD_FILL_FOCUS if focused else _CARD_FILL
-        border = theme.GRID if focused else _CARD_BORDER
-        pygame.draw.rect(surface, fill, card, border_radius=radius)
-        pygame.draw.rect(
-            surface,
-            border,
-            card,
-            width=max(1, theme.s(2)) if focused else 1,
-            border_radius=radius,
-        )
-        color = theme.LABEL if focused else theme.MUTED
-        img = font.render(label, True, color)
-        surface.blit(img, img.get_rect(center=card.center))
 
 
 def editor_drag(x: int, y: int, travel: float) -> bool:
@@ -587,6 +879,22 @@ def _set_volume_at(x: int) -> None:
     span = max(1, track.width)
     volume = int(round((x - track.left) / span * 100))
     _draft["volume"] = max(0, min(100, volume))
+
+
+def editor_swipe_up(start: tuple[int, int] | None = None) -> bool:
+    """An upward swipe dismisses the editor like Cancel, without saving.
+
+    A drag that begins on the wheel or the volume bar belongs to that control,
+    so it never dismisses. Returns True when the editor was closed.
+    """
+    if not _editor:
+        return False
+    if start is not None:
+        hit = _control_at(int(start[0]), int(start[1]))
+        if hit is not None and hit[0] in ("wheel", "volume"):
+            return False
+    close_editor()
+    return True
 
 
 def editor_tap(x: int, y: int) -> str:
@@ -669,25 +977,6 @@ def draw_ringing(surface) -> None:
     _ring_hits = [("stop", stop_rect), ("snooze", snooze_rect)]
 
 
-def _pill_width(label: str, font) -> int:
-    return font.size(label)[0] + theme.s(22)
-
-
-def _draw_pill_anchored(
-    surface, label, font, anchor, fill, text_color, *, to_right: bool
-) -> pygame.Rect:
-    img = font.render(label, True, text_color)
-    rect = img.get_rect()
-    rect.inflate_ip(theme.s(22), theme.s(12))
-    if to_right:
-        rect.midleft = anchor
-    else:
-        rect.midright = anchor
-    pygame.draw.rect(surface, fill, rect, border_radius=rect.height // 2)
-    surface.blit(img, img.get_rect(center=rect.center))
-    return rect
-
-
 def _draw_pill(surface, rect, label, font, fill, text_color) -> None:
     pygame.draw.rect(surface, fill, rect, border_radius=rect.height // 2)
     img = font.render(label, True, text_color)
@@ -695,7 +984,12 @@ def _draw_pill(surface, rect, label, font, fill, text_color) -> None:
 
 
 def reset_for_tests() -> None:
-    global _editor, _icon_rect
+    global _editor, _icon_rect, _layout_cache, _layout_key
+    _aa_cache.clear()
+    _label_cache.clear()
+    _header_cache.clear()
+    _layout_cache = None
+    _layout_key = None
     _editor = False
     _icon_rect = pygame.Rect(0, 0, 0, 0)
     _hits.clear()

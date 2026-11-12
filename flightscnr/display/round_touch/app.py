@@ -5788,6 +5788,16 @@ class RoundTouchDisplay:
                 alarm_ui.editor_drag_end()
 
         gesture = self.input.consume_gesture()
+        if (
+            gesture
+            and gesture[0] == "swipe"
+            and gesture[1] == input_handler.SWIPE_UP
+            and not alarm_clock.is_ringing()
+            and alarm_ui.editor_swipe_up(gesture[3] if len(gesture) > 3 else None)
+        ):
+            self._note_activity()
+            self._safe_draw()
+            return
         if not gesture or gesture[0] != "tap":
             return
         pos = gesture[1]
