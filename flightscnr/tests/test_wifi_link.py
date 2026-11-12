@@ -95,6 +95,12 @@ class TestLinkUpCache(unittest.TestCase):
         w._link_up_cache = False
         w._link_up_cache_at = 0.0
         w._link_probe_state = ""
+        # Never read the host's real /sys/class/net/wlan0: on a Pi it would let
+        # probe_link() serve a cached "up" and skip the mocked probe.
+        w.invalidate_link_probe()
+        patcher = mock.patch.object(w, "_wlan_sysfs_signature", return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_unknown_keeps_last_good_true(self) -> None:
         with mock.patch.object(w, "ethernet_up", return_value=False):
