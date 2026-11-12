@@ -1014,6 +1014,8 @@
   "iss.near_city": "nr {name}",
   "iss.crew.title": "IN SPACE",
   "iss.crew.empty": "Crew list unavailable",
+  "iss.crew.person": "persoon",
+  "iss.crew.people": "personen",
   "iss.region.antarctica": "Antarctica",
   "iss.region.australia": "Australia",
   "iss.region.south_america": "S. America",

@@ -1014,6 +1014,8 @@
   "iss.near_city": "{name} közelében",
   "iss.crew.title": "AZ ŰRBEN",
   "iss.crew.empty": "Az űrhajósok listája nem érhető el",
+  "iss.crew.person": "fő",
+  "iss.crew.people": "fő",
   "iss.region.antarctica": "Antarktisz",
   "iss.region.australia": "Ausztrália",
   "iss.region.south_america": "Dél-Amerika",
