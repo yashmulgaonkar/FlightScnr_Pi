@@ -1078,6 +1078,7 @@
   "alarm.volume": "Hangerő",
   "alarm.snooze": "Szundi",
   "alarm.snooze_value": "{minutes} perc",
+  "alarm.rings_in": "{when} múlva szól",
   "alarm.enabled": "Ébresztő",
   "alarm.sound": "Hang",
   "alarm.sound.tones": "Hangjelzés",

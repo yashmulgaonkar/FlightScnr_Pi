@@ -1078,6 +1078,7 @@
   "alarm.volume": "Volume",
   "alarm.snooze": "Rappel",
   "alarm.snooze_value": "{minutes} min",
+  "alarm.rings_in": "Sonne dans {when}",
   "alarm.enabled": "Alarme",
   "alarm.sound": "Son",
   "alarm.sound.tones": "Sonneries",

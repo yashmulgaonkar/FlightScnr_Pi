@@ -325,21 +325,26 @@ class EditorSoundTests(unittest.TestCase):
                 dist = ((x - theme.CENTER_X) ** 2 + (y - theme.CENTER_Y) ** 2) ** 0.5
                 self.assertLess(dist, radius, f"{action} corner {(x, y)} outside the panel")
 
-    def test_segments_clear_the_label_in_every_language(self):
-        from display.round_touch import draw, theme
-        from i18n import catalog, tr
+    def test_segments_sit_inside_the_sound_cell_in_every_language(self):
+        from display.round_touch import theme
+        from i18n import catalog
 
-        font = draw.load_font(theme.s(13), bold=True)
         try:
             for locale in ("en", "de", "es", "fr", "hu", "nl"):
                 catalog.activate(locale)
                 self.ui.open_editor()
                 self.ui.draw_editor(self.pygame.Surface((theme.SIZE, theme.SIZE)))
-                row = self.ui._layout()["sound"]
+                cell = self.ui._layout()["sound"]
                 segments = [rect for action, _v, rect in self.ui._hits if action == "sound"]
-                label_right = row.left + font.size(tr("alarm.sound"))[0]
-                self.assertGreater(min(rect.left for rect in segments), label_right, locale)
-                self.assertLessEqual(max(rect.right for rect in segments), row.right, locale)
+                self.assertEqual(len(segments), 2, locale)
+                self.assertGreaterEqual(min(rect.left for rect in segments), cell.left, locale)
+                self.assertLessEqual(max(rect.right for rect in segments), cell.right, locale)
+                # Below the SOUND caption row, never on top of it.
+                self.assertGreater(
+                    min(rect.top for rect in segments),
+                    cell.top + int(theme.VISIBLE_RADIUS * 0.08),
+                    locale,
+                )
         finally:
             catalog.activate("en")
 
