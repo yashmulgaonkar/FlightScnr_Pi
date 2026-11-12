@@ -32,7 +32,6 @@ from utilities import iss as iss_feed
 VALUE_WHITE = (255, 255, 255)
 LABEL_MUTED = (132, 146, 160)
 RULE_DIM = (70, 80, 92)
-OVER_PINK = (252, 129, 208)
 AGE_AMBER = (247, 220, 84)
 
 
@@ -948,20 +947,36 @@ def _tiangong_craft(craft: str) -> bool:
     return "shenzhou" in name or "tiangong" in name
 
 
+# American crew vehicles: SpaceX Crew-N / Crew Dragon and Boeing Starliner.
+_US_CRAFT_WORDS = ("dragon", "crew-", "starliner")
+
+
+def _us_craft(craft: str) -> bool:
+    name = craft.lower()
+    return any(word in name for word in _US_CRAFT_WORDS)
+
+
+def _crew_rank(craft: str) -> int:
+    """American spacecraft first, other ISS crews next, Shenzhou and Tiangong last.
+
+    Judged by the vehicle, not the people aboard: Crew-13 carries a Russian
+    cosmonaut and Soyuz MS-29 carries an American.
+    """
+    if _us_craft(craft):
+        return 0
+    return 2 if _tiangong_craft(craft) else 1
+
+
 def _crew_groups() -> list[tuple[str, list[iss_feed.CrewMember]]]:
-    """ISS crews first, in feed order. Shenzhou and Tiangong stay last."""
+    """American spacecraft on top, then the other ISS crews in feed order, Tiangong last."""
     crew = iss_feed.crew_snapshot()
     if crew is None:
         return []
-    ordered = [member for member in crew.members if not _tiangong_craft(member.craft)]
-    ordered.extend(member for member in crew.members if _tiangong_craft(member.craft))
-    groups: list[tuple[str, list[iss_feed.CrewMember]]] = []
-    for member in ordered:
-        if not groups or groups[-1][0] != member.craft:
-            groups.append((member.craft, [member]))
-        else:
-            groups[-1][1].append(member)
-    return groups
+    by_craft: dict[str, list[iss_feed.CrewMember]] = {}
+    for member in crew.members:
+        by_craft.setdefault(member.craft, []).append(member)
+    # sorted() is stable, so feed order is kept inside each rank.
+    return sorted(by_craft.items(), key=lambda item: _crew_rank(item[0]))
 
 
 def _star(
@@ -1054,32 +1069,6 @@ def _paint_canada(surface: pygame.Surface) -> None:
     )
 
 
-_COUNTRY_ABBR = {
-    "us": "USA",
-    "ru": "RUS",
-    "cn": "CHN",
-    "ca": "CAN",
-    "jp": "JPN",
-    "de": "GER",
-    "fr": "FRA",
-    "it": "ITA",
-    "in": "IND",
-    "gb": "UK",
-    "uk": "UK",
-}
-
-
-def _country_abbr(member: iss_feed.CrewMember) -> str:
-    """Short country label. The flag already carries the full name."""
-    code = (member.flag_code or "").lower()
-    if code in _COUNTRY_ABBR:
-        return _COUNTRY_ABBR[code]
-    name = (member.country or "").strip()
-    if len(name) <= 6:
-        return name
-    return name[:3].upper()
-
-
 def _paint_flag(surface: pygame.Surface, code: str, rect: pygame.Rect) -> None:
     """Draw a small flag with its emblem, then fit it to the crew row."""
     code = (code or "").lower()
@@ -1130,69 +1119,16 @@ def _paint_flag(surface: pygame.Surface, code: str, rect: pygame.Rect) -> None:
     pygame.draw.rect(surface, (0, 0, 0), rect, 1)
 
 
-def _draw_member_row(
-    surface: pygame.Surface,
-    y: int,
-    member: iss_feed.CrewMember,
-    name_font: pygame.font.Font,
-    detail_font: pygame.font.Font,
-    now: float,
-) -> int:
-    """One person: name, flag, country, and days in space."""
-    row_h = max(name_font.get_height(), theme.s(16))
-    half = draw.circle_half_width_at_row(y, row_h)
-    avail = max(theme.s(80), half * 2 - theme.s(8))
-    gap = theme.s(4)
-    days = iss_feed.space_days(member, now)
-    day_text = f"{days}d" if days is not None else ""
-    flag_h = theme.s(17)
-    loaded_flag = flags.load_flag_surface(member.flag_code, flag_h) if member.flag_code else None
-    flag_w = loaded_flag.get_width() if loaded_flag is not None else (theme.s(26) if member.flag_code else 0)
-    day_w = detail_font.size(day_text)[0] if day_text else 0
-    fixed = flag_w + day_w
-    if member.flag_code:
-        fixed += gap
-    if day_text:
-        fixed += gap
-    country_label = _country_abbr(member)
-    if country_label:
-        fixed += gap
-    name_budget = max(theme.s(48), int(avail * 0.46))
-    country_budget = max(theme.s(24), avail - name_budget - fixed)
-    name = draw.fit_text(member.name, name_font, name_budget)
-    country = draw.fit_text(country_label, detail_font, country_budget) if country_label else ""
-    name_w = name_font.size(name)[0]
-    country_w = detail_font.size(country)[0] if country else 0
-    parts = [name_w]
-    if member.flag_code:
-        parts.append(flag_w)
-    if country:
-        parts.append(country_w)
-    if day_text:
-        parts.append(day_w)
-    total = sum(parts) + gap * (len(parts) - 1)
-    x = theme.CENTER_X - total // 2
-    mid = y + row_h // 2
-    _blit_outlined(surface, name_font, name, (x + name_w // 2, mid), VALUE_WHITE)
-    x += name_w + gap
-    if member.flag_code:
-        _paint_flag(
-            surface,
-            member.flag_code,
-            pygame.Rect(x, mid - flag_h // 2, flag_w, flag_h),
-        )
-        x += flag_w + gap
-    if country:
-        _blit_outlined(surface, detail_font, country, (x + country_w // 2, mid), VALUE_WHITE)
-        x += country_w + gap
-    if day_text:
-        _blit_outlined(surface, detail_font, day_text, (x + day_w // 2, mid), AGE_AMBER)
-    return y + row_h + theme.s(3)
+_NAME_SIZES = (15, 14, 13, 12)
+
+
+def _station_label(craft: str) -> str:
+    return "TIANGONG" if _tiangong_craft(craft) else "ISS"
 
 
 def _crew_viewport() -> tuple[int, int]:
-    """Vertical band for the crew list, from the bezel down to the side pills."""
-    title_font = draw.load_font(theme.s(18), bold=True)
+    """Vertical band for the crew list, from the bezel down to the radar pill."""
+    title_font = draw.load_font(theme.s(12), bold=True)
     title_h = title_font.get_height()
     title_w = title_font.size(tr("iss.crew.title"))[0] + theme.s(12)
     top = theme.CENTER_Y - theme.VISIBLE_RADIUS + theme.s(2)
@@ -1200,48 +1136,172 @@ def _crew_viewport() -> tuple[int, int]:
         if draw.circle_half_width_at_row(top, title_h) * 2 >= title_w:
             break
         top += 4
-    bottom = nav.content_bottom_y()
+    radar = _pill_rect("radar")
+    bottom = (radar.top - theme.s(6)) if radar is not None else nav.content_bottom_y()
+    return top, max(top + theme.s(48), bottom)
+
+
+def _crew_column() -> tuple[int, int]:
+    """One left and right edge for every row, clear of the pin and astronaut pills."""
+    half = int(theme.VISIBLE_RADIUS * 0.58)
     for kind in ("pin", "astronaut"):
         pill = _pill_rect(kind)
-        if pill is not None:
-            bottom = min(bottom, pill.top - theme.s(6))
-    return top, max(top + theme.s(48), bottom)
+        if pill is None:
+            continue
+        if kind == "pin":
+            half = min(half, theme.CENTER_X - (pill.right + theme.s(4)))
+        else:
+            half = min(half, (pill.left - theme.s(4)) - theme.CENTER_X)
+    half = max(theme.s(60), half)
+    return theme.CENTER_X - half, theme.CENTER_X + half
+
+
+def _crew_rows_top(left: int, right: int) -> int:
+    """First y where the dial is wide enough for a full crew row."""
+    need = (right - left) + theme.s(12)
+    y = theme.CENTER_Y - theme.VISIBLE_RADIUS + theme.s(2)
+    for _ in range(200):
+        if draw.circle_half_width_at_row(y, theme.s(4)) * 2 >= need:
+            return y
+        y += 4
+    return theme.CENTER_Y
+
+
+def _fit_name(name: str, budget: int) -> tuple[str, pygame.font.Font]:
+    """Largest font that shows the whole name, else the smallest with an ellipsis."""
+    for size in _NAME_SIZES:
+        font = draw.load_font(theme.s(size))
+        if font.size(name)[0] <= budget:
+            return name, font
+    font = draw.load_font(theme.s(_NAME_SIZES[-1]))
+    return draw.fit_text(name, font, max(1, budget)), font
+
+
+def _draw_member_row(
+    surface: pygame.Surface,
+    y: int,
+    member: iss_feed.CrewMember,
+    left: int,
+    right: int,
+    now: float,
+) -> int:
+    """One person: rectangular flag, name, and days in space on the right."""
+    row_h = theme.s(27)
+    mid = y + row_h // 2
+    flag_h = theme.s(16)
+    flag_w = theme.s(24)
+    gap = theme.s(8)
+    if member.flag_code:
+        _paint_flag(
+            surface, member.flag_code, pygame.Rect(left, mid - flag_h // 2, flag_w, flag_h)
+        )
+    days = iss_feed.space_days(member, now)
+    days_font = draw.load_font(theme.s(15), bold=True)
+    unit_font = draw.load_font(theme.s(10), bold=True)
+    days_w = 0
+    if days is not None:
+        number = days_font.render(str(days), True, VALUE_WHITE)
+        unit = unit_font.render("d", True, LABEL_MUTED)
+        days_w = number.get_width() + theme.s(2) + unit.get_width()
+        x = right - days_w
+        surface.blit(number, number.get_rect(midleft=(x, mid)))
+        surface.blit(unit, unit.get_rect(midleft=(x + number.get_width() + theme.s(2), mid + theme.s(2))))
+    name_left = left + flag_w + gap
+    budget = right - name_left - (days_w + gap if days_w else 0)
+    text, font = _fit_name(member.name, budget)
+    _blit_outlined(surface, font, text, (name_left + font.size(text)[0] // 2, mid), VALUE_WHITE)
+    return y + row_h
+
+
+def _draw_crew_header(surface: pygame.Surface, y: int, count: int) -> int:
+    """IN SPACE, then the head count as a large number."""
+    title_font = draw.load_font(theme.s(12), bold=True)
+    count_font = draw.load_font(theme.s(34), bold=True)
+    word_font = draw.load_font(theme.s(12))
+    title_h = title_font.get_height()
+    _blit_outlined(
+        surface, title_font, tr("iss.crew.title"), (theme.CENTER_X, y + title_h // 2), _accent()
+    )
+    y += title_h + theme.s(4)
+    number = count_font.render(str(count), True, VALUE_WHITE)
+    word = word_font.render(
+        tr("iss.crew.person" if count == 1 else "iss.crew.people"), True, LABEL_MUTED
+    )
+    gap = theme.s(6)
+    left = theme.CENTER_X - (number.get_width() + gap + word.get_width()) // 2
+    surface.blit(number, (left, y))
+    surface.blit(
+        word,
+        word.get_rect(
+            midleft=(left + number.get_width() + gap, y + number.get_height() - theme.s(14))
+        ),
+    )
+    return y + number.get_height() + theme.s(4)
+
+
+def _draw_crew_section(
+    surface: pygame.Surface, y: int, craft: str, left: int, right: int
+) -> int:
+    """Spacecraft name in the accent colour, its station on the right, then a rule."""
+    font = draw.load_font(theme.s(10), bold=True)
+    station = font.render(_station_label(craft), True, LABEL_MUTED)
+    name = draw.fit_text(
+        craft.upper(), font, max(1, right - left - station.get_width() - theme.s(10))
+    )
+    h = font.get_height()
+    _blit_outlined(surface, font, name, (left + font.size(name)[0] // 2, y + h // 2), _accent())
+    surface.blit(station, station.get_rect(midright=(right, y + h // 2)))
+    y += h + theme.s(3)
+    pygame.draw.line(surface, RULE_DIM, (left, y), (right, y), max(1, theme.s(1)))
+    return y + theme.s(4)
+
+
+def _fade_edge(surface: pygame.Surface, edge: int, height: int, *, top: bool) -> None:
+    """Fade rows out toward a hard edge: the radar pill below, the wide part of the dial above."""
+    layer = pygame.Surface((surface.get_width(), height), pygame.SRCALPHA)
+    for row in range(height):
+        alpha = int(255 * (1 - row / height)) if top else int(255 * row / height)
+        pygame.draw.line(layer, (0, 0, 0, alpha), (0, row), (surface.get_width(), row))
+    surface.blit(layer, (0, edge if top else edge - height))
 
 
 def _draw_crew(surface: pygame.Surface, scroll_offset: int, now: float) -> int:
     """Crew grouped by spacecraft. Returns how far the list can still scroll."""
-    title_font = draw.load_font(theme.s(18), bold=True)
-    craft_font = draw.load_font(theme.s(14), bold=True)
-    name_font = draw.load_font(theme.s(15))
-    detail_font = draw.load_font(theme.s(12))
     top, bottom = _crew_viewport()
     viewport = max(1, bottom - top)
+    left, right = _crew_column()
+    offset = max(0, int(scroll_offset))
     clip_prev = surface.get_clip()
     surface.set_clip(pygame.Rect(0, top, surface.get_width(), viewport))
-    y = top - max(0, int(scroll_offset))
-    y = draw.draw_center_line(
-        surface, tr("iss.crew.title"), y, title_font, _accent()
-    )
-    y += theme.s(4)
+    y = top - offset
     groups = _crew_groups()
     if not groups:
+        title_font = draw.load_font(theme.s(12), bold=True)
+        name_font = draw.load_font(theme.s(15))
+        y = draw.draw_center_line(surface, tr("iss.crew.title"), y, title_font, _accent())
         draw.draw_center_line(
-            surface, tr("iss.crew.empty"), y, name_font, VALUE_WHITE
+            surface, tr("iss.crew.empty"), y + theme.s(6), name_font, VALUE_WHITE
         )
         surface.set_clip(clip_prev)
         return 0
+    total = sum(len(members) for _craft, members in groups)
+    y = _draw_crew_header(surface, y, total)
+    # Rows are wider than the header, so they get clipped where the dial narrows.
+    rows_top = max(top, _crew_rows_top(left, right))
+    surface.set_clip(pygame.Rect(0, rows_top, surface.get_width(), bottom - rows_top))
     for craft, members in groups:
-        y = draw.draw_center_line(surface, craft, y, craft_font, OVER_PINK)
+        y = _draw_crew_section(surface, y, craft, left, right)
         for member in members:
-            y = _draw_member_row(surface, y, member, name_font, detail_font, now)
-        y += theme.s(6)
+            y = _draw_member_row(surface, y, member, left, right, now)
+        y += theme.s(10)
     surface.set_clip(clip_prev)
-    content_h = (y + max(0, int(scroll_offset))) - top
+    content_h = (y + offset) - top
     max_scroll = max(0, int(content_h) - viewport + theme.s(8))
+    if offset > 0:
+        _fade_edge(surface, rows_top, theme.s(24), top=True)
     if max_scroll > 0:
-        nav.draw_curved_scroll_arc(
-            surface, max(0, int(scroll_offset)), max_scroll, viewport_h=viewport
-        )
+        _fade_edge(surface, bottom, theme.s(26), top=False)
+        nav.draw_curved_scroll_arc(surface, offset, max_scroll, viewport_h=viewport)
     return max_scroll
 
 

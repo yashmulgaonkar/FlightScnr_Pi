@@ -112,20 +112,79 @@ class TestParsers(unittest.TestCase):
         self.assertEqual(crew.members[0], CrewMember("Ada Lovelace", "ISS"))
         self.assertEqual(crew.members[1].craft, "Tiangong")
 
-    def test_iss_crews_are_drawn_before_shenzhou(self):
+    def test_american_spacecraft_come_first_then_iss_then_shenzhou(self):
+        inject_crew_for_tests(
+            CrewSnapshot(
+                count=6,
+                members=(
+                    CrewMember("Zhu Yangzhu", "Shenzhou 23"),
+                    CrewMember("Pyotr Dubrov", "Soyuz MS-29"),
+                    CrewMember("Jessica Watkins", "Crew-13 Dragon"),
+                    CrewMember("Anna Kikina", "Soyuz MS-29"),
+                    CrewMember("Luke Delaney", "Crew-13 Dragon"),
+                    CrewMember("Butch Wilmore", "Starliner"),
+                ),
+                fetched_at=0.0,
+            )
+        )
+        groups = iss_screen._crew_groups()
+        self.assertEqual(
+            [craft for craft, _members in groups],
+            ["Crew-13 Dragon", "Starliner", "Soyuz MS-29", "Shenzhou 23"],
+        )
+        # A craft split across the feed still ends up as one group.
+        self.assertEqual(
+            [m.name for m in groups[0][1]], ["Jessica Watkins", "Luke Delaney"]
+        )
+
+    def test_next_crew_rotation_stays_on_top_without_a_code_change(self):
+        inject_crew_for_tests(
+            CrewSnapshot(
+                count=3,
+                members=(
+                    CrewMember("Pyotr Dubrov", "Soyuz MS-29"),
+                    CrewMember("Ada Lovelace", "Crew-14 Dragon"),
+                    CrewMember("Zhu Yangzhu", "Shenzhou 23"),
+                ),
+                fetched_at=0.0,
+            )
+        )
+        self.assertEqual(
+            [craft for craft, _members in iss_screen._crew_groups()],
+            ["Crew-14 Dragon", "Soyuz MS-29", "Shenzhou 23"],
+        )
+
+    def test_nationality_of_the_people_aboard_does_not_decide_the_order(self):
+        # An American on a Soyuz does not lift Soyuz above a Dragon with a cosmonaut.
+        inject_crew_for_tests(
+            CrewSnapshot(
+                count=2,
+                members=(
+                    CrewMember("Anil Menon", "Soyuz MS-29", country="USA", flag_code="us"),
+                    CrewMember("Sergey Teteryatnikov", "Crew-13 Dragon", country="Russia", flag_code="ru"),
+                ),
+                fetched_at=0.0,
+            )
+        )
+        self.assertEqual(
+            [craft for craft, _members in iss_screen._crew_groups()],
+            ["Crew-13 Dragon", "Soyuz MS-29"],
+        )
+
+    def test_without_an_american_craft_the_feed_order_is_kept(self):
         inject_crew_for_tests(
             CrewSnapshot(
                 count=3,
                 members=(
                     CrewMember("Zhu Yangzhu", "Shenzhou 23"),
                     CrewMember("Pyotr Dubrov", "Soyuz MS-29"),
-                    CrewMember("Jessica Watkins", "Crew-13 Dragon"),
+                    CrewMember("Ada Lovelace", "ISS"),
                 ),
                 fetched_at=0.0,
             )
         )
         crafts = [craft for craft, _members in iss_screen._crew_groups()]
-        self.assertEqual(crafts, ["Soyuz MS-29", "Crew-13 Dragon", "Shenzhou 23"])
+        self.assertEqual(crafts, ["Soyuz MS-29", "ISS", "Shenzhou 23"])
 
     def test_crew_keeps_country_flag_and_time_in_space(self):
         crew = parse_crew(
@@ -533,6 +592,111 @@ class TestDraw(unittest.TestCase):
             for x in range(0, theme.SIZE, 3):
                 if not rect.collidepoint(x, y):
                     self.assertEqual(with_glow.get_at((x, y)), without.get_at((x, y)))
+
+    def _ten_crew(self):
+        roster = [
+            ("Pyotr Dubrov", "Soyuz MS-29", "ru", 475),
+            ("Anna Kikina", "Soyuz MS-29", "ru", 277),
+            ("Anil Menon", "Soyuz MS-29", "us", 120),
+            ("Jessica Watkins", "Crew-13 Dragon", "us", 211),
+            ("Luke Delaney", "Crew-13 Dragon", "us", 41),
+            ("Joshua Kutryk", "Crew-13 Dragon", "ca", 41),
+            ("Sergey Teteryatnikov", "Crew-13 Dragon", "ru", 41),
+            ("Zhu Yangzhu", "Shenzhou 23", "cn", 321),
+            ("Zhang Zhiyuan", "Shenzhou 23", "cn", 171),
+            ("Lai Ka-ying", "Shenzhou 23", "cn", 171),
+        ]
+        members = tuple(
+            CrewMember(n, c, flag_code=f, days_in_space=0, launched=int(1_700_000_000 - d * 86400))
+            for n, c, f, d in roster
+        )
+        inject_crew_for_tests(
+            CrewSnapshot(count=len(members), members=members, fetched_at=1_700_000_000.0)
+        )
+
+    def test_crew_names_fit_the_column_without_ellipsis(self):
+        def check():
+            from display.round_touch import draw
+
+            left, right = iss_screen._crew_column()
+            days_w = (
+                draw.load_font(theme.s(15), bold=True).size("41")[0]
+                + theme.s(2)
+                + draw.load_font(theme.s(10), bold=True).size("d")[0]
+            )
+            budget = right - left - theme.s(24) - theme.s(8) - (days_w + theme.s(8))
+            for name in ("Sergey Teteryatnikov", "Jessica Watkins", "Lai Ka-ying"):
+                text, font = iss_screen._fit_name(name, budget)
+                self.assertEqual(text, name, f"{name!r} was shortened at {theme.SIZE}")
+                self.assertLessEqual(font.size(text)[0], budget)
+            text, font = iss_screen._fit_name("A" * 80, budget)
+            self.assertLessEqual(font.size(text)[0], budget)
+
+        for side in (720, 1080):
+            self._with_side(side, check)
+
+    def test_crew_list_stays_inside_the_dial_and_off_the_pills(self):
+        from display.round_touch import nav
+
+        def check():
+            self._ten_crew()
+            iss_screen.toggle_crew() if not iss_screen.show_crew() else None
+            surface = self._surface()
+            max_scroll = iss_screen.draw_iss(surface, now=1_700_000_000.0)
+            self.assertGreater(max_scroll, 0, "ten crew should need scrolling")
+            for offset in (0, max_scroll // 2, max_scroll):
+                surface = self._surface()
+                iss_screen.draw_iss(surface, now=1_700_000_000.0, scroll_offset=offset)
+                radius = theme.VISIBLE_RADIUS
+                for y in range(theme.SIZE):
+                    for x in range(0, theme.SIZE, 2):
+                        r, g, b, _a = surface.get_at((x, y))
+                        if r + g + b < 30:
+                            continue
+                        dx, dy = x - theme.CENTER_X, y - theme.CENTER_Y
+                        self.assertLessEqual(
+                            dx * dx + dy * dy,
+                            radius * radius + 4,
+                            f"ink outside the dial at {(x, y)} offset {offset} size {theme.SIZE}",
+                        )
+                footer_only = self._surface()
+                # Same order as draw_iss: the scroll arc first, the footer over it.
+                top, bottom = iss_screen._crew_viewport()
+                nav.draw_curved_scroll_arc(
+                    footer_only, offset, max_scroll, viewport_h=max(1, bottom - top)
+                )
+                nav.draw_curved_footer(
+                    footer_only,
+                    list(iss_screen.FOOTER_BUTTONS),
+                    pin_active=False,
+                    crew_open=True,
+                )
+                for kind in ("pin", "astronaut"):
+                    box = iss_screen._pill_rect(kind).clip(surface.get_rect())
+                    self.assertEqual(
+                        pygame.image.tostring(surface.subsurface(box), "RGB"),
+                        pygame.image.tostring(footer_only.subsurface(box), "RGB"),
+                        f"crew ink inside the {kind} pill at {theme.SIZE}, offset {offset}",
+                    )
+
+        for side in (720, 1080):
+            self._with_side(side, check)
+
+    def test_crew_header_counts_people_singular_and_plural(self):
+        one = CrewMember("Ada Lovelace", "ISS", flag_code="us", days_in_space=1, launched=0)
+        inject_crew_for_tests(CrewSnapshot(count=1, members=(one,), fetched_at=0.0))
+        iss_screen.toggle_crew() if not iss_screen.show_crew() else None
+        single = self._surface()
+        iss_screen.draw_iss(single, now=86400.0)
+        self._ten_crew()
+        many = self._surface()
+        iss_screen.draw_iss(many, now=1_700_000_000.0)
+        self.assertNotEqual(
+            pygame.image.tostring(single, "RGB"), pygame.image.tostring(many, "RGB")
+        )
+        from i18n import tr
+
+        self.assertNotEqual(tr("iss.crew.person"), tr("iss.crew.people"))
 
     def test_astronaut_pill_sits_right_of_the_radar(self):
         from display.round_touch import nav
