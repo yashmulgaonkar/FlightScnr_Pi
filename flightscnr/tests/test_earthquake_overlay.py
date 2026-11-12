@@ -233,7 +233,7 @@ class TestEarthquakeOverlay(unittest.TestCase):
         quake = {"id": "nc1", "lat": 37.5, "lon": -122.2}
         with mock.patch.object(earthquake_overlay, "_cached_map_path", return_value=None):
             with mock.patch.object(
-                earthquake_overlay, "_topo_export_map", return_value=None
+                earthquake_overlay, "_satellite_export_map", return_value=None
             ) as esri:
                 with mock.patch.object(
                     earthquake_overlay, "_carto_export_map", return_value="/tmp/nc1.png"
@@ -246,6 +246,94 @@ class TestEarthquakeOverlay(unittest.TestCase):
         esri.assert_called_once()
         carto.assert_called_once()
         shake.assert_not_called()
+
+    def test_satellite_export_asks_esri_world_imagery_and_caches_under_its_own_name(self):
+        import io
+        import tempfile
+
+        from PIL import Image
+
+        from display.round_touch import earthquake_overlay
+
+        buf = io.BytesIO()
+        Image.new("RGB", (480, 360), (120, 100, 70)).save(buf, format="PNG")
+        resp = mock.Mock()
+        resp.content = buf.getvalue()
+        resp.headers = {"content-type": "image/png"}
+        resp.raise_for_status = mock.Mock()
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(earthquake_overlay, "_maps_dir", return_value=tmp):
+                with mock.patch.object(earthquake_overlay, "_http_get", return_value=resp) as get:
+                    path = earthquake_overlay._satellite_export_map(41.6, -109.5, "us7000abcd")
+                self.assertEqual(get.call_args.args[0].split("/")[-3], "World_Imagery")
+                span = int(round(earthquake_overlay.MAP_SPAN_DEG * 1000))
+                self.assertTrue(path.endswith(f"us7000abcd_esri_sat_{span}.png"), path)
+                self.assertEqual(earthquake_overlay._cached_map_path("us7000abcd"), path)
+
+    def test_the_snapshot_is_centred_and_spans_map_span_deg(self):
+        from display.round_touch import earthquake_overlay as eo
+
+        west, south, east, north = eo.bbox_around(41.6, -109.5)
+        self.assertAlmostEqual(east - west, eo.MAP_SPAN_DEG, places=6)
+        self.assertAlmostEqual(north - south, eo.MAP_SPAN_DEG, places=6)
+        self.assertAlmostEqual((east + west) / 2, -109.5, places=6)
+        self.assertAlmostEqual((north + south) / 2, 41.6, places=6)
+
+    def test_a_snapshot_saved_at_another_zoom_is_not_reused(self):
+        import tempfile
+
+        from display.round_touch import earthquake_overlay as eo
+
+        other = int(round(eo.MAP_SPAN_DEG * 1000)) + 100
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.path.join(tmp, f"us1_esri_sat_{other}.png")
+            with open(old, "wb") as fh:
+                fh.write(b"\x89PNG" + b"\x00" * 400)
+            legacy = os.path.join(tmp, "us1_esri_sat.png")
+            with open(legacy, "wb") as fh:
+                fh.write(b"\x89PNG" + b"\x00" * 400)
+            with mock.patch.object(eo, "_maps_dir", return_value=tmp):
+                self.assertIsNone(eo._cached_map_path("us1"))
+
+    def test_an_old_pale_topo_cache_is_not_reused(self):
+        import tempfile
+
+        from display.round_touch import earthquake_overlay
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.path.join(tmp, "us7000abcd.png")
+            with open(old, "wb") as fh:
+                fh.write(b"\x89PNG" + b"\x00" * 400)
+            with mock.patch.object(earthquake_overlay, "_maps_dir", return_value=tmp):
+                self.assertIsNone(earthquake_overlay._cached_map_path("us7000abcd"))
+
+    def test_a_shakemap_fallback_is_cached_under_its_own_name_and_found_again(self):
+        import tempfile
+
+        from display.round_touch import earthquake_overlay
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(earthquake_overlay, "_maps_dir", return_value=tmp):
+                path = earthquake_overlay._write_map_file(
+                    "us7000abcd",
+                    b"\x89PNG" + b"\x00" * 400,
+                    basename=earthquake_overlay._shakemap_basename("us7000abcd"),
+                )
+                self.assertTrue(path.endswith("us7000abcd_shake.png"))
+                self.assertEqual(earthquake_overlay._cached_map_path("us7000abcd"), path)
+
+    def test_satellite_wins_over_a_cached_shakemap(self):
+        import tempfile
+
+        from display.round_touch import earthquake_overlay
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for stem in ("us1_shake", earthquake_overlay._satellite_basename("us1")):
+                with open(os.path.join(tmp, stem + ".png"), "wb") as fh:
+                    fh.write(b"\x89PNG" + b"\x00" * 400)
+            with mock.patch.object(earthquake_overlay, "_maps_dir", return_value=tmp):
+                span = int(round(earthquake_overlay.MAP_SPAN_DEG * 1000))
+                self.assertTrue(earthquake_overlay._cached_map_path("us1").endswith(f"_esri_sat_{span}.png"))
 
     def test_carto_export_map_uses_map_bg_tile_url(self):
         from display.round_touch import earthquake_overlay, map_bg

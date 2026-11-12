@@ -90,22 +90,23 @@ class TestFollowButton:
         assert rect is not None
         assert flight_detail.follow_button_hit(rect.centerx, rect.centery) is True
 
-    def test_follow_row_sits_below_text_rows(self, monkeypatch):
-        from display.round_touch.screens import common
+    def test_follow_row_sits_below_the_stats(self, monkeypatch):
+        from display.round_touch.screens import detail_style
 
-        rows_end = [0]
-        orig = common.draw_detail_rows
+        stats_end = [0]
+        orig = detail_style.draw_stats
 
         def tracking(*args, **kwargs):
             y = orig(*args, **kwargs)
-            rows_end[0] = y
+            stats_end[0] = y
             return y
 
-        monkeypatch.setattr(common, "draw_detail_rows", tracking)
+        monkeypatch.setattr(detail_style, "draw_stats", tracking)
         flight_detail.draw_flight_detail(_surface(), [_FULL_FLIGHT], 0)
         rect = flight_detail._follow_btn_rect
         assert rect is not None
-        assert rect.top >= rows_end[0]
+        assert stats_end[0] > 0
+        assert rect.top >= stats_end[0] - theme.s(8)
 
     def test_follow_button_scrolls_with_content(self):
         surface = _surface()

@@ -22,11 +22,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-def _tall_header(_surface, _flight, y, **_kwargs):
+def _tall_hero(_surface, _item, y, *_args, **_kwargs):
     return y + 400
 
 
-def _tall_icon(_surface, y):
+def _tall_style_hero(_surface, y, _band, **_kwargs):
     return y + 400
 
 
@@ -50,7 +50,7 @@ class DetailScrollTests(unittest.TestCase):
 
     def test_flight_overflow_draws_scrollbar(self):
         from display.round_touch import nav
-        from display.round_touch.screens import common, flight_detail
+        from display.round_touch.screens import flight_detail
 
         flight = {
             "callsign": "UAL123",
@@ -65,7 +65,7 @@ class DetailScrollTests(unittest.TestCase):
             "plane_longitude": -122.3,
             "photo_credit": "Photo credit line",
         }
-        with mock.patch.object(common, "draw_logo", side_effect=_tall_header):
+        with mock.patch.object(flight_detail, "_draw_flight_hero", side_effect=_tall_hero):
             with mock.patch.object(nav, "draw_curved_scroll_arc") as cue:
                 max_scroll = flight_detail.draw_flight_detail(
                     self._surface(), [flight], 0, 0
@@ -79,20 +79,17 @@ class DetailScrollTests(unittest.TestCase):
 
     def test_flight_fits_without_scrollbar(self):
         from display.round_touch import nav
-        from display.round_touch.screens import common, flight_detail
+        from display.round_touch.screens import flight_detail
 
         flight = {"callsign": "N123AB"}
-        with mock.patch.object(common, "draw_logo", side_effect=lambda s, f, y, **k: y):
-            with mock.patch.object(nav, "draw_curved_scroll_arc") as cue:
-                max_scroll = flight_detail.draw_flight_detail(
-                    self._surface(), [flight], 0, 0
-                )
+        with mock.patch.object(nav, "draw_curved_scroll_arc") as cue:
+            max_scroll = flight_detail.draw_flight_detail(self._surface(), [flight], 0, 0)
         self.assertEqual(max_scroll, 0)
         cue.assert_not_called()
 
     def test_tall_flight_scroll_includes_follow_row(self):
         from display.round_touch import nav
-        from display.round_touch.screens import common, flight_detail
+        from display.round_touch.screens import flight_detail
 
         flight = {
             "callsign": "UAL123",
@@ -106,7 +103,7 @@ class DetailScrollTests(unittest.TestCase):
             "plane_latitude": 37.6,
             "plane_longitude": -122.3,
         }
-        with mock.patch.object(common, "draw_logo", side_effect=_tall_header):
+        with mock.patch.object(flight_detail, "_draw_flight_hero", side_effect=_tall_hero):
             with mock.patch.object(nav, "draw_curved_scroll_arc"):
                 max_scroll = flight_detail.draw_flight_detail(
                     self._surface(), [flight], 0, 0
@@ -117,7 +114,7 @@ class DetailScrollTests(unittest.TestCase):
 
     def test_fire_overflow_draws_scrollbar(self):
         from display.round_touch import nav
-        from display.round_touch.screens import fire_detail
+        from display.round_touch.screens import detail_style, fire_detail
 
         fire = {
             "name": "Park Fire",
@@ -131,9 +128,7 @@ class DetailScrollTests(unittest.TestCase):
             "admin_unit": "CAL FIRE",
             "source": "calfire",
         }
-        with mock.patch.object(
-            fire_detail, "_draw_fire_icon_header", side_effect=_tall_icon
-        ):
+        with mock.patch.object(detail_style, "draw_hero", side_effect=_tall_style_hero):
             with mock.patch.object(nav, "draw_curved_scroll_arc") as cue:
                 max_scroll = fire_detail.draw_fire_detail(
                     self._surface(), [fire], 0, 0
@@ -143,7 +138,7 @@ class DetailScrollTests(unittest.TestCase):
 
     def test_quake_overflow_draws_scrollbar(self):
         from display.round_touch import nav
-        from display.round_touch.screens import earthquake_detail
+        from display.round_touch.screens import detail_style, earthquake_detail
 
         quake = {
             "mag": 6.2,
@@ -159,9 +154,7 @@ class DetailScrollTests(unittest.TestCase):
             "mmi": 5.1,
             "status": "reviewed",
         }
-        with mock.patch.object(
-            earthquake_detail, "_draw_quake_icon_header", side_effect=_tall_icon
-        ):
+        with mock.patch.object(detail_style, "draw_hero", side_effect=_tall_style_hero):
             with mock.patch.object(nav, "draw_curved_scroll_arc") as cue:
                 max_scroll = earthquake_detail.draw_earthquake_detail(
                     self._surface(), [quake], 0, 0

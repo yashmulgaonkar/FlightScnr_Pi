@@ -164,5 +164,85 @@ class TestWfigsOverlay(unittest.TestCase):
                                 inv_f.assert_called_once()
 
 
+class FireSatelliteMapTests(unittest.TestCase):
+    """WFIGS wildfire maps are Esri satellite snapshots with the fire icon on them."""
+
+    def _png(self, color=(90, 110, 60)):
+        import io
+
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGB", (480, 360), color).save(buf, format="PNG")
+        return buf.getvalue()
+
+    def _fake_session(self, data):
+        resp = mock.Mock()
+        resp.content = data
+        resp.raise_for_status = mock.Mock()
+        session = mock.Mock()
+        session.get.return_value = resp
+        return session
+
+    def test_the_snapshot_comes_from_esri_world_imagery_not_topo(self):
+        from display.round_touch import wfigs_overlay
+
+        with tempfile.TemporaryDirectory() as tmp:
+            session = self._fake_session(self._png())
+            with mock.patch.object(wfigs_overlay, "_maps_dir", return_value=tmp), mock.patch.object(
+                wfigs_overlay, "_session", return_value=session
+            ):
+                path = wfigs_overlay._satellite_export_map(39.8, -121.6, "fire-1")
+            url = session.get.call_args.args[0]
+            self.assertIn("World_Imagery", url)
+            self.assertNotIn("Topo", url)
+            self.assertTrue(path and os.path.isfile(path), path)
+            params = session.get.call_args.kwargs["params"]
+            west, south, east, north = (float(v) for v in params["bbox"].split(","))
+            self.assertAlmostEqual((west + east) / 2, -121.6, places=6)
+            self.assertAlmostEqual((south + north) / 2, 39.8, places=6)
+
+    def test_the_fire_icon_is_drawn_on_the_incident(self):
+        from PIL import Image
+
+        from display.round_touch import wfigs_overlay
+
+        with tempfile.TemporaryDirectory() as tmp:
+            session = self._fake_session(self._png((90, 110, 60)))
+            with mock.patch.object(wfigs_overlay, "_maps_dir", return_value=tmp), mock.patch.object(
+                wfigs_overlay, "_session", return_value=session
+            ):
+                path = wfigs_overlay._satellite_export_map(39.8, -121.6, "fire-1")
+            image = Image.open(path).convert("RGB")
+            w, h = image.size
+            centre = [image.getpixel((w // 2 + dx, h // 2 + dy)) for dx in range(-14, 15, 2) for dy in range(-30, 6, 2)]
+            odd = [c for c in centre if abs(c[0] - 90) + abs(c[1] - 110) + abs(c[2] - 60) > 60]
+            self.assertGreater(len(odd), 8, "the flame icon should sit on the incident")
+            self.assertEqual(image.getpixel((8, 8)), (90, 110, 60), "the rest of the tile is untouched")
+
+    def test_a_failed_download_is_not_cached(self):
+        from display.round_touch import wfigs_overlay
+
+        session = mock.Mock()
+        session.get.side_effect = OSError("offline")
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(wfigs_overlay, "_maps_dir", return_value=tmp), mock.patch.object(
+                wfigs_overlay, "_session", return_value=session
+            ):
+                self.assertIsNone(wfigs_overlay._satellite_export_map(39.8, -121.6, "fire-1"))
+            self.assertEqual(os.listdir(tmp), [])
+
+    def test_fetch_map_for_fire_uses_the_satellite_snapshot_and_needs_coordinates(self):
+        from display.round_touch import wfigs_overlay
+
+        with mock.patch.object(wfigs_overlay, "_satellite_export_map", return_value="/tmp/sat.png") as sat:
+            self.assertEqual(
+                wfigs_overlay.fetch_map_for_fire({"id": "w-1", "lat": 39.8, "lon": -121.6}), "/tmp/sat.png"
+            )
+            sat.assert_called_once_with(39.8, -121.6, "w-1")
+            self.assertIsNone(wfigs_overlay.fetch_map_for_fire({"id": "w-2"}))
+            self.assertIsNone(wfigs_overlay.fetch_map_for_fire({"lat": 1.0, "lon": 2.0}))
+
+
 if __name__ == "__main__":
     unittest.main()
