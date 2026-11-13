@@ -2094,6 +2094,22 @@ class RoundTouchDisplay:
             earthquake_overlay.invalidate()
             if settings.show_earthquakes():
                 earthquake_overlay.request_refresh(force=True)
+        elif action == "cyclones":
+            from display.round_touch import cyclone_overlay
+
+            settings.toggle_show_cyclones()
+            cyclone_overlay.invalidate()
+            if settings.show_cyclones():
+                cyclone_overlay.request_refresh(force=True)
+            radar.invalidate_frame_layer()
+        elif action == "restricted_airspace":
+            from display.round_touch import airspace_overlay
+
+            settings.toggle_show_restricted_airspace()
+            airspace_overlay.invalidate()
+            if settings.show_restricted_airspace():
+                airspace_overlay.request_refresh(force=True)
+            radar.invalidate_frame_layer()
         elif action == "airport_centerlines":
             from display.round_touch import airport_overlay
 

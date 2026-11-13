@@ -433,6 +433,9 @@ _defaults = {
     "show_wildfires": False,
     "show_earthquakes": False,
     "earthquake_voice_enabled": False,
+    # NOAA NHC active cyclones; FAA prohibited/restricted airspace (US).
+    "show_cyclones": False,
+    "show_restricted_airspace": False,
     # OurAirports runway centerlines on dark/light maps (not VFR).
     "show_airport_centerlines": True,
     # airport.png pins for large/medium/small airports in range.
@@ -1455,6 +1458,8 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("show_wildfires"),
         state.get("show_earthquakes"),
         state.get("earthquake_voice_enabled"),
+        bool(state.get("show_cyclones")),
+        bool(state.get("show_restricted_airspace")),
         state.get("show_airport_centerlines"),
         state.get("show_airport_icons"),
         str(state.get("airport_icon_style") or "classic"),
@@ -2343,6 +2348,34 @@ def toggle_show_earthquakes():
 
 def set_show_earthquakes(enabled: bool):
     _state["show_earthquakes"] = bool(enabled)
+    _save(_state)
+
+
+def show_cyclones() -> bool:
+    return bool(_state.get("show_cyclones", False))
+
+
+def toggle_show_cyclones():
+    _state["show_cyclones"] = not show_cyclones()
+    _save(_state)
+
+
+def set_show_cyclones(enabled: bool):
+    _state["show_cyclones"] = bool(enabled)
+    _save(_state)
+
+
+def show_restricted_airspace() -> bool:
+    return bool(_state.get("show_restricted_airspace", False))
+
+
+def toggle_show_restricted_airspace():
+    _state["show_restricted_airspace"] = not show_restricted_airspace()
+    _save(_state)
+
+
+def set_show_restricted_airspace(enabled: bool):
+    _state["show_restricted_airspace"] = bool(enabled)
     _save(_state)
 
 

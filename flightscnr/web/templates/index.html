@@ -405,6 +405,16 @@
             </div>
             <p class="hint">Global M2.5+ epicenters from the <a href="https://earthquake.usgs.gov/" target="_blank" rel="noopener">USGS</a> catalog (no API key), last 24 hours — same default window as the USGS live map. PAGER impact alerts and tsunami bulletins show on the detail page. Tap a marker for magnitude, depth, and place. Refreshes every minute and on recenter. Voice alerts are under Display, screens &amp; volume (device: Settings → HUD &amp; Volume).</p>
             <div class="chk">
+                <label for="show_cyclones">Show cyclones</label>
+                <span class="switch"><input id="show_cyclones" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">Active hurricanes and tropical storms from the NOAA National Hurricane Center (nhc.noaa.gov, no API key). Atlantic and eastern/central Pacific only. Storms inside the radar show their name, category and 24-hour motion; storms beyond the edge get a pointer with the distance. Informational only — follow official advisories. Refreshes every 15 minutes.</p>
+            <div class="chk">
+                <label for="show_restricted_airspace">Show restricted airspace</label>
+                <span class="switch"><input id="show_restricted_airspace" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">FAA prohibited (red, P-) and restricted (orange, R-) airspace areas from the FAA special-use airspace dataset (no API key). United States only. Informational only — never use for navigation or flight planning; check current NOTAMs. Refreshes every few hours and on recenter or zoom.</p>
+            <div class="chk">
                 <label for="show_airport_centerlines">Show airport centerlines</label>
                 <span class="switch"><input id="show_airport_centerlines" type="checkbox"><span class="track"></span></span>
             </div>
@@ -1882,6 +1892,8 @@ async function loadAll() {
         $("show_precip").checked = r.show_precipitation !== false;
         if ($("show_wildfires")) $("show_wildfires").checked = !!r.show_wildfires;
         if ($("show_earthquakes")) $("show_earthquakes").checked = !!r.show_earthquakes;
+        if ($("show_cyclones")) $("show_cyclones").checked = !!r.show_cyclones;
+        if ($("show_restricted_airspace")) $("show_restricted_airspace").checked = !!r.show_restricted_airspace;
         if ($("show_airport_centerlines")) $("show_airport_centerlines").checked = !!r.show_airport_centerlines;
         if ($("show_airport_icons")) $("show_airport_icons").checked = !!r.show_airport_icons;
         if ($("airport_icon_style")) $("airport_icon_style").value = r.airport_icon_style || "classic";
@@ -2368,6 +2380,8 @@ async function saveRadar() {
                 show_precipitation: $("show_precip").checked,
                 show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
                 show_earthquakes: $("show_earthquakes") ? $("show_earthquakes").checked : false,
+                show_cyclones: $("show_cyclones") ? $("show_cyclones").checked : false,
+                show_restricted_airspace: $("show_restricted_airspace") ? $("show_restricted_airspace").checked : false,
                 show_airport_centerlines: $("show_airport_centerlines") ? $("show_airport_centerlines").checked : false,
                 show_airport_icons: $("show_airport_icons") ? $("show_airport_icons").checked : false,
                 airport_icon_style: $("airport_icon_style") ? $("airport_icon_style").value : "classic",
@@ -2676,6 +2690,8 @@ async function saveAndReloadSettings(statusId) {
                 show_precipitation: $("show_precip").checked,
                 show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
                 show_earthquakes: $("show_earthquakes") ? $("show_earthquakes").checked : false,
+                show_cyclones: $("show_cyclones") ? $("show_cyclones").checked : false,
+                show_restricted_airspace: $("show_restricted_airspace") ? $("show_restricted_airspace").checked : false,
                 show_airport_centerlines: $("show_airport_centerlines") ? $("show_airport_centerlines").checked : false,
                 show_airport_icons: $("show_airport_icons") ? $("show_airport_icons").checked : false,
                 airport_icon_style: $("airport_icon_style") ? $("airport_icon_style").value : "classic",
