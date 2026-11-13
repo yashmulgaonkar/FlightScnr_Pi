@@ -1647,6 +1647,8 @@ def radar_json():
             "show_wildfires": settings.show_wildfires(),
             "show_earthquakes": settings.show_earthquakes(),
             "earthquake_voice_enabled": settings.earthquake_voice_enabled(),
+            "show_cyclones": settings.show_cyclones(),
+            "show_restricted_airspace": settings.show_restricted_airspace(),
             "show_airport_centerlines": settings.show_airport_centerlines(),
             "show_airport_icons": settings.show_airport_icons(),
             "airport_icon_style": settings.airport_icon_style(),
@@ -1866,6 +1868,20 @@ def radar_save():
         earthquake_overlay.invalidate()
         if settings.show_earthquakes():
             earthquake_overlay.request_refresh(force=True)
+    if "show_cyclones" in data:
+        from display.round_touch import cyclone_overlay
+
+        settings.set_show_cyclones(bool(data.get("show_cyclones")))
+        cyclone_overlay.invalidate()
+        if settings.show_cyclones():
+            cyclone_overlay.request_refresh(force=True)
+    if "show_restricted_airspace" in data:
+        from display.round_touch import airspace_overlay
+
+        settings.set_show_restricted_airspace(bool(data.get("show_restricted_airspace")))
+        airspace_overlay.invalidate()
+        if settings.show_restricted_airspace():
+            airspace_overlay.request_refresh(force=True)
     if "earthquake_voice_enabled" in data:
         from display.round_touch import earthquake_overlay
 

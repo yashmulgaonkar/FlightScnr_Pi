@@ -156,6 +156,7 @@
                          "AP32","EAGL","SREY","GLST","SIRA","A5","CRUZ","GC1","P210","JAB4","LNC2",
                          "SHRK","TRIN","PNR4","TAMP","EVSS","PTS2","COY2","FK14","DHC1","SONX",
                          "NAVI","L5","TRF1","CHIP","dv20","DHC1","c140","FDCT","M600","PC6T","A210",
+                         "PA11",
                          "RV6", "RV7", "RV8", "RV9", "RV10", "RV12", "RV14","DA50","P28A","PC12","C180","COL4","P28B",
                          "ERCO","AT5T","TBM9","PA38","P28R","S22T","K100","CH7A","TB21","CC11"],
 
@@ -190,7 +191,7 @@
                           "A10", "AV8B", "T45", "T6","U2","B17"],
 
     "cargo": ["B74F", "B744F", "B748F", "B77F", "B772F", "B77LF",
-             "A30F", "A306F", "MD10F", "MD11F",
+             "A30F", "A306F", "MD10F", "MD11F","A3ST",
              "B762F", "B763F", "A332F","A400",
              "AN12", "AN22", "AN124", "AN225", "IL76"],
 

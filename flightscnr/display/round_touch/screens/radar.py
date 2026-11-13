@@ -30,6 +30,7 @@ from display.round_touch import (
     wildfire_overlay,
     earthquake_overlay,
 )
+from display.round_touch import airspace_overlay, cyclone_overlay
 from display.round_touch import alert_prefs, frame_debug
 from display.round_touch import vessel_declutter
 from i18n import tr
@@ -333,8 +334,10 @@ def _build_frame_layer(build: pygame.Surface, backdrop, flights, offset) -> bool
     _t0 = _t = time.perf_counter()
     build.blit(backdrop, (0, 0))
     _t = _rebuild_stage("2r_blit", _t)
+    airspace_overlay.draw_airspace(build, pan_offset=offset)
     wildfire_overlay.draw_fires(build, pan_offset=offset)
     earthquake_overlay.draw_quakes(build, pan_offset=offset)
+    cyclone_overlay.draw_cyclones(build, pan_offset=offset)
     _t = _rebuild_stage("2r_fires", _t)
     _building_icons = [] if live_icons_enabled() else None
     _building_labels = [] if live_icons_enabled() else None
@@ -582,6 +585,8 @@ def draw_radar(
     rainviewer_overlay.request_overlay()
     wildfire_overlay.request_refresh()
     earthquake_overlay.request_refresh()
+    airspace_overlay.request_refresh()
+    cyclone_overlay.request_refresh()
 
     if pan_mode:
         _draw_map_pan_overlay(
@@ -634,8 +639,10 @@ def draw_radar(
             bezel_applied = True
         else:
             airport_overlay.draw_airports(surface, pan_offset=offset)
+            airspace_overlay.draw_airspace(surface, pan_offset=offset)
             wildfire_overlay.draw_fires(surface, pan_offset=offset)
             earthquake_overlay.draw_quakes(surface, pan_offset=offset)
+            cyclone_overlay.draw_cyclones(surface, pan_offset=offset)
             _draw_flights(surface, flights)
             _draw_status(surface, flights)
             _draw_map_attribution(surface)
@@ -2676,6 +2683,9 @@ def _draw_map_attribution(surface):
     quake_text = earthquake_overlay.attribution_text()
     if quake_text:
         parts.append(quake_text)
+    for extra in (airspace_overlay.attribution_text(), cyclone_overlay.attribution_text()):
+        if extra:
+            parts.append(extra)
     if not parts:
         return
     text = " · ".join(parts)
