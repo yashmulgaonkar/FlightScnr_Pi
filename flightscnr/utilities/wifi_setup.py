@@ -971,6 +971,156 @@ def stop_setup_ap() -> None:
         _set_status("Setup hotspot stopped")
 
 
+# --- Automatic retry of saved Wi-Fi while the setup hotspot is up -----------
+#
+# A short router outage used to strand the device in hotspot mode until
+# someone tapped "Try saved Wi-Fi" or power-cycled it (#292). The scheduler
+# below decides *when* to retry; the display tick supplies the busy checks.
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
+
+
+def auto_retry_enabled() -> bool:
+    return os.environ.get("FLIGHTSCNR_WIFI_AUTO_RETRY", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def auto_recover_enabled() -> bool:
+    """Radio reload / NetworkManager restart as escalation after failed retries."""
+    return os.environ.get("FLIGHTSCNR_WIFI_AUTO_RECOVER", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+class SetupRetryScheduler:
+    """Backoff schedule for retrying saved Wi-Fi from setup-hotspot mode.
+
+    Pure bookkeeping (no I/O): ``poll`` returns the action to run now, or None.
+    Actions: ``retry`` (plain try-saved), ``radio`` (reload the Wi-Fi radio,
+    then retry) and ``nm`` (restart NetworkManager, then retry). Recovery
+    steps repeat every ``recover_every`` failures after their first trigger.
+    """
+
+    def __init__(
+        self,
+        base_s: float = 300.0,
+        *,
+        radio_after: int = 3,
+        nm_after: int = 5,
+        recover_every: int = 4,
+        recover: bool = True,
+    ) -> None:
+        base = max(1.0, float(base_s))
+        self.delays = (base, base * 2.0, base * 6.0)
+        self.radio_after = radio_after
+        self.nm_after = nm_after
+        self.recover_every = max(1, recover_every)
+        self.recover = recover
+        self.failures = 0
+        self.next_at = 0.0
+
+    def _delay(self) -> float:
+        return self.delays[min(self.failures, len(self.delays) - 1)]
+
+    def reset(self, now: float) -> None:
+        self.failures = 0
+        self.next_at = now + self.delays[0]
+
+    def note_attempt(self, now: float, *, ok: bool) -> None:
+        """Record a finished attempt (manual taps count as attempts too)."""
+        if ok:
+            self.failures = 0
+        else:
+            self.failures += 1
+        self.next_at = now + self._delay()
+
+    def defer(self, now: float) -> None:
+        """Push the next attempt out without counting a failure."""
+        self.next_at = now + self._delay()
+
+    def _action(self) -> str:
+        f = self.failures
+        if self.recover:
+            if f >= self.nm_after and (f - self.nm_after) % self.recover_every == 0:
+                return "nm"
+            if f >= self.radio_after and (f - self.radio_after) % self.recover_every == 0:
+                return "radio"
+        return "retry"
+
+    def poll(self, now: float, *, blocked=None, recheck_s: float = 60.0) -> str | None:
+        """Return the action due now. ``blocked`` is only called once due."""
+        if now < self.next_at:
+            return None
+        if blocked is not None and blocked():
+            self.next_at = now + recheck_s
+            return None
+        return self._action()
+
+
+def new_setup_retry_scheduler() -> SetupRetryScheduler:
+    return SetupRetryScheduler(
+        _env_float("FLIGHTSCNR_WIFI_RETRY_S", 300.0),
+        recover=auto_recover_enabled(),
+    )
+
+
+def hotspot_clients_present() -> bool:
+    """True when a station (phone) is associated with our setup AP."""
+    proc = _run(["iw", "dev", WLAN_IFACE, "station", "dump"], timeout=5.0)
+    if proc.returncode != 0:
+        return False
+    return any(
+        line.startswith("Station ") for line in (proc.stdout or "").splitlines()
+    )
+
+
+def reload_wifi_radio() -> None:
+    """Soft-cycle the Wi-Fi radio (rfkill via NetworkManager)."""
+    logger.warning("Wi-Fi recovery: reloading the radio")
+    invalidate_link_probe()
+    with _radio_lock():
+        _nmcli("radio", "wifi", "off", timeout=15.0)
+        time.sleep(2.0)
+        _nmcli("radio", "wifi", "on", timeout=15.0)
+        time.sleep(3.0)
+
+
+def restart_network_manager() -> None:
+    logger.warning("Wi-Fi recovery: restarting NetworkManager")
+    invalidate_link_probe()
+    with _radio_lock():
+        _run(["systemctl", "restart", "NetworkManager"], timeout=60.0)
+        time.sleep(5.0)
+
+
+def auto_retry_saved_wifi(action: str = "retry") -> tuple[bool, str]:
+    """Run one scheduled retry, optionally preceded by a radio recovery step."""
+    if action in ("radio", "nm"):
+        mark_client_join_busy("auto-recover")
+        try:
+            if action == "nm":
+                restart_network_manager()
+            else:
+                reload_wifi_radio()
+        except Exception:
+            logger.exception("Wi-Fi recovery step failed")
+        finally:
+            clear_client_join_busy()
+    return try_saved_wifi()
+
+
 def try_saved_wifi(*, timeout_s: float | None = None) -> tuple[bool, str]:
     """Leave the setup AP and let NetworkManager join a saved client profile.
 

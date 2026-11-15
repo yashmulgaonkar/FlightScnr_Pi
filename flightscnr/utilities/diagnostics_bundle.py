@@ -197,6 +197,58 @@ def _journal_text() -> tuple[str, str]:
     return text, "ok"
 
 
+# Network diagnostics (#292): the cause of a Wi-Fi drop was invisible without these.
+NETWORK_CMD_TIMEOUT_S = 8.0
+_NETWORK_COMMANDS: tuple[tuple[str, list[str]], ...] = (
+    (
+        "network/networkmanager-journal.txt",
+        ["journalctl", "-u", "NetworkManager", "-u", "wpa_supplicant",
+         "--since", "-24h", "-n", "1500", "--no-pager", "-o", "short-iso"],
+    ),
+    ("network/dmesg-brcm.txt", ["dmesg", "--time-format", "iso"]),
+    ("network/nmcli-device-status.txt", ["nmcli", "device", "status"]),
+    ("network/nmcli-connections.txt", ["nmcli", "-f", "NAME,TYPE,DEVICE,STATE", "connection", "show"]),
+    ("network/iw-link.txt", ["iw", "dev", "wlan0", "link"]),
+    ("network/rfkill.txt", ["rfkill", "list"]),
+)
+_NETWORK_FILTERS = {
+    "network/dmesg-brcm.txt": ("brcm", "wlan0", "cfg80211", "firmware"),
+}
+
+
+def _network_command_text(arcname: str, cmd: list[str]) -> str:
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=NETWORK_CMD_TIMEOUT_S,
+            check=False,
+        )
+    except FileNotFoundError:
+        return f"{cmd[0]} not found on this system.\n"
+    except subprocess.TimeoutExpired:
+        return f"{' '.join(cmd)} timed out after {NETWORK_CMD_TIMEOUT_S:.0f}s.\n"
+    except OSError as exc:
+        return f"{' '.join(cmd)} failed: {exc}\n"
+    text = proc.stdout or ""
+    needles = _NETWORK_FILTERS.get(arcname)
+    if needles:
+        lines = [ln for ln in text.splitlines() if any(n in ln.lower() for n in needles)]
+        text = "\n".join(lines[-400:]) + ("\n" if lines else "")
+    if proc.returncode != 0:
+        err = (proc.stderr or "").strip()
+        text = f"# exit {proc.returncode}: {err}\n{text}"
+    return text or "(no output)\n"
+
+
+def collect_network_diagnostics() -> dict[str, str]:
+    """Wi-Fi/NetworkManager state as {zip member name: text}."""
+    return {
+        name: _network_command_text(name, cmd) for name, cmd in _NETWORK_COMMANDS
+    }
+
+
 def _add_member(
     zf: zipfile.ZipFile,
     name: str,
@@ -252,6 +304,20 @@ def build_diagnostics_zip(*, data_dir: str | None = None) -> bytes:
             )
             if journal_status != "ok":
                 errors.append(f"journal.txt: {journal_status}")
+
+            # Wi-Fi / NetworkManager state
+            try:
+                for net_name, net_text in collect_network_diagnostics().items():
+                    _add_member(
+                        zf,
+                        net_name,
+                        net_text.encode("utf-8", errors="replace"),
+                        included=included,
+                        skipped=skipped,
+                        running_size=running_size,
+                    )
+            except Exception as exc:
+                errors.append(f"network: {exc}")
 
             # Rotating app logs
             log_path = app_logging.app_log_path(str(root))

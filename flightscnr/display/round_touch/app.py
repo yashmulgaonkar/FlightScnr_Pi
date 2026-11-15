@@ -275,6 +275,7 @@ class RoundTouchDisplay:
         self._last_wifi_setup_poll = 0.0
         self._wifi_setup_redraw = False
         self._wifi_try_saved_busy = False
+        self._wifi_retry = wifi_setup_util.new_setup_retry_scheduler()
         self._wifi_offline_since: float | None = None
         self._wifi_down_streak = 0
         self._last_wifi_link_poll = 0.0
@@ -576,6 +577,7 @@ class RoundTouchDisplay:
         self._wifi_offline_since = None
         self._wifi_down_streak = 0
         self._wifi_try_saved_busy = False
+        self._wifi_retry.reset(time.time())
         self.screen = SCREEN_WIFI_SETUP
         try:
             wifi_setup_util.clear_wifi_connected_flag()
@@ -616,6 +618,7 @@ class RoundTouchDisplay:
         self._wifi_setup_mode = False
         self._wifi_try_saved_busy = False
         self._wifi_ap_starting = False
+        self._wifi_retry.reset(time.time())
         self._wifi_offline_since = None
         self._wifi_down_streak = 0
         self._fatal_error = None
@@ -730,21 +733,32 @@ class RoundTouchDisplay:
         ):
             self._accept_safety_disclaimer(from_auto=True)
 
-    def _start_try_saved_wifi(self) -> None:
-        """Tear down the AP and retry saved client profiles (off the UI thread)."""
+    def _start_try_saved_wifi(self, action: str | None = None) -> None:
+        """Tear down the AP and retry saved client profiles (off the UI thread).
+
+        ``action`` is None for a manual tap, else the scheduler's ``retry`` /
+        ``radio`` / ``nm`` step.
+        """
         if self._wifi_try_saved_busy or self._wifi_ap_starting:
             return
         if not wifi_setup_util.saved_client_wifi_names():
+            self._wifi_retry.defer(time.time())
             return
         self._wifi_try_saved_busy = True
         self._wifi_setup_redraw = True
 
         def _worker():
+            ok = False
             try:
-                wifi_setup_util.try_saved_wifi()
+                if action is None:
+                    ok, _msg = wifi_setup_util.try_saved_wifi()
+                else:
+                    logger.info("Wi-Fi setup: automatic saved-network retry (%s)", action)
+                    ok, _msg = wifi_setup_util.auto_retry_saved_wifi(action)
             except Exception:
                 logger.exception("Try-saved Wi-Fi failed")
             finally:
+                self._wifi_retry.note_attempt(time.time(), ok=ok)
                 self._wifi_try_saved_busy = False
                 self._wifi_setup_redraw = True
 
@@ -854,6 +868,21 @@ class RoundTouchDisplay:
         if connected:
             self._leave_wifi_setup()
             return
+        if (
+            wifi_setup_util.auto_retry_enabled()
+            and not self._wifi_ap_starting
+            and not self._wifi_try_saved_busy
+        ):
+            action = self._wifi_retry.poll(
+                now,
+                blocked=lambda: (
+                    wifi_setup_util.client_join_busy()
+                    or wifi_setup_util.hotspot_clients_present()
+                ),
+            )
+            if action is not None:
+                self._start_try_saved_wifi(action)
+                return
         # Keep the radio in AP mode while the QR screen is up. try-saved used
         # to stop the hotspot and then time out without restoring it. Skip while
         # the portal is mid-join — otherwise we interrupt NM client activation.
