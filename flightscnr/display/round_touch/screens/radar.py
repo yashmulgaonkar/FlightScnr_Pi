@@ -13,6 +13,7 @@ import math
 import os
 import threading
 import time
+import weakref
 
 import pygame
 
@@ -32,6 +33,7 @@ from display.round_touch import (
 )
 from display.round_touch import airspace_overlay, cyclone_overlay
 from display.round_touch import alert_prefs, frame_debug
+from display.round_touch import radar_classic
 from display.round_touch import vessel_declutter
 from i18n import tr
 from utilities import aircraft_alert
@@ -125,6 +127,7 @@ def _init_sweep():
     _sweep_last_ms = time.time() * 1000
     _backdrop = None
     _backdrop_key = None
+    _beam_latch.reset()
     invalidate_frame_layer()
 
 
@@ -1430,6 +1433,48 @@ _label_state: dict = {}
 _live_frame_cache: dict[str, tuple] = {}
 _live_label_frame_cache: dict[str, tuple] = {}
 _live_frame_cursor = 0
+# Ids in the published live set, so a tap can tell "not painted yet" (classic
+# motion, waiting for its first pass) from "never a live icon".
+_live_ids: set = set()
+# Classic motion: which targets the sweep has reached (see radar_classic).
+_beam_latch = radar_classic.BeamLatch()
+# Classic motion: ``[(key, item), ...]`` for the targets holding their paint
+# this frame, in draw order (trail tips, halos, icons, tags). The present
+# path stamps these once and only touches the ones that change. None in the
+# other motions, where every target is drawn each frame.
+_held_frame: list | None = None
+# Trail tip of each held target as drawn at its last pass. The layer worker
+# moves the baked trail heads every few seconds; following them would redraw
+# every held tip between passes.
+_held_tips: dict = {}
+# Classic motion paint fade. Off with FLIGHTSCNR_CLASSIC_FADE=0.
+_CLASSIC_FADE = os.environ.get("FLIGHTSCNR_CLASSIC_FADE", "1").strip().lower() not in (
+    "0", "false", "off", "no",
+)
+# Dimmed copies of a sprite per fade level, kept while the sprite is alive.
+_fade_cache: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+# Targets that left the scope, still decaying: {id: (painted_at, [(kind, item), ...])}.
+# Filled by the layer worker when it prunes a target, drained by the display.
+_ghosts: dict = {}
+_classic_view = None
+# Classic motion: out-of-range rim targets as sprites, so the beam paints them
+# too. The layer worker renders one spec per target ({"id", "xy", "item"});
+# the display keeps what it last painted: {id: (item, painted_at, xy)}.
+_rim_building: list | None = None
+_live_rim_targets: list = []
+_rim_painted: dict = {}
+_RIM_KEY = "rim:"
+# A zoom or pan repaints every target over a few frames. The layer built in
+# that moment has no trails for them yet, so ask for another once they are
+# painted (time.time() of the repaint, or None).
+_classic_repaint_at: float | None = None
+_CLASSIC_REPAINT_SETTLE_S = 0.6
+# The trail-head table the held tips were last computed against.
+_held_tips_heads = None
+# Trail heads per layer generation. The display keeps presenting the old
+# layer for a few frames after a publish (the staged swap), and held tips must
+# match the trails actually on screen.
+_heads_by_gen: dict = {}
 # 4 ms: on a Pi 4 a refresh costs ~0.6 ms per target, so ~6 targets a frame and
 # each one every ~6 frames with 40 on screen. They move well under a pixel per
 # frame; at 6 ms the pass alone pushed busy frames past the 33 ms budget.
@@ -1439,22 +1484,40 @@ _LIVE_FRAME_BUDGET_S = 0.004
 def _set_pending_live_specs(icons, labels) -> None:
     global _live_pending
     if icons is None:
-        _live_pending = ([], [], {})
+        _live_pending = ([], [], {}, [])
     else:
-        _live_pending = (icons, labels, dict(_trail_heads_building))
+        _live_pending = (icons, labels, dict(_trail_heads_building), list(_rim_building or ()))
 
 
 def _publish_live_specs() -> None:
-    global _live_icons, _live_labels, _live_heads, _live_frame_cursor
+    global _live_icons, _live_labels, _live_heads, _live_frame_cursor, _live_ids
+    global _live_rim_targets
     if _live_pending is not None:
-        _live_icons, _live_labels, _live_heads = _live_pending
+        _live_icons, _live_labels, _live_heads = _live_pending[:3]
+        _heads_by_gen[_frame_layer_gen] = _live_heads
+        for gen in [g for g in _heads_by_gen.copy() if g < _frame_layer_gen - 3]:
+            _heads_by_gen.pop(gen, None)
+        _live_rim_targets = _live_pending[3] if len(_live_pending) > 3 else []
         keep = {st["id"] for st in _live_icons}
+        _live_ids = keep
+        ghosts = _CLASSIC_FADE and settings.classic_radar_enabled()
+        labels = _live_label_frame_cache.copy()
         for cache in (_live_frame_cache, _live_label_frame_cache):
             # The display thread can update/clear these while the layer worker
             # publishes. A shallow copy is atomic under the GIL and gives this
             # worker a stable set of keys to prune.
             for key in [key for key in cache.copy() if key not in keep]:
-                cache.pop(key, None)
+                gone = cache.pop(key, None)
+                if ghosts and cache is _live_frame_cache and gone is not None and len(gone) > 3:
+                    # Classic motion: the paint stays and decays (see _ghost_items).
+                    parts = []
+                    if gone[2] is not None:
+                        parts.append(("g", gone[2]))
+                    parts.append(("i", gone[1]))
+                    label = labels.get(key)
+                    if label is not None:
+                        parts.append(("l", tuple(label[1:4])))
+                    _ghosts[key] = (gone[3], parts)
         if _live_icons:
             _live_frame_cursor %= len(_live_icons)
         else:
@@ -1618,11 +1681,13 @@ def _clip_to_display(sprite, ix, iy):
     return clipped, ix, iy
 
 
-def _live_glow_sprite(flight, icon_color):
+def _live_glow_sprite(flight, icon_color, pulse_on: bool | None = None):
     """Halo disc that rides with a live icon, or None."""
     if not _blip_wants_glow(flight):
         return None
-    style = _halo_style(flight, icon_color, aircraft_alert.pulse_phase())
+    if pulse_on is None:
+        pulse_on = aircraft_alert.pulse_phase()
+    style = _halo_style(flight, icon_color, pulse_on)
     if style is None:
         return None
     color, alpha, blooming = style
@@ -1635,12 +1700,246 @@ def live_trail_connectors() -> list:
     return _live_connectors
 
 
+def _beam_bearing() -> float:
+    """Bearing of the beam as drawn, in the logical frame targets are placed in.
+
+    The fast present path draws the beam at ``sweep - rotation`` on the
+    display, while a logical point at bearing b lands at ``b + rotation``
+    (see rotation._map_display_point). On a rotated panel the two differ by
+    twice the rotation, so comparing targets with the raw sweep angle
+    repainted them half a turn away from the visible beam.
+    """
+    from display.round_touch import rotation
+
+    return (current_sweep_angle() - 2 * rotation.rotation_degrees()) % 360.0
+
+
+def _classic_due_ids(icons) -> list:
+    """Targets to repaint this frame in classic motion, live ones first."""
+    cx, cy = float(theme.CENTER_X), float(theme.CENTER_Y)
+    bearings = {}
+    live = []
+    for st in icons:
+        ident = st["id"]
+        cached = _live_frame_cache.get(ident)
+        # The painted position is what the beam visibly reaches. A target
+        # with no paint yet waits at its data position for its first pass.
+        x, y = cached[0] if cached is not None else st["xy"]
+        bearings[ident] = radar_classic.bearing_deg(x, y, cx, cy)
+        if st.get("live") or ident == _trail_selected_id:
+            live.append(ident)
+    for spec in _live_rim_targets:
+        painted = _rim_painted.get(spec["id"])
+        x, y = painted[2] if painted is not None else spec["xy"]
+        bearings[_RIM_KEY + spec["id"]] = radar_classic.bearing_deg(x, y, cx, cy)
+    global _classic_view, _classic_repaint_at
+    view = _trail_projection_key((theme.SIZE, theme.SIZE))
+    if view != _classic_view:
+        # Old paint belongs to the old zoom or pan.
+        _classic_view = view
+        _ghosts.clear()
+        _rim_painted.clear()
+        _classic_repaint_at = time.time()
+    elif (
+        _classic_repaint_at is not None
+        and time.time() - _classic_repaint_at >= _CLASSIC_REPAINT_SETTLE_S
+    ):
+        _classic_repaint_at = None
+        expire_frame_layer()
+    return _beam_latch.due(_beam_bearing(), view, bearings, live)
+
+
+def _rim_spec(ident: str, flight, x: int, y: int, color, rim_style: str, heli_icon_form: bool):
+    """One rim target drawn into its own sprite, as the layer would draw it."""
+    if rim_style == "dot":
+        r_blip = max(
+            2, int(round(theme.RIM_BLIP_RADIUS * settings.blip_size_pct() / 100.0))
+        )
+        reach = r_blip
+        glow_r = _alert_glow_radius(flight, compact=True, rim_dot_r=r_blip, blooming=True)
+    else:
+        r_blip = None
+        reach = theme.s(11) * 2
+        glow_r = _alert_glow_radius(flight, compact=True, blooming=True)
+    half = int(max(reach, glow_r if _blip_wants_glow(flight) else 0)) + 6
+    sprite = pygame.Surface((half * 2, half * 2), pygame.SRCALPHA)
+    # Painted at its bright phase: it holds until the next pass.
+    _paint_blip_glow(
+        sprite, half, half, flight, color,
+        compact=True, pulse_on=True, rim_dot_r=r_blip,
+    )
+    if rim_style == "dot":
+        blip_rgb = settings.blip_color() or color
+        alpha = int(255 * min(100, settings.blip_opacity()) / 100)
+        dot = pygame.Surface((r_blip * 2, r_blip * 2), pygame.SRCALPHA)
+        pygame.draw.circle(dot, (*blip_rgb[:3], alpha), (r_blip, r_blip), r_blip)
+        sprite.blit(dot, (half - r_blip, half - r_blip))
+    else:
+        aircraft.draw_plane_icon(
+            sprite, half, half,
+            geo.screen_heading(flight.get("heading") or 0),
+            color, compact=True, flight=flight,
+        )
+    box = sprite.get_bounding_rect()
+    if box.w <= 0 or box.h <= 0:
+        return None
+    cut = sprite.subsurface(box).copy()
+    cx = x - half + box.x + box.w // 2
+    cy = y - half + box.y + box.h // 2
+    return {"id": ident, "xy": (x, y), "item": _clip_to_display(cut, cx, cy)}
+
+
+def _classic_rim_items(now: float, due: set) -> list:
+    """Held items for the rim targets; ``due`` ones take their latest sprite."""
+    specs = _live_rim_targets
+    current = set()
+    for spec in specs:
+        ident = spec["id"]
+        current.add(ident)
+        if ident in due:
+            _rim_painted[ident] = (spec["item"], now, spec["xy"])
+    for ident in [key for key in _rim_painted if key not in current]:
+        # A target that came into range keeps its rim paint until the beam
+        # paints it as an in-range icon; otherwise it would blink out.
+        if ident in _live_ids and ident not in _live_frame_cache:
+            continue
+        _rim_painted.pop(ident, None)
+    out = []
+    for ident, (item, painted_at, _xy) in _rim_painted.items():
+        sprite, x, y = item
+        out.append(((("r", ident)), (_faded(sprite, _fade_level_at(painted_at, now)), x, y)))
+    return out
+
+
+def _faded(sprite: pygame.Surface, level: int, *, holds_floor: bool = True):
+    """``sprite`` dimmed to a fade level, or None once the paint is gone."""
+    if level <= 0:
+        return sprite
+    if holds_floor:
+        level = min(level, radar_classic.FADE_LEVELS - 1)
+    brightness = radar_classic.fade_brightness(level, holds_floor=holds_floor)
+    if brightness <= radar_classic.FADE_GONE:
+        return None
+    bucket = _fade_cache.get(sprite)
+    if bucket is None:
+        bucket = _fade_cache[sprite] = {}
+    dim = bucket.get(level)
+    if dim is None:
+        dim = sprite.copy()
+        dim.fill(
+            (255, 255, 255, int(round(255 * brightness))),
+            special_flags=pygame.BLEND_RGBA_MULT,
+        )
+        bucket[level] = dim
+    return dim
+
+
+def _fade_level_at(painted_at, now: float) -> int:
+    if not _CLASSIC_FADE or painted_at is None:
+        return 0
+    return radar_classic.fade_level(now - painted_at, theme.SWEEP_PERIOD_MS / 1000.0)
+
+
+def _ghost_items(now: float) -> list:
+    """Held items for targets that left the scope, dimmer each step until gone."""
+    out = []
+    for ident, (painted_at, parts) in _ghosts.copy().items():
+        level = _fade_level_at(painted_at, now)
+        if not _CLASSIC_FADE or ident in _live_frame_cache:
+            # Fade off: gone at once, as before. Painted again: the fresh
+            # return replaces the old paint.
+            _ghosts.pop(ident, None)
+            continue
+        items = []
+        for kind, (sprite, x, y) in parts:
+            dim = _faded(sprite, level, holds_floor=False)
+            if dim is not None:
+                items.append(((kind, ident), (dim, x, y)))
+        if not items:
+            _ghosts.pop(ident, None)
+            continue
+        out.extend(items)
+    return out
+
+
+def _split_rim_due(due: list) -> tuple[list, set]:
+    """Beam-latch ids split into in-range ids (order kept) and rim ids."""
+    inner = []
+    rim = set()
+    for ident in due:
+        if ident.startswith(_RIM_KEY):
+            rim.add(ident[len(_RIM_KEY):])
+        else:
+            inner.append(ident)
+    return inner, rim
+
+
+def _trail_tip(head, fx: float, fy: float):
+    """Line from a baked trail head to where its target is drawn, or None."""
+    if head is None:
+        return None
+    (bx, by), rgb, width = head
+    if math.hypot(fx - bx, fy - by) < 0.75:
+        return None
+    return (
+        float(bx), float(by), float(fx), float(fy),
+        (*tuple(rgb[:3]), _TRAIL_ALPHA),
+        int(max(1, width)),
+    )
+
+
+def live_held_frame_for(layer_gen) -> list | None:
+    """The held frame as it will look once layer ``layer_gen`` is on screen.
+
+    Same targets, with the trail tips worked out against that layer's trail
+    heads. The present path stamps this onto the next base while the old one
+    is still up, so the swap does not have to redraw every tip.
+    """
+    held = _held_frame
+    heads = _heads_by_gen.get(layer_gen)
+    if held is None or heads is None:
+        return held
+    cache = _live_frame_cache.copy()
+    tips = []
+    rest = []
+    for key, item in held:
+        if key[0] == "c":
+            continue
+        rest.append((key, item))
+        if key[0] == "i":
+            cached = cache.get(key[1])
+            if cached is not None:
+                tip = _trail_tip(heads.get(key[1]), cached[0][0], cached[0][1])
+                if tip is not None:
+                    tips.append((("c", key[1]), tip))
+    return tips + rest
+
+
+def live_held_frame() -> list | None:
+    """Held targets published by the latest ``live_icon_frame`` (classic motion)."""
+    return _held_frame
+
+
 def live_icon_frame(now: float | None = None) -> list:
-    """Per-frame ``[(sprite, x, y), ...]`` for icons then tags (logical coords)."""
-    global _phase_left, _live_connectors, _live_frame_cursor
+    """Per-frame ``[(sprite, x, y), ...]`` for icons then tags (logical coords).
+
+    In classic motion this is only the tracked and selected aircraft; the
+    rest are in ``live_held_frame``.
+    """
+    global _phase_left, _live_connectors, _live_frame_cursor, _held_frame
     _live_connectors = []
     icons = _live_icons
     if not icons:
+        now = time.time() if now is None else now
+        if settings.classic_radar_enabled():
+            rim_due = _split_rim_due(_classic_due_ids([]))[1]
+            _held_frame = _ghost_items(now) + _classic_rim_items(now, rim_due)
+            _beam_latch.painted([_RIM_KEY + ident for ident in rim_due])
+        else:
+            _held_frame = None
+            _ghosts.clear()
+            _rim_painted.clear()
+        _held_tips.clear()
         _label_hits.clear()
         _live_frame_cache.clear()
         _live_label_frame_cache.clear()
@@ -1655,16 +1954,23 @@ def live_icon_frame(now: float | None = None) -> list:
     by_id = {st["id"]: st for st in icons}
     index_by_id = {st["id"]: idx for idx, st in enumerate(icons)}
 
-    # New targets are prepared first. Existing targets advance in a round-robin
-    # bounded by wall time, spreading dense-scene work over frames.
-    update_ids = [st["id"] for st in icons if st["id"] not in _live_frame_cache]
-    seen = set(update_ids)
-    for offset in range(count):
-        st = icons[(_live_frame_cursor + offset) % count]
-        ident = st["id"]
-        if ident not in seen:
-            update_ids.append(ident)
-            seen.add(ident)
+    classic = settings.classic_radar_enabled()
+    if classic:
+        # Only what the sweep reached this frame, plus tracked and selected
+        # aircraft. Everything else keeps the sprite it was painted with.
+        update_ids, rim_due = _split_rim_due(_classic_due_ids(icons))
+    else:
+        # New targets are prepared first. Existing targets advance in a
+        # round-robin bounded by wall time, spreading dense-scene work over
+        # frames.
+        update_ids = [st["id"] for st in icons if st["id"] not in _live_frame_cache]
+        seen = set(update_ids)
+        for offset in range(count):
+            st = icons[(_live_frame_cursor + offset) % count]
+            ident = st["id"]
+            if ident not in seen:
+                update_ids.append(ident)
+                seen.add(ident)
 
     processed_ids = []
     # One set of projection constants for the whole pass: each target is
@@ -1691,7 +1997,12 @@ def live_icon_frame(now: float | None = None) -> list:
                 if hs is not None:
                     heading = hs
             st["color"] = _flight_icon_color(st["flight"], compact=False)
-            glow = _live_glow_sprite(st["flight"], st.get("color"))
+            # A classic repaint holds until the next pass, so paint the halo
+            # at its bright phase; a dim one would sit there a whole rotation.
+            glow = _live_glow_sprite(
+                st["flight"], st.get("color"),
+                True if classic and not (st.get("live") or ident == _trail_selected_id) else None,
+            )
             glow_item = (
                 _clip_to_display(glow, int(round(fx)), int(round(fy)))
                 if glow is not None
@@ -1706,11 +2017,15 @@ def live_icon_frame(now: float | None = None) -> list:
                 (float(fx), float(fy)),
                 _clip_to_display(sprite, ix, iy),
                 glow_item,
+                now,
             )
             processed_ids.append(ident)
             _live_frame_cursor = (index_by_id[ident] + 1) % count
     finally:
         map_bg.end_projection_batch()
+    if classic:
+        _beam_latch.painted(processed_ids)
+        _beam_latch.painted([_RIM_KEY + ident for ident in rim_due])
 
     # The layer-prewarm worker prunes this cache when it publishes a new target
     # set. Iterating the shared dict directly can raise "dictionary changed
@@ -1721,17 +2036,43 @@ def live_icon_frame(now: float | None = None) -> list:
         for ident, cached in frame_cache_snapshot.items()
         if ident in by_id
     }
+    # Classic motion: everything but the tracked and selected aircraft holds.
+    held = None
+    moving: set = set()
+    if classic:
+        held = {"c": [], "g": [], "i": [], "l": []}
+        moving = {
+            st["id"] for st in icons
+            if st.get("live") or st["id"] == _trail_selected_id
+        }
+    painted_now = set(processed_ids)
+    global _held_tips_heads
+    held_heads = _live_heads
+    if held is not None:
+        from display.round_touch import rotation
+
+        held_heads = _heads_by_gen.get(rotation.shown_layer_gen(), _live_heads)
+        if held_heads is not _held_tips_heads:
+            # New layer on screen: its trails now reach each painted position,
+            # so the old tips would draw over them. Work them out again.
+            _held_tips_heads = held_heads
+            _held_tips.clear()
+    for ident in [key for key in _held_tips if key not in live_pos or key in moving]:
+        _held_tips.pop(ident, None)
     for ident, (fx, fy) in live_pos.items():
-        head = _live_heads.get(ident)
-        if head is None:
+        holds = held is not None and ident not in moving
+        if holds and ident not in painted_now and ident in _held_tips:
+            tip = _held_tips[ident]
+            if tip is not None:
+                held["c"].append((("c", ident), tip))
             continue
-        (bx, by), rgb, width = head
-        if math.hypot(fx - bx, fy - by) >= 0.75:
-            _live_connectors.append((
-                float(bx), float(by), float(fx), float(fy),
-                (*tuple(rgb[:3]), _TRAIL_ALPHA),
-                int(max(1, width)),
-            ))
+        tip = _trail_tip((held_heads if holds else _live_heads).get(ident), fx, fy)
+        if holds:
+            _held_tips[ident] = tip
+            if tip is not None:
+                held["c"].append((("c", ident), tip))
+        elif tip is not None:
+            _live_connectors.append(tip)
 
     label_by_id = {lb["id"]: lb for lb in _live_labels}
     for ident in processed_ids:
@@ -1751,7 +2092,8 @@ def live_icon_frame(now: float | None = None) -> list:
 
     # A layer publish may replace a label sprite between that target's turns.
     # Refresh only those changed labels immediately; unchanged ones stay cheap.
-    for ident, lb in label_by_id.items():
+    # Classic motion holds a tag, like its icon, until the sweep comes round.
+    for ident, lb in (() if classic else label_by_id.items()):
         cached = _live_label_frame_cache.get(ident)
         vis = lb.get("vis")
         base = live_pos.get(ident)
@@ -1767,9 +2109,24 @@ def live_icon_frame(now: float | None = None) -> list:
 
     glows = []
     out = []
+    fade_levels: dict = {}
     for st in icons:
         cached = _live_frame_cache.get(st["id"])
         if cached is None:
+            continue
+        if held is not None and st["id"] not in moving:
+            level = _fade_level_at(cached[3] if len(cached) > 3 else None, now)
+            fade_levels[st["id"]] = level
+            if level <= 0:
+                if cached[2] is not None:
+                    held["g"].append((("g", st["id"]), cached[2]))
+                held["i"].append((("i", st["id"]), cached[1]))
+                continue
+            if cached[2] is not None:
+                sprite, x, y = cached[2]
+                held["g"].append((("g", st["id"]), (_faded(sprite, level), x, y)))
+            sprite, x, y = cached[1]
+            held["i"].append((("i", st["id"]), (_faded(sprite, level), x, y)))
             continue
         if cached[2] is not None:
             glows.append(cached[2])
@@ -1783,12 +2140,26 @@ def live_icon_frame(now: float | None = None) -> list:
         if cached is None:
             continue
         _vis_id, sprite, ix, iy = cached
-        out.append((sprite, ix, iy))
+        if held is not None and lb["id"] not in moving:
+            # The tag dims with its icon.
+            dim = _faded(sprite, fade_levels.get(lb["id"], 0))
+            held["l"].append((("l", lb["id"]), (dim, ix, iy)))
+        else:
+            out.append((sprite, ix, iy))
         _label_hits.append((
             lb["id"],
             pygame.Rect(ix - sprite.get_width() // 2, iy - sprite.get_height() // 2,
                         sprite.get_width(), sprite.get_height()),
         ))
+    if held is None:
+        _held_frame = None
+        _ghosts.clear()
+        _rim_painted.clear()
+    else:
+        _held_frame = (
+            held["c"] + _ghost_items(now) + _classic_rim_items(now, rim_due)
+            + held["g"] + held["i"] + held["l"]
+        )
     return out
 
 
@@ -1798,6 +2169,13 @@ def draw_live_icons(surface) -> None:
 
     frame = live_icon_frame()
     # Logical surface — present() rotates the whole frame afterwards.
+    # Classic motion: held targets first, the gliding ones on top.
+    held = _held_frame or ()
+    rotation._blit_live_connectors(
+        surface, (0, 0), 0, [item for key, item in held if key[0] == "c"]
+    )
+    for key, (sprite, x, y) in ((k, it) for k, it in held if k[0] != "c"):
+        surface.blit(sprite, (int(x) - sprite.get_width() // 2, int(y) - sprite.get_height() // 2))
     rotation._blit_live_connectors(surface, (0, 0), 0, _live_connectors)
     for sprite, x, y in frame:
         surface.blit(sprite, (int(x) - sprite.get_width() // 2, int(y) - sprite.get_height() // 2))
@@ -1851,6 +2229,7 @@ def _draw_trails(surface, items) -> None:
     project = lambda lat, lon: geo.lat_lon_to_screen(lat, lon)
     proj_key = _trail_projection_key(surface.get_size())
     drawn = set()
+    classic = live_icons_enabled() and settings.classic_radar_enabled()
     _trail_heads_building = {}
     for _, flight, (x, y) in items:
         if flight.get("kind") == "vessel":
@@ -1858,9 +2237,18 @@ def _draw_trails(surface, items) -> None:
         ident = position_smooth.identity_of(flight)
         if not ident:
             continue
-        if mode != "all" and not (ident == _trail_selected_id or _is_tracked(flight)):
+        moving = ident == _trail_selected_id or _is_tracked(flight)
+        if mode != "all" and not moving:
             continue
         drawn.add(ident)
+        if classic and not moving:
+            # The trail grows on the pass: it ends where the target is
+            # painted, not where the data has it now. No paint yet (new
+            # traffic waiting for the beam) means no trail yet either.
+            cached = _live_frame_cache.get(ident)
+            if cached is None:
+                continue
+            x, y = int(round(cached[0][0])), int(round(cached[0][1]))
         if overlay is None:
             overlay = _trail_overlay_surface(surface.get_size())
         flight_trails.draw_trail(
@@ -2208,6 +2596,9 @@ def _draw_flights(surface, flights, live=None, live_labels=None):
     highlighted_any = False
     heli_any = False
     heli_icon_form = settings.target_form("heli") == "icon"
+    classic_live = live is not None and settings.classic_radar_enabled()
+    global _rim_building
+    _rim_building = [] if classic_live else None
     map_bg.begin_projection_batch()
     try:
         rim_items: list[tuple[float, dict, tuple[int, int]]] = []
@@ -2254,8 +2645,20 @@ def _draw_flights(surface, flights, live=None, live_labels=None):
         _sub = frame_debug.mark("2r_f_rim")
         # Hoisted: one config read per pass, not one per rim target.
         rim_style = settings.rim_target_style()
+        from display.round_touch import position_smooth
+
         for _, flight, (x, y) in rim_items:
             color = _flight_icon_color(flight, compact=True)
+            if classic_live:
+                # Classic motion: a sprite the beam paints, not a baked blip.
+                ident = position_smooth.identity_of(flight)
+                spec = (
+                    _rim_spec(ident, flight, x, y, color, rim_style, heli_icon_form)
+                    if ident else None
+                )
+                if spec is not None:
+                    _rim_building.append(spec)
+                    continue
             if rim_style == "dot":
                 # Whole dot centred inside the rim; apply_round_bezel() crops
                 # the overhang, leaving a D flat against the display edge.
@@ -2320,6 +2723,8 @@ def _draw_flights(surface, flights, live=None, live_labels=None):
                     st["color"] = color
                     st["xy"] = (x, y)
                     st["heli"] = bool(is_heli)
+                    # Classic motion keeps the tracked aircraft gliding.
+                    st["live"] = classic_live and _is_tracked(flight)
                     live.append(st)
                     continue
             glow = _paint_blip_glow(
@@ -2711,6 +3116,29 @@ def _flight_screen_xy(flight) -> tuple[int, int] | None:
     return geo.beyond_ring_position(lat, lon)
 
 
+def _tap_xy(flight) -> tuple[int, int] | None:
+    """Where a tap finds this target: where it is painted.
+
+    Classic motion leaves a target at its last pass for up to a rotation, so
+    the data position can sit several pixels off the glyph. A target still
+    waiting for its first pass is not on screen and cannot be tapped.
+    """
+    if settings.classic_radar_enabled():
+        from display.round_touch import position_smooth
+
+        ident = position_smooth.identity_of(flight)
+        if ident:
+            cached = _live_frame_cache.get(ident)
+            if cached is not None:
+                return int(round(cached[0][0])), int(round(cached[0][1]))
+            rim = _rim_painted.get(ident)
+            if rim is not None:
+                return int(rim[2][0]), int(rim[2][1])
+            if ident in _live_ids:
+                return None
+    return _flight_screen_xy(flight)
+
+
 def pick_flight_at(flights, tap_x, tap_y, alt_x=None, alt_y=None):
     """Hit-test aircraft/vessel *icons* only — labels are not tappable.
 
@@ -2731,7 +3159,7 @@ def pick_flight_at(flights, tap_x, tap_y, alt_x=None, alt_y=None):
     for flight in _visible_flights(flights):
         if not aircraft_alert.is_shown_on_radar(flight):
             continue
-        pos = _flight_screen_xy(flight)
+        pos = _tap_xy(flight)
         if not pos:
             continue
         x, y = pos
@@ -2755,7 +3183,7 @@ def flights_near(flights, tap_x, tap_y, radius_px):
     for flight in _visible_flights(flights):
         if not aircraft_alert.is_shown_on_radar(flight):
             continue
-        pos = _flight_screen_xy(flight)
+        pos = _tap_xy(flight)
         if not pos:
             continue
         d2 = (pos[0] - tap_x) ** 2 + (pos[1] - tap_y) ** 2
