@@ -12,6 +12,7 @@ from flask import Flask, render_template, jsonify, send_from_directory, send_fil
 import json
 import os
 import sys
+import time
 from io import BytesIO
 
 # Ensure the parent directory is on sys.path so `config` and `utilities` resolve
@@ -1720,6 +1721,25 @@ def dump1090_live_status():
     out["aircraft_fresh"] = int(probe.get("aircraft_fresh") or 0)
     out["error"] = probe.get("error") or ""
     return jsonify(out)
+
+
+_MAP_REFETCH_MIN_GAP_S = 60.0
+_last_map_refetch = 0.0
+
+
+@app.post("/radar/refetch-map")
+def radar_refetch_map():
+    """Ask the display to delete the cached basemap and download it again."""
+    global _last_map_refetch
+    from display.round_touch import map_bg
+
+    now = time.time()
+    if now - _last_map_refetch < _MAP_REFETCH_MIN_GAP_S:
+        return jsonify({"ok": False, "code": "wait"}), 429
+    if not map_bg.request_refetch():
+        return jsonify({"ok": False, "code": "failed"}), 500
+    _last_map_refetch = now
+    return jsonify({"ok": True})
 
 
 @app.post("/radar")

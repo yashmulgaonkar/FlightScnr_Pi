@@ -318,6 +318,8 @@
                 <option value="satellite">Satellite: Esri</option>
             </select>
             <p class="hint" data-i18n="portal.radar.map_style.hint">Dark/Light/Voyager Carto need a free CARTO_BASEMAPS_API_KEY. Dark: Stadia and Light: Toner need a free STADIA_MAPS_API_KEY. OSM, Esri, Flat, and VFR need no key. VFR sectionals are public-domain FAA charts (US coverage). Nautical: Seamap is an Open Waters chart with depths and seamarks (no key). Not for navigation.</p>
+            <button class="btn btn-sm" id="btn-map-refetch" type="button" data-i18n="portal.radar.map_refetch.label">Re-download basemap</button>
+            <p class="hint" data-i18n="portal.radar.map_refetch.hint">Deletes this location's saved map images and downloads them again. Use it when the basemap is blank, patchy or out of date.</p>
             <label for="vfr_opacity">VFR map opacity <span id="vfr_opacity_label">45%</span></label>
             <input id="vfr_opacity" type="range" min="15" max="100" step="1" value="45">
             <div id="seamap-opacity-row" hidden>
@@ -4032,6 +4034,22 @@ if ($("btn-earthquake-voice-preview")) {
 if ($("vfr_opacity")) $("vfr_opacity").addEventListener("input", syncVfrOpacityLabel);
 if ($("seamap_opacity")) $("seamap_opacity").addEventListener("input", syncSeamapOpacityLabel);
 if ($("map_style")) $("map_style").addEventListener("change", syncSeamapOpacityRow);
+if ($("btn-map-refetch")) $("btn-map-refetch").addEventListener("click", async () => {
+    clearStatus("radar-status");
+    try {
+        const res = await fetch("/radar/refetch-map", { method: "POST", cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 429) {
+            showStatus("radar-status", i18nText("portal.radar.map_refetch.wait", "A basemap download was just requested. Wait a minute and try again."), true);
+        } else if (!res.ok || !data.ok) {
+            showStatus("radar-status", i18nText("portal.radar.map_refetch.failed", "Could not request the basemap download."), true);
+        } else {
+            showStatus("radar-status", i18nText("portal.radar.map_refetch.done", "Basemap download requested. The new map appears on the display in a few moments."));
+        }
+    } catch (err) {
+        showStatus("radar-status", i18nText("portal.radar.map_refetch.failed", "Could not request the basemap download."), true);
+    }
+});
 if ($("dist_units")) $("dist_units").addEventListener("change", onDistanceUnitsChanged);
 if ($("live_tracking_min_radius")) {
     $("live_tracking_min_radius").addEventListener("change", readFollowRadiusKmFromInputs);
