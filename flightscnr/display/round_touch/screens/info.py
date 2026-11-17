@@ -84,7 +84,7 @@ DISPLAY_ACTIONS = (
     "sweep",
     "tag_leaders",
     "color_by_altitude",
-    "smooth_motion",
+    "radar_motion",
     "rim_style",
     "units",
     "range",
@@ -259,6 +259,7 @@ LIST_PICKER_KINDS = frozenset(
         # Missing here meant the Display > Rim targets row opened a picker
         # with a title, a close button, and no choices in it.
         "rim_style",
+        "radar_motion",
         "idle_dim_after",
         "idle_dim_level",
         "idle_off_after",
@@ -279,6 +280,7 @@ _LIST_PICKER_TITLES = {
     "aircraft_tag": "settings.picker.aircraft_tag",
     "aircraft_tag_id": "settings.picker.aircraft_tag_id",
     "rim_style": "settings.picker.rim_style",
+    "radar_motion": "settings.picker.radar_motion",
     "min_height": "settings.picker.min_height",
     "max_height": "settings.picker.max_height",
     "aircraft_min_speed": "settings.picker.aircraft_min_speed",
@@ -592,6 +594,12 @@ def _build_settings_picker_items(kind: str) -> list[dict]:
             settings.RIM_TARGET_STYLES,
             settings.rim_target_style(),
             lambda style: tr(settings.RIM_TARGET_STYLE_LABELS.get(style, str(style))),
+        )
+    if kind == "radar_motion":
+        return _enum_picker_items(
+            settings.RADAR_MOTIONS,
+            settings.radar_motion_setting(),
+            lambda mode: tr(settings.RADAR_MOTION_LABELS.get(mode, str(mode))),
         )
     if kind == "min_height":
         return _enum_picker_items(
@@ -3109,7 +3117,7 @@ def _display_row_labels() -> list[str]:
             else tr("settings.row.tag_leaders_off")
         ),
         tr("settings.row.color_altitude"),
-        tr("settings.row.smooth_motion"),
+        tr("settings.row.radar_motion", value=settings.radar_motion_label()),
         tr("settings.row.rim_targets", value=settings.rim_target_style_label()),
         tr("settings.row.units", value=settings.unit_preset_label()),
         tr("settings.row.radar_range", value=settings.scale_label()),
@@ -3207,7 +3215,6 @@ _TOGGLE_ROW_STATE = {
     "sweep": settings.show_sweep_line,
     "tag_leaders": settings.show_tag_leaders,
     "color_by_altitude": settings.color_by_altitude,
-    "smooth_motion": settings.smooth_motion_setting,
     "radar_hud": settings.radar_hud_enabled,
     "background_texture": settings.background_texture,
     "zoom_buttons": settings.radar_zoom_buttons,

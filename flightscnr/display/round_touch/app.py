@@ -280,6 +280,7 @@ class RoundTouchDisplay:
         self._wifi_offline_since: float | None = None
         self._wifi_down_streak = 0
         self._last_wifi_link_poll = 0.0
+        self._last_map_refetch_poll = 0.0
         self._wifi_ap_starting = False
         self._last_clock_minute = -1
         self._flip_board_sampled_at = 0.0
@@ -786,6 +787,20 @@ class RoundTouchDisplay:
             self._enter_wifi_setup(reason="manual")
             self._safe_draw()
 
+    def _tick_map_refetch_request(self) -> None:
+        """Honor the portal's "Re-download basemap" request (cross-process)."""
+        now = time.time()
+        if now - self._last_map_refetch_poll < 2.0:
+            return
+        self._last_map_refetch_poll = now
+        try:
+            if not map_bg.consume_refetch_request():
+                return
+            map_bg.refetch_all()
+            radar.expire_frame_layer()
+        except Exception:
+            logger.exception("Basemap refetch request failed")
+
     def _tick_wifi_link(self) -> None:
         """If client Wi-Fi/ethernet stays down, reopen the setup hotspot after a grace."""
         if (
@@ -1053,6 +1068,7 @@ class RoundTouchDisplay:
                 live_icons = radar.live_icon_frame()
                 live_connectors = radar.live_trail_connectors()
                 live_rim = radar.live_rim_spec()
+                held = radar.live_held_frame()
                 if FRAME_DEBUG:
                     self._stage("4L_live_frame", time.perf_counter() - _t)
                 sweep_angle = radar.current_sweep_angle()
@@ -1068,6 +1084,8 @@ class RoundTouchDisplay:
                         live_icons=live_icons,
                         live_connectors=live_connectors,
                         live_rim=live_rim,
+                        held=held,
+                        held_for_gen=radar.live_held_frame_for,
                     )
                     self._stage("4_present", time.perf_counter() - _t)
                 else:
@@ -1081,6 +1099,8 @@ class RoundTouchDisplay:
                         live_icons=live_icons,
                         live_connectors=live_connectors,
                         live_rim=live_rim,
+                        held=held,
+                        held_for_gen=radar.live_held_frame_for,
                     )
                 return
 
@@ -2105,9 +2125,8 @@ class RoundTouchDisplay:
         elif action == "color_by_altitude":
             settings.toggle_color_by_altitude()
             radar.invalidate_frame_layer()
-        elif action == "smooth_motion":
-            settings.toggle_smooth_motion()
-            radar.invalidate_frame_layer()
+        elif action == "radar_motion":
+            self._open_atc_picker("radar_motion")
         elif action == "rim_style":
             self._open_atc_picker("rim_style")
         elif action == "precipitation":
@@ -2497,6 +2516,10 @@ class RoundTouchDisplay:
             return
         if kind == "rim_style":
             settings.set_rim_target_style(choice)
+            radar.invalidate_frame_layer()
+            return
+        if kind == "radar_motion":
+            settings.set_radar_motion(choice)
             radar.invalidate_frame_layer()
             return
         if kind == "min_height":
@@ -7284,6 +7307,7 @@ class RoundTouchDisplay:
                 # Re-open captive setup if known Wi-Fi stays down past the grace window.
                 self._tick_wifi_link()
                 self._tick_wifi_enter_request()
+                self._tick_map_refetch_request()
 
                 if self._fatal_error:
                     # Don't freeze forever during Wi-Fi setup if a draw glitch set fatal

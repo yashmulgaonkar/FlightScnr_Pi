@@ -12,6 +12,7 @@ from flask import Flask, render_template, jsonify, send_from_directory, send_fil
 import json
 import os
 import sys
+import time
 from io import BytesIO
 
 # Ensure the parent directory is on sys.path so `config` and `utilities` resolve
@@ -1661,6 +1662,7 @@ def radar_json():
             "tag_text_shadow": settings.tag_text_shadow(),
             "hud_tap_labels": settings.hud_tap_labels(),
             "smooth_motion": settings.smooth_motion_setting(),
+            "radar_motion": settings.radar_motion_setting(),
             "renderer": settings.renderer_setting(),
             "renderer_state": _renderer_state(),
             "rim_target_style": settings.rim_target_style(),
@@ -1740,6 +1742,25 @@ def dump1090_live_status():
     out["aircraft_fresh"] = int(probe.get("aircraft_fresh") or 0)
     out["error"] = probe.get("error") or ""
     return jsonify(out)
+
+
+_MAP_REFETCH_MIN_GAP_S = 60.0
+_last_map_refetch = 0.0
+
+
+@app.post("/radar/refetch-map")
+def radar_refetch_map():
+    """Ask the display to delete the cached basemap and download it again."""
+    global _last_map_refetch
+    from display.round_touch import map_bg
+
+    now = time.time()
+    if now - _last_map_refetch < _MAP_REFETCH_MIN_GAP_S:
+        return jsonify({"ok": False, "code": "wait"}), 429
+    if not map_bg.request_refetch():
+        return jsonify({"ok": False, "code": "failed"}), 500
+    _last_map_refetch = now
+    return jsonify({"ok": True})
 
 
 @app.post("/radar")
@@ -1862,7 +1883,10 @@ def radar_save():
         settings.set_show_sweep_line(bool(data.get("show_sweep_line")))
     if "hud_tap_labels" in data:
         settings.set_hud_tap_labels(bool(data.get("hud_tap_labels")))
-    if "smooth_motion" in data:
+    if "radar_motion" in data:
+        settings.set_radar_motion(str(data.get("radar_motion") or ""))
+    elif "smooth_motion" in data:
+        # Older portal pages and scripts still send the on/off switch.
         settings.set_smooth_motion(bool(data.get("smooth_motion")))
     if "renderer" in data:
         # Saved only on a change: saving also clears a failed GPU start, and
