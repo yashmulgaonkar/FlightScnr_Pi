@@ -116,6 +116,15 @@ RIM_TARGET_STYLE_LABELS = {
     "plane": "settings.opt.rim.plane",
     "dot": "settings.opt.rim.dot",
 }
+# How aircraft move on the radar. "standard" bakes icons into the layer and
+# steps them at each data update, "smooth" glides them every frame, "classic"
+# repaints each target only when the sweep passes its bearing.
+RADAR_MOTIONS = ("standard", "smooth", "classic")
+RADAR_MOTION_LABELS = {
+    "standard": "settings.opt.motion.standard",
+    "smooth": "settings.opt.motion.smooth",
+    "classic": "settings.opt.motion.classic",
+}
 # Follow speed-based zoom bounds (issue #114) — portal / settings.json.
 LIVE_TRACKING_PREVIEW_MINUTES_MIN = 1.0
 LIVE_TRACKING_PREVIEW_MINUTES_MAX = 30.0
@@ -1441,6 +1450,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("traffic_labels"),
         bool(state.get("hud_tap_labels", False)),
         bool(state.get("smooth_motion", False)),
+        str(state.get("radar_motion") or ""),
         str(state.get("rim_target_style") or "plane"),
         state.get("aircraft_tag_id"),
         _normalize_facing(state.get("facing_deg", 0)),
@@ -2935,22 +2945,65 @@ def _live_icons_env() -> bool | None:
     return None
 
 
+def radar_motion_setting() -> str:
+    """Saved aircraft motion: standard | smooth | classic.
+
+    Devices saved before the three-way choice only have the smooth_motion
+    switch, so that decides between standard and smooth.
+    """
+    raw = str(_state.get("radar_motion") or "").strip().lower()
+    if raw in RADAR_MOTIONS:
+        return raw
+    return "smooth" if _state.get("smooth_motion", False) else "standard"
+
+
+def radar_motion() -> str:
+    """Motion in effect. FLIGHTSCNR_LIVE_ICONS can still force per-frame icons on or off."""
+    mode = radar_motion_setting()
+    override = _live_icons_env()
+    if override is False:
+        return "standard"
+    if override is True and mode == "standard":
+        return "smooth"
+    return mode
+
+
+def radar_motion_label() -> str:
+    return tr(RADAR_MOTION_LABELS.get(radar_motion_setting(), "settings.opt.motion.standard"))
+
+
+def set_radar_motion(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    mode = raw if raw in RADAR_MOTIONS else "standard"
+    _state["radar_motion"] = mode
+    # Kept in step so older code reading the switch still gets per-frame icons.
+    _state["smooth_motion"] = mode != "standard"
+    _save(_state)
+    return radar_motion_setting()
+
+
+def classic_radar_enabled() -> bool:
+    """True when targets repaint on the sweep instead of every frame."""
+    return radar_motion() == "classic"
+
+
 def smooth_motion_setting() -> bool:
-    """Saved Smooth motion switch. The environment variable can still override it."""
-    return bool(_state.get("smooth_motion", False))
+    """True when the saved motion draws icons per frame (smooth or classic)."""
+    return radar_motion_setting() != "standard"
 
 
 def smooth_motion_enabled() -> bool:
     """True when aircraft icons are drawn every frame instead of baked in."""
-    override = _live_icons_env()
-    if override is not None:
-        return override
-    return smooth_motion_setting()
+    return radar_motion() != "standard"
 
 
 def set_smooth_motion(enabled: bool) -> bool:
-    _state["smooth_motion"] = bool(enabled)
-    _save(_state)
+    """Legacy on/off switch: on keeps classic if chosen, otherwise smooth."""
+    if enabled:
+        mode = radar_motion_setting()
+        set_radar_motion(mode if mode != "standard" else "smooth")
+    else:
+        set_radar_motion("standard")
     return smooth_motion_setting()
 
 

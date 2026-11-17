@@ -370,11 +370,13 @@
                 <span class="switch"><input id="tag_text_shadow" type="checkbox"><span class="track"></span></span>
             </div>
             <p class="hint" data-i18n="portal.radar.tag_text_shadow.hint">Thin drop shadow under the callsign, type and altitude text so tags stay readable over map roads, water and other tags. Light text gets a dark shadow; dark text on light maps gets a light one.</p>
-            <div class="chk">
-                <label for="smooth_motion" data-i18n="portal.radar.smooth_motion.label">Smooth aircraft motion</label>
-                <span class="switch"><input id="smooth_motion" type="checkbox"><span class="track"></span></span>
-            </div>
-            <p class="hint" data-i18n="portal.radar.smooth_motion.hint">Glide icons between radar updates instead of stepping them. Off keeps the usual baked icons. Fly smoothly in/out needs this on.</p>
+            <label for="radar_motion" data-i18n="portal.radar.motion.label">Aircraft motion</label>
+            <select id="radar_motion">
+                <option value="standard" data-i18n="portal.radar.motion.standard">Standard</option>
+                <option value="smooth" data-i18n="portal.radar.motion.smooth">Smooth</option>
+                <option value="classic" data-i18n="portal.radar.motion.classic">Classic radar</option>
+            </select>
+            <p class="hint" data-i18n="portal.radar.motion.hint">Standard steps icons at each data update. Smooth glides them every frame. Classic radar repaints each target only when the sweep passes it; tracked and selected aircraft still glide. Fly smoothly in/out needs Smooth or Classic radar.</p>
             <label for="rim_target_style">Out-of-range rim targets</label>
             <select id="rim_target_style">
                 <option value="glide" data-i18n="portal.radar.rim_targets.glide">Fly smoothly in/out (full symbol)</option>
@@ -1886,7 +1888,7 @@ async function loadAll() {
         if ($("show_tag_leaders")) $("show_tag_leaders").checked = r.show_tag_leaders !== false;
         if ($("tag_text_shadow")) $("tag_text_shadow").checked = r.tag_text_shadow !== false;
         if ($("hud_tap_labels")) $("hud_tap_labels").checked = !!r.hud_tap_labels;
-        if ($("smooth_motion")) $("smooth_motion").checked = !!r.smooth_motion;
+        if ($("radar_motion")) $("radar_motion").value = r.radar_motion || (r.smooth_motion ? "smooth" : "standard");
         if ($("rim_target_style")) $("rim_target_style").value = r.rim_target_style || "plane";
         syncTagLeadersControl();
         $("show_precip").checked = r.show_precipitation !== false;
@@ -2375,7 +2377,7 @@ async function saveRadar() {
                 show_tag_leaders: $("show_tag_leaders") ? $("show_tag_leaders").checked : true,
                 tag_text_shadow: $("tag_text_shadow") ? $("tag_text_shadow").checked : true,
                 hud_tap_labels: $("hud_tap_labels") ? $("hud_tap_labels").checked : false,
-                smooth_motion: $("smooth_motion") ? $("smooth_motion").checked : false,
+                radar_motion: $("radar_motion") ? $("radar_motion").value : "standard",
                 rim_target_style: $("rim_target_style") ? $("rim_target_style").value : "plane",
                 show_precipitation: $("show_precip").checked,
                 show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
@@ -2685,7 +2687,7 @@ async function saveAndReloadSettings(statusId) {
                 show_tag_leaders: $("show_tag_leaders") ? $("show_tag_leaders").checked : true,
                 tag_text_shadow: $("tag_text_shadow") ? $("tag_text_shadow").checked : true,
                 hud_tap_labels: $("hud_tap_labels") ? $("hud_tap_labels").checked : false,
-                smooth_motion: $("smooth_motion") ? $("smooth_motion").checked : false,
+                radar_motion: $("radar_motion") ? $("radar_motion").value : "standard",
                 rim_target_style: $("rim_target_style") ? $("rim_target_style").value : "plane",
                 show_precipitation: $("show_precip").checked,
                 show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,

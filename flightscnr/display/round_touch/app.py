@@ -1052,6 +1052,7 @@ class RoundTouchDisplay:
                 live_icons = radar.live_icon_frame()
                 live_connectors = radar.live_trail_connectors()
                 live_rim = radar.live_rim_spec()
+                held = radar.live_held_frame()
                 if FRAME_DEBUG:
                     self._stage("4L_live_frame", time.perf_counter() - _t)
                 sweep_angle = radar.current_sweep_angle()
@@ -1067,6 +1068,8 @@ class RoundTouchDisplay:
                         live_icons=live_icons,
                         live_connectors=live_connectors,
                         live_rim=live_rim,
+                        held=held,
+                        held_for_gen=radar.live_held_frame_for,
                     )
                     self._stage("4_present", time.perf_counter() - _t)
                 else:
@@ -1080,6 +1083,8 @@ class RoundTouchDisplay:
                         live_icons=live_icons,
                         live_connectors=live_connectors,
                         live_rim=live_rim,
+                        held=held,
+                        held_for_gen=radar.live_held_frame_for,
                     )
                 return
 
@@ -2104,9 +2109,8 @@ class RoundTouchDisplay:
         elif action == "color_by_altitude":
             settings.toggle_color_by_altitude()
             radar.invalidate_frame_layer()
-        elif action == "smooth_motion":
-            settings.toggle_smooth_motion()
-            radar.invalidate_frame_layer()
+        elif action == "radar_motion":
+            self._open_atc_picker("radar_motion")
         elif action == "rim_style":
             self._open_atc_picker("rim_style")
         elif action == "precipitation":
@@ -2496,6 +2500,10 @@ class RoundTouchDisplay:
             return
         if kind == "rim_style":
             settings.set_rim_target_style(choice)
+            radar.invalidate_frame_layer()
+            return
+        if kind == "radar_motion":
+            settings.set_radar_motion(choice)
             radar.invalidate_frame_layer()
             return
         if kind == "min_height":

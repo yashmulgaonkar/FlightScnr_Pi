@@ -1642,6 +1642,7 @@ def radar_json():
             "tag_text_shadow": settings.tag_text_shadow(),
             "hud_tap_labels": settings.hud_tap_labels(),
             "smooth_motion": settings.smooth_motion_setting(),
+            "radar_motion": settings.radar_motion_setting(),
             "rim_target_style": settings.rim_target_style(),
             "show_precipitation": settings.show_precipitation(),
             "show_wildfires": settings.show_wildfires(),
@@ -1841,7 +1842,10 @@ def radar_save():
         settings.set_show_sweep_line(bool(data.get("show_sweep_line")))
     if "hud_tap_labels" in data:
         settings.set_hud_tap_labels(bool(data.get("hud_tap_labels")))
-    if "smooth_motion" in data:
+    if "radar_motion" in data:
+        settings.set_radar_motion(str(data.get("radar_motion") or ""))
+    elif "smooth_motion" in data:
+        # Older portal pages and scripts still send the on/off switch.
         settings.set_smooth_motion(bool(data.get("smooth_motion")))
     if "show_tag_leaders" in data:
         settings.set_show_tag_leaders(bool(data.get("show_tag_leaders")))
