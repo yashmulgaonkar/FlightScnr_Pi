@@ -1095,7 +1095,7 @@
   "portal.radar.renderer.label": "Moteur de rendu",
   "portal.radar.renderer.cpu": "CPU (par défaut)",
   "portal.radar.renderer.gpu": "GPU (si l'appareil le permet)",
-  "portal.radar.renderer.hint": "GPU dessine le radar sur la puce graphique : moins de charge pour le processeur et plus de fluidité. Si l'appareil n'a pas de rendu accéléré, il revient au CPU de lui-même. Prend effet après le redémarrage de l'application (Système, Relancer l'application).",
+  "portal.radar.renderer.hint": "GPU dessine le radar sur la puce graphique : moins de charge pour le processeur, et le radar classique s'estompe en continu. Si l'appareil n'a pas de rendu accéléré, il revient au CPU de lui-même. Prend effet après le redémarrage de l'application (Système, Relancer l'application).",
   "portal.radar.renderer.failed": "Le GPU n'a pas pu démarrer, le rendu CPU est donc utilisé. Pour réessayer, choisissez CPU, enregistrez, puis choisissez GPU et enregistrez à nouveau.",
   "portal.radar.renderer.active": "Le rendu GPU est actif.",
   "settings.row.smooth_motion": "Mouvement fluide",

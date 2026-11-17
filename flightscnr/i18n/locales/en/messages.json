@@ -1095,7 +1095,7 @@
   "portal.radar.renderer.label": "Renderer",
   "portal.radar.renderer.cpu": "CPU (default)",
   "portal.radar.renderer.gpu": "GPU (if the device supports it)",
-  "portal.radar.renderer.hint": "GPU draws the radar on the graphics chip: lighter on the processor and smoother. If the device has no accelerated renderer it goes back to CPU by itself. Takes effect after the app relaunches (System, Relaunch app).",
+  "portal.radar.renderer.hint": "GPU draws the radar on the graphics chip: lighter on the processor, and Classic radar fades smoothly. If the device has no accelerated renderer it goes back to CPU by itself. Takes effect after the app relaunches (System, Relaunch app).",
   "portal.radar.renderer.failed": "GPU could not start, so the CPU renderer is in use. Choose CPU, save, then GPU and save again to retry.",
   "portal.radar.renderer.active": "GPU renderer is running.",
   "settings.row.smooth_motion": "Smooth motion",

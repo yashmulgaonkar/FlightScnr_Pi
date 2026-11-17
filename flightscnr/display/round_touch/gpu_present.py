@@ -15,7 +15,7 @@ frame with textures:
 - the static radar layer is one texture, uploaded when the layer rebuilds and
   rotated to the panel by the GPU;
 - every sprite (icons, halos, tags, rim targets) is a texture kept while its
-  surface is alive, drawn with a per-draw alpha, so fading one costs
+  surface is alive, drawn with a per-frame alpha, so a paint fade costs
   nothing;
 - trail tips are a stretched 1x1 texture, the sweep wedge is drawn once and
   rotated;
@@ -335,6 +335,7 @@ def present_radar_sweep(
     live_connectors: list | None = None,
     live_rim: tuple | None = None,
     held: list | None = None,
+    held_alpha: dict | None = None,
 ) -> bool:
     """Draw and present one radar frame. False when there is nothing to show yet."""
     from display.round_touch import rotation as rot
@@ -366,13 +367,14 @@ def present_radar_sweep(
     else:
         _base_tex.draw(dstrect=(origin_off[0], origin_off[1], side_w, side_h))
     # Held targets (classic motion), then the gliding ones, then the sweep,
-    # so the beam still passes over the targets. Held sprites arrive already
-    # dimmed by the radar screen, as on the CPU renderer.
-    for key, item in held or ():
-        if key[0] == "c":
-            _draw_line(ren, item, rotation, origin_off)
-        else:
-            _draw_sprite(ren, item, rotation, origin_off)
+    # so the beam still passes over the targets.
+    if held:
+        alphas = held_alpha or {}
+        for key, item in held:
+            if key[0] == "c":
+                _draw_line(ren, item, rotation, origin_off)
+            else:
+                _draw_sprite(ren, item, rotation, origin_off, alphas.get(key, 1.0))
     for item in live_connectors or ():
         _draw_line(ren, item, rotation, origin_off)
     for item in live_icons or ():
