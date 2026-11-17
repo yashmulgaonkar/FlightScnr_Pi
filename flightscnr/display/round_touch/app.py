@@ -68,6 +68,7 @@ from display.round_touch import (
 )
 from utilities import aircraft_alert
 from display.round_touch import alert_sounds
+from display.round_touch import gpu
 from i18n import tr
 from display.round_touch.screens import (
     analog_clock,
@@ -7319,7 +7320,7 @@ class RoundTouchDisplay:
                     radar.tick_sweep()
                     # Keep radar cadence even when the sweep beam is hidden so
                     # prewarmed aircraft layers present promptly.
-                    frame_ms = theme.SWEEP_FRAME_MS
+                    frame_ms = gpu.radar_frame_ms(theme.SWEEP_FRAME_MS)
                     # Stamp the schedule *before* drawing. Stamping after made the
                     # interval = draw_time + frame_ms (~35ms) and capped the sweep
                     # at ~28fps even when draws were cheap enough for ~50fps.
@@ -7495,9 +7496,10 @@ class RoundTouchDisplay:
                         if self.screen == SCREEN_RADAR
                         else self._last_static_draw
                     )
-                    requested = sweep_poll_sleep_s(
-                        last_draw, time.time(), theme.SWEEP_FRAME_MS / 1000.0
-                    )
+                    frame_s = theme.SWEEP_FRAME_MS / 1000.0
+                    if self.screen == SCREEN_RADAR:
+                        frame_s = gpu.radar_frame_ms(theme.SWEEP_FRAME_MS) / 1000.0
+                    requested = sweep_poll_sleep_s(last_draw, time.time(), frame_s)
                 elif ring_animating:
                     requested = _SWEEP_POLL_SLEEP_S
                 else:

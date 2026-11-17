@@ -375,6 +375,13 @@
                 <span class="switch"><input id="smooth_motion" type="checkbox"><span class="track"></span></span>
             </div>
             <p class="hint" data-i18n="portal.radar.smooth_motion.hint">Glide icons between radar updates instead of stepping them. Off keeps the usual baked icons. Fly smoothly in/out needs this on.</p>
+            <label for="renderer" data-i18n="portal.radar.renderer.label">Renderer</label>
+            <select id="renderer">
+                <option value="cpu" data-i18n="portal.radar.renderer.cpu">CPU (default)</option>
+                <option value="gpu" data-i18n="portal.radar.renderer.gpu">GPU (if the device supports it)</option>
+            </select>
+            <p class="hint" data-i18n="portal.radar.renderer.hint">GPU draws the radar on the graphics chip: lighter on the processor and smoother. If the device has no accelerated renderer it goes back to CPU by itself. Takes effect after the app relaunches (System, Relaunch app).</p>
+            <p class="hint" id="renderer_state" hidden></p>
             <label for="rim_target_style">Out-of-range rim targets</label>
             <select id="rim_target_style">
                 <option value="glide" data-i18n="portal.radar.rim_targets.glide">Fly smoothly in/out (full symbol)</option>
@@ -1887,6 +1894,18 @@ async function loadAll() {
         if ($("tag_text_shadow")) $("tag_text_shadow").checked = r.tag_text_shadow !== false;
         if ($("hud_tap_labels")) $("hud_tap_labels").checked = !!r.hud_tap_labels;
         if ($("smooth_motion")) $("smooth_motion").checked = !!r.smooth_motion;
+        if ($("renderer")) $("renderer").value = r.renderer === "gpu" ? "gpu" : "cpu";
+        if ($("renderer_state")) {
+            const rs = r.renderer_state || {};
+            let note = "";
+            if (r.renderer === "gpu" && rs.state === "failed") {
+                note = i18nText("portal.radar.renderer.failed", "GPU could not start, so the CPU renderer is in use. Choose CPU, save, then GPU and save again to retry.") + (rs.reason ? " (" + rs.reason + ")" : "");
+            } else if (r.renderer === "gpu" && rs.state === "ok") {
+                note = i18nText("portal.radar.renderer.active", "GPU renderer is running.");
+            }
+            $("renderer_state").textContent = note;
+            $("renderer_state").hidden = !note;
+        }
         if ($("rim_target_style")) $("rim_target_style").value = r.rim_target_style || "plane";
         syncTagLeadersControl();
         $("show_precip").checked = r.show_precipitation !== false;
@@ -2376,6 +2395,7 @@ async function saveRadar() {
                 tag_text_shadow: $("tag_text_shadow") ? $("tag_text_shadow").checked : true,
                 hud_tap_labels: $("hud_tap_labels") ? $("hud_tap_labels").checked : false,
                 smooth_motion: $("smooth_motion") ? $("smooth_motion").checked : false,
+                renderer: $("renderer") ? $("renderer").value : "cpu",
                 rim_target_style: $("rim_target_style") ? $("rim_target_style").value : "plane",
                 show_precipitation: $("show_precip").checked,
                 show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
@@ -2686,6 +2706,7 @@ async function saveAndReloadSettings(statusId) {
                 tag_text_shadow: $("tag_text_shadow") ? $("tag_text_shadow").checked : true,
                 hud_tap_labels: $("hud_tap_labels") ? $("hud_tap_labels").checked : false,
                 smooth_motion: $("smooth_motion") ? $("smooth_motion").checked : false,
+                renderer: $("renderer") ? $("renderer").value : "cpu",
                 rim_target_style: $("rim_target_style") ? $("rim_target_style").value : "plane",
                 show_precipitation: $("show_precip").checked,
                 show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
