@@ -167,6 +167,12 @@ class TestOpenDisplayFallsBack:
         state = gpu.read_state()
         assert state["status"] == "failed" and "accelerated" in state["reason"]
 
+    def test_start_up_check_measures_the_cost_of_a_layer(self, software_renderer):
+        cost = gpu._self_test(software_renderer)
+        assert cost >= 0.0
+        # Nothing was left on screen by the check.
+        assert _shot(software_renderer).get_at((100, 100))[:3] == (0, 0, 0)
+
     def test_set_mode_error_falls_back(self, chosen, state_dir, monkeypatch):
         chosen["renderer"] = "gpu"
 
@@ -179,7 +185,7 @@ class TestOpenDisplayFallsBack:
 
     def test_good_start_is_active_then_marked_ok(self, chosen, state_dir, monkeypatch):
         chosen["renderer"] = "gpu"
-        monkeypatch.setattr(gpu, "_self_test", lambda _ren: 3.0)
+        monkeypatch.setattr(gpu, "_self_test", lambda _ren: 0.4)
         monkeypatch.setattr(gpu, "_register_exit_hook", lambda: None)
         surface = gpu.open_display(SIDE, SIDE, 0)
         try:

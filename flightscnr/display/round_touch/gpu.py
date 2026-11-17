@@ -38,10 +38,16 @@ RENDERERS = ("cpu", "gpu")
 
 _ENV = "FLIGHTSCNR_RENDERER"
 _STATE_FILE = "gpu_state.json"
-# A frame of the start-up check slower than this is a software renderer in
-# disguise (llvmpipe, SDL's own), which is slower than the CPU path.
-_SELF_TEST_MAX_MS = 22.0
-_SELF_TEST_SPRITES = 120
+# Start-up check: what one extra full-window blended layer costs, in ms.
+# That is the fill rate, the thing the radar frame leans on (base layer plus
+# sweep wedge every frame). Measured on a Pi 4: 0.3 to 0.6 ms on the GPU
+# (v3d), 5.3 ms on Mesa's software rasteriser (llvmpipe), which would run the
+# radar slower than the CPU renderer. Timing the difference between a light
+# and a heavy scene cancels fixed costs and most of a busy boot.
+_SELF_TEST_MAX_MS = 2.5
+_SELF_TEST_SPRITES = 60
+_SELF_TEST_LAYERS = (1, 5)
+_SELF_TEST_FRAMES = 6
 # Frames drawn before a GPU start counts as good.
 _HEALTHY_FRAMES = 120
 
@@ -159,39 +165,51 @@ def radar_frame_ms(default_ms: float) -> float:
 
 
 def _self_test(ren) -> float:
-    """Best frame time (ms) of a small alpha-sprite scene on ``ren``."""
+    """Cost in ms of one more full-window blended layer on ``ren``.
+
+    Nothing is presented, so the display refresh is not part of the number; a
+    one-pixel readback makes the renderer finish each frame before the clock
+    stops.
+    """
     import pygame
     from pygame._sdl2 import video
 
     sprite = pygame.Surface((64, 32), pygame.SRCALPHA)
-    sprite.fill((0, 0, 0, 0))
-    pygame.draw.rect(sprite, (12, 12, 12, 255), (2, 2, 60, 28), border_radius=6)
+    sprite.fill((12, 12, 12, 255))
     tex = video.Texture.from_surface(ren, sprite)
     tex.blend_mode = 1
     width, height = (int(v) for v in ren.logical_size)
     if width <= 0 or height <= 0:
         width, height = 720, 720
-    best = None
-    # Best of several: with vsync on, each frame waits for a refresh, and one
-    # slow frame while the system is still booting must not fail the check.
-    for frame in range(12):
-        started = time.perf_counter()
-        ren.draw_color = (0, 0, 0, 255)
-        ren.clear()
-        for i in range(_SELF_TEST_SPRITES):
-            tex.alpha = 40 + (i * 7 + frame * 13) % 200
-            tex.draw(
-                dstrect=((i * 53) % max(1, width - 64), (i * 97) % max(1, height - 32)),
-                angle=float((i * 11) % 360),
-            )
-        ren.present()
-        took = (time.perf_counter() - started) * 1000.0
-        if frame and (best is None or took < best):
-            best = took
+    sheet = pygame.Surface((width, height), pygame.SRCALPHA)
+    sheet.fill((10, 10, 10, 60))
+    layer = video.Texture.from_surface(ren, sheet)
+    layer.blend_mode = 1
+    pixel = pygame.Rect(0, 0, 1, 1)
+    best = {}
+    for layers in _SELF_TEST_LAYERS:
+        for frame in range(_SELF_TEST_FRAMES + 1):
+            started = time.perf_counter()
+            ren.draw_color = (0, 0, 0, 255)
+            ren.clear()
+            for i in range(layers):
+                layer.draw(angle=float(17 + i * 31 + frame))
+            for i in range(_SELF_TEST_SPRITES):
+                tex.alpha = 40 + (i * 7 + frame * 13) % 200
+                tex.draw(
+                    dstrect=((i * 53) % max(1, width - 64), (i * 97) % max(1, height - 32)),
+                    angle=float((i * 11) % 360),
+                )
+            ren.to_surface(area=pixel)
+            took = (time.perf_counter() - started) * 1000.0
+            # The first frame of each scene pays for uploads and shader setup.
+            if frame and (layers not in best or took < best[layers]):
+                best[layers] = took
     ren.draw_color = (0, 0, 0, 255)
     ren.clear()
     ren.present()
-    return float(best or 0.0)
+    light, heavy = _SELF_TEST_LAYERS
+    return max(0.0, (best[heavy] - best[light]) / float(heavy - light))
 
 
 def open_display(width: int, height: int, flags: int):
@@ -241,7 +259,7 @@ def open_display(width: int, height: int, flags: int):
         took = _self_test(ren)
         if took > _SELF_TEST_MAX_MS:
             raise RuntimeError(
-                f"no accelerated renderer (test frame {took:.1f} ms)"
+                f"no accelerated renderer (fill test {took:.1f} ms per layer)"
             )
     except Exception as exc:
         _reason = str(exc) or exc.__class__.__name__
@@ -257,7 +275,9 @@ def open_display(width: int, height: int, flags: int):
     _active = True
     _reason = ""
     _register_exit_hook()
-    logger.info("GPU renderer active (test frame %.1f ms, vsync=%s)", took, _vsync())
+    logger.info(
+        "GPU renderer active (fill test %.2f ms per layer, vsync=%s)", took, _vsync()
+    )
     return surface
 
 
