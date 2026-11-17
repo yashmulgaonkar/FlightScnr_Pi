@@ -334,6 +334,7 @@ def present_radar_sweep(
     live_icons: list | None = None,
     live_connectors: list | None = None,
     live_rim: tuple | None = None,
+    held: list | None = None,
 ) -> bool:
     """Draw and present one radar frame. False when there is nothing to show yet."""
     from display.round_touch import rotation as rot
@@ -364,8 +365,14 @@ def present_radar_sweep(
         _base_tex.draw(dstrect=(origin_off[0], origin_off[1], side_w, side_h), angle=float(rotation))
     else:
         _base_tex.draw(dstrect=(origin_off[0], origin_off[1], side_w, side_h))
-    # Trail tips, then icons, then the sweep, so the beam still passes over
-    # the targets.
+    # Held targets (classic motion), then the gliding ones, then the sweep,
+    # so the beam still passes over the targets. Held sprites arrive already
+    # dimmed by the radar screen, as on the CPU renderer.
+    for key, item in held or ():
+        if key[0] == "c":
+            _draw_line(ren, item, rotation, origin_off)
+        else:
+            _draw_sprite(ren, item, rotation, origin_off)
     for item in live_connectors or ():
         _draw_line(ren, item, rotation, origin_off)
     for item in live_icons or ():
@@ -377,6 +384,7 @@ def present_radar_sweep(
     if debug:
         frame_debug.stage("4g_draw", time.perf_counter() - _t)
         frame_debug.count("live_icons", len(live_icons or ()))
+        frame_debug.count("held_items", len(held or ()))
         _t = time.perf_counter()
     _draw_hud(ren, origin_off, rotation)
     _draw_overlays(ren, display, origin_off, rotation)

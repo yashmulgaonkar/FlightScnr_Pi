@@ -92,7 +92,8 @@ def _cpu_frame(monkeypatch, rot, base, **parts):
     monkeypatch.setattr(gpu, "_active", False)
     for name, value in (
         ("_rot_base", None), ("_rot_base_key", None), ("_prev_sweep_rect", None),
-        ("_prev_icon_rects", []), ("_needs_full", False), ("_rim_prev_spec", None), ("_rim_prev_rects", []),
+        ("_prev_icon_rects", []), ("_held_base", None), ("_held_items", {}),
+        ("_needs_full", False), ("_rim_prev_spec", None), ("_rim_prev_rects", []),
     ):
         monkeypatch.setattr(rotation_mod, name, value)
     monkeypatch.setattr(pygame.display, "flip", lambda: None)
@@ -294,19 +295,45 @@ class TestGpuFrameMatchesCpu:
         assert got.get_at((100 + 78, 100))[:3] == (255, 0, 0)
         assert got.get_at((100 + 60, 100))[:3] == (0, 0, 0)
 
+    @pytest.mark.parametrize("rot", [0, 90, 180, 270])
+    def test_classic_held_targets_match_the_cpu_path(self, software_renderer, monkeypatch, rot):
+        base = pygame.Surface((SIDE, SIDE))
+        base.fill((0, 0, 0))
+        tip = (("c", "a"), (30.0, 150.0, 90.0, 150.0, (200, 200, 0, 255), 3))
+        sprites = [
+            (("i", "a"), (_dot((255, 0, 0, 255), 20), 50, 60)),
+            (("l", "a"), (_dot((0, 0, 255, 128), 20), 140, 60)),
+        ]
+        monkeypatch.setattr(rotation_mod, "rotation_degrees", lambda: rot)
+        display = pygame.Surface((SIDE, SIDE))
+        rotation_mod.present_radar_sweep(
+            display, base, 1, 0.0, (48, 255, 96), draw_sweep=False, held=sprites,
+        )
+        got = _shot(software_renderer)
+        want = _cpu_frame(monkeypatch, rot, base, draw_sweep=False, held=sprites)
+        assert _max_diff(got, want) <= 2
+        assert got.get_at(rotation_mod._map_display_point(50, 60, rot, (0, 0)))[:3] == (255, 0, 0)
+        # The trail tip is a line: its edges differ by renderer, its body does not.
+        rotation_mod.present_radar_sweep(
+            display, base, 1, 0.0, (48, 255, 96), draw_sweep=False, held=[tip] + sprites,
+        )
+        got = _shot(software_renderer)
+        assert got.get_at(rotation_mod._map_display_point(60, 150, rot, (0, 0)))[:3] == (200, 200, 0)
+        assert got.get_at(rotation_mod._map_display_point(60, 170, rot, (0, 0)))[:3] == (0, 0, 0)
+
     def test_new_layer_generation_is_uploaded(self, software_renderer, monkeypatch):
         monkeypatch.setattr(rotation_mod, "rotation_degrees", lambda: 0)
         base = pygame.Surface((SIDE, SIDE))
         base.fill((10, 20, 30))
         display = pygame.Surface((SIDE, SIDE))
         rotation_mod.present_radar_sweep(display, base, 1, 0.0, (0, 0, 0), draw_sweep=False)
-        assert gpu_present.shown_layer_gen() == 1
+        assert rotation_mod.shown_layer_gen() == 1
         base.fill((90, 80, 70))
         rotation_mod.present_radar_sweep(display, base, 1, 0.0, (0, 0, 0), draw_sweep=False)
         assert _shot(software_renderer).get_at((5, 5))[:3] == (10, 20, 30)
         rotation_mod.present_radar_sweep(display, base, 2, 0.0, (0, 0, 0), draw_sweep=False)
         assert _shot(software_renderer).get_at((5, 5))[:3] == (90, 80, 70)
-        assert gpu_present.shown_layer_gen() == 2
+        assert rotation_mod.shown_layer_gen() == 2
 
     def test_prewarm_is_skipped(self, software_renderer, monkeypatch):
         monkeypatch.setattr(rotation_mod, "_next_base", None)

@@ -256,7 +256,7 @@ def present_radar_sweep(
     if gpu.active() and _present_gpu(
         display, base_layer, layer_gen, sweep_angle_logical, sweep_color,
         draw_sweep=draw_sweep, live_icons=live_icons,
-        live_connectors=live_connectors, live_rim=live_rim,
+        live_connectors=live_connectors, live_rim=live_rim, held=held,
     ):
         return
     global _rot_base, _rot_base_key, _prev_sweep_rect, _pending_key, _needs_full
@@ -685,6 +685,10 @@ def _held_stamp(surface: pygame.Surface, rotation: int, key, item) -> None:
 
 def shown_layer_gen():
     """Generation of the radar layer the fast path is presenting, or None."""
+    if gpu.active():
+        from display.round_touch import gpu_present
+
+        return gpu_present.shown_layer_gen()
     return _rot_base_key[0] if _rot_base_key is not None else None
 
 
