@@ -127,6 +127,13 @@ CACHE_TTL_S = 7 * 24 * 3600
 # 24: dark/light bands now resize to ring scale (#187). Old unscaled caches
 # would leave aircraft off the roads until the 7-day TTL expired.
 CACHE_STYLE_VERSION = 24
+# A build that missed tiles (network down, server error) must not be written to
+# disk: the 7-day cache would serve a blank or holed map long after the network
+# came back. Such a build is retried after this long.
+FETCH_RETRY_S = 60.0
+# Cache files written before the manifest recorded a tile count may be the blank
+# result of an offline build. Those are sampled and dropped if nearly one colour.
+_BLANK_MAX_COLOURS = 3
 
 
 _lock = threading.Lock()
@@ -136,6 +143,8 @@ _surfaces: dict[tuple, pygame.Surface] = {}
 # invalidated the radar backdrop cache (~every frame).
 _display_converted: set[tuple] = set()
 _fetch_threads: dict[tuple, threading.Thread] = {}
+# key -> time.time() of the last build that missed tiles (see FETCH_RETRY_S).
+_incomplete: dict[tuple, float] = {}
 _stadia_key_warned = False
 _carto_key_warned = False
 
@@ -907,20 +916,33 @@ def _scalable(tile: pygame.Surface) -> pygame.Surface:
 
 
 def _build_background(scale_index: int, style: str | None = None) -> pygame.Surface | None:
+    """The map surface, or None when it cannot be built or no tile arrived."""
+    return _build_background_result(scale_index, style)[0]
+
+
+def _build_background_result(
+    scale_index: int, style: str | None = None
+) -> tuple[pygame.Surface | None, str, int]:
+    """Build one scale's map: ``(surface, status, tiles fetched)``.
+
+    status is "ok" (every tile arrived), "partial" (some missing: usable, but
+    not to be cached), "failed" (none arrived: no surface) or "skip" (nothing
+    to build for this configuration).
+    """
     try:
         from config import LOCATION_HOME, location_configured
     except ImportError:
-        return None
+        return None, "skip", 0
     if not location_configured():
-        return None
+        return None, "skip", 0
     if scale_index < 0 or scale_index >= len(scale.SCALE_BANDS):
-        return None
+        return None, "skip", 0
 
     # Pin style for the whole build — never re-read settings mid-fetch.
     # Otherwise switching Map while prewarm runs can save light tiles under a dark key.
     provider = normalize_map_style(style) if style else _resolved_style()
     if provider == "black":
-        return _build_flat_black_background()
+        return _build_flat_black_background(), "ok", 0
     home_lat, home_lon = LOCATION_HOME[0], LOCATION_HOME[1]
     outer_km = scale.bands()[scale_index]["label_km"]
     px_per_km = theme.GRID_OUTER_RADIUS / outer_km
@@ -947,6 +969,25 @@ def _build_background(scale_index: int, style: str | None = None) -> pygame.Surf
         for tx in range(x_min, x_max + 1)
     ]
     tiles = _fetch_tile_coords(zoom, coords, provider)
+    if not tiles:
+        logger.warning(
+            "Map build for scale %d (%s): 0/%d tiles arrived, not cached; retrying in %.0fs",
+            scale_index,
+            provider,
+            len(coords),
+            FETCH_RETRY_S,
+        )
+        return None, "failed", 0
+    status = "ok" if len(tiles) >= len(coords) else "partial"
+    if status == "partial":
+        logger.warning(
+            "Map build for scale %d (%s): %d/%d tiles arrived, not cached; retrying in %.0fs",
+            scale_index,
+            provider,
+            len(tiles),
+            len(coords),
+            FETCH_RETRY_S,
+        )
 
     scaled = abs(render_scale - 1.0) > 1e-3
     # +1px overlap so scaled tile seams do not leave gaps after rounding.
@@ -981,10 +1022,10 @@ def _build_background(scale_index: int, style: str | None = None) -> pygame.Surf
     )
     canvas = _style_for_radar(canvas, provider)
     canvas = _apply_circle_mask(canvas)
-    return canvas
+    return canvas, status, len(tiles)
 
 
-def _save_cache(surface: pygame.Surface, key: tuple):
+def _save_cache(surface: pygame.Surface, key: tuple, tiles: int | None = None):
     os.makedirs(CACHE_DIR, exist_ok=True)
     path = _cache_path_for_key(key)
     manifest_path = _manifest_path_for_key(key)
@@ -999,6 +1040,9 @@ def _save_cache(surface: pygame.Surface, key: tuple):
         "style_version": CACHE_STYLE_VERSION,
         "path": os.path.basename(path),
     }
+    if tiles is not None:
+        # Marks a map built from real tiles (see _drop_if_blank).
+        manifest["tiles"] = int(tiles)
     if len(key) > 4 and key[4] in (0, 1):
         manifest["carto_auth"] = key[4]
     tmp = manifest_path + ".tmp"
@@ -1007,11 +1051,39 @@ def _save_cache(surface: pygame.Surface, key: tuple):
     os.replace(tmp, manifest_path)
 
 
+def _looks_blank(surface: pygame.Surface) -> bool:
+    """True when the opaque pixels of a map are (nearly) one colour.
+
+    Sampled on a grid. A real map has roads, water and land; the result of a
+    build where no tile arrived is a flat fill inside the circle mask.
+    """
+    w, h = surface.get_size()
+    step = max(1, min(w, h) // 32)
+    colours = set()
+    for x in range(0, w, step):
+        for y in range(0, h, step):
+            r, g, b, a = surface.get_at((x, y))
+            if a > 0:
+                colours.add((r // 4, g // 4, b // 4))
+                if len(colours) > _BLANK_MAX_COLOURS:
+                    return False
+    return True
+
+
+def _remove_cache_files(key: tuple) -> None:
+    for path in (_cache_path_for_key(key), _manifest_path_for_key(key)):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 def _load_cache(key: tuple) -> pygame.Surface | None:
     path = _cache_path_for_key(key)
     manifest_path = _manifest_path_for_key(key)
     if not os.path.isfile(path):
         return None
+    has_tile_count = False
     if os.path.isfile(manifest_path):
         try:
             with open(manifest_path, encoding="utf-8") as fh:
@@ -1034,6 +1106,7 @@ def _load_cache(key: tuple) -> pygame.Surface | None:
             fetched_at = int(manifest.get("fetched_at", 0))
             if time.time() - fetched_at > CACHE_TTL_S:
                 return None
+            has_tile_count = "tiles" in manifest
         except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
             logger.warning("Could not read cached radar map manifest: %s", exc)
             return None
@@ -1054,10 +1127,18 @@ def _load_cache(key: tuple) -> pygame.Surface | None:
     else:
         return None
     try:
-        return _as_display_surface(pygame.image.load(path), alpha=True)
+        loaded = pygame.image.load(path)
     except (OSError, pygame.error) as exc:
         logger.warning("Could not load cached radar map: %s", exc)
         return None
+    if not has_tile_count and _looks_blank(loaded):
+        # Saved by an older build that cached a map with no tiles in it.
+        logger.warning(
+            "Cached radar map for scale %d is blank (built offline); dropping it", key[2]
+        )
+        _remove_cache_files(key)
+        return None
+    return _as_display_surface(loaded, alpha=True)
 
 
 def _remember_surface(key: tuple, surface: pygame.Surface):
@@ -1090,11 +1171,17 @@ def _start_fetch(key: tuple):
 def _fetch_worker(key: tuple):
     try:
         # key = (lat, lon, scale_index, style) — use key style, not live settings.
-        surface = _build_background(key[2], style=key[3])
+        surface, status, tiles = _build_background_result(key[2], style=key[3])
+        if status in ("failed", "partial"):
+            with _lock:
+                _incomplete[key] = time.time()
+        elif status == "ok":
+            with _lock:
+                _incomplete.pop(key, None)
         if surface is None:
             return
-        if key[3] != "black":
-            _save_cache(surface, key)
+        if key[3] != "black" and status == "ok":
+            _save_cache(surface, key, tiles)
         _remember_surface(key, surface)
     except Exception:
         logger.exception("Radar map background fetch failed for scale %s", key[2])
@@ -1121,9 +1208,12 @@ def request_background_for_key(key: tuple, force: bool = False):
         return
 
     with _lock:
-        if not force and key in _surfaces:
+        failed_at = _incomplete.get(key)
+        if not force and key in _surfaces and failed_at is None:
             return
     if _fetch_running(key):
+        return
+    if not force and failed_at is not None and time.time() - failed_at < FETCH_RETRY_S:
         return
 
     style = key[3] if len(key) > 3 else _resolved_style()
@@ -1186,9 +1276,62 @@ def invalidate():
     with _lock:
         _surfaces.clear()
         _fetch_threads.clear()
+        _incomplete.clear()
         _display_converted.clear()
     clear_vfr_opacity_blit_cache()
     clear_seamap_opacity_blit_cache()
+
+
+# Cross-process: the portal asks the display to rebuild the basemap.
+REFETCH_REQUEST_PATH = os.path.join(DATA_DIR, "map_refetch.request")
+
+
+def request_refetch() -> bool:
+    """Ask the display process to delete the cached maps and download them again."""
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        tmp = REFETCH_REQUEST_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"at": time.time(), "pid": os.getpid()}, fh)
+        os.replace(tmp, REFETCH_REQUEST_PATH)
+        return True
+    except OSError as exc:
+        logger.warning("Could not write basemap refetch request: %s", exc)
+        return False
+
+
+def consume_refetch_request() -> bool:
+    """True once if a refetch was requested (clears the request)."""
+    if not os.path.isfile(REFETCH_REQUEST_PATH):
+        return False
+    try:
+        os.remove(REFETCH_REQUEST_PATH)
+    except OSError:
+        pass
+    return True
+
+
+def refetch_all() -> int:
+    """Delete this location's cached maps (every scale, current style) and rebuild.
+
+    The manual recovery for a map that is blank or wrong. Returns how many
+    cached scales were removed.
+    """
+    if not _enabled():
+        return 0
+    removed = 0
+    for scale_index in range(len(scale.SCALE_BANDS)):
+        key = _cache_key_for_scale(scale_index)
+        if key is None:
+            return removed
+        if os.path.isfile(_cache_path_for_key(key)):
+            removed += 1
+        _remove_cache_files(key)
+    invalidate()
+    request_background(force=True)
+    prewarm_all_scales()
+    logger.info("Basemap refetch requested (%d cached scale(s) removed)", removed)
+    return removed
 
 
 def cache_token() -> object:

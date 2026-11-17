@@ -279,6 +279,7 @@ class RoundTouchDisplay:
         self._wifi_offline_since: float | None = None
         self._wifi_down_streak = 0
         self._last_wifi_link_poll = 0.0
+        self._last_map_refetch_poll = 0.0
         self._wifi_ap_starting = False
         self._last_clock_minute = -1
         self._flip_board_sampled_at = 0.0
@@ -784,6 +785,20 @@ class RoundTouchDisplay:
         if want:
             self._enter_wifi_setup(reason="manual")
             self._safe_draw()
+
+    def _tick_map_refetch_request(self) -> None:
+        """Honor the portal's "Re-download basemap" request (cross-process)."""
+        now = time.time()
+        if now - self._last_map_refetch_poll < 2.0:
+            return
+        self._last_map_refetch_poll = now
+        try:
+            if not map_bg.consume_refetch_request():
+                return
+            map_bg.refetch_all()
+            radar.expire_frame_layer()
+        except Exception:
+            logger.exception("Basemap refetch request failed")
 
     def _tick_wifi_link(self) -> None:
         """If client Wi-Fi/ethernet stays down, reopen the setup hotspot after a grace."""
@@ -7291,6 +7306,7 @@ class RoundTouchDisplay:
                 # Re-open captive setup if known Wi-Fi stays down past the grace window.
                 self._tick_wifi_link()
                 self._tick_wifi_enter_request()
+                self._tick_map_refetch_request()
 
                 if self._fatal_error:
                     # Don't freeze forever during Wi-Fi setup if a draw glitch set fatal
