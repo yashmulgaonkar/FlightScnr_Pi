@@ -125,11 +125,11 @@ RADAR_MOTION_LABELS = {
     "smooth": "settings.opt.motion.smooth",
     "classic": "settings.opt.motion.classic",
 }
-# Follow speed-based zoom bounds (issue #114) — portal / settings.json.
-LIVE_TRACKING_PREVIEW_MINUTES_MIN = 1.0
 # Renderer: "cpu" draws on software surfaces (the default), "gpu" draws the
 # radar with textures when the device has an accelerated renderer (see gpu.py).
 RENDERERS = ("cpu", "gpu")
+# Follow speed-based zoom bounds (issue #114) — portal / settings.json.
+LIVE_TRACKING_PREVIEW_MINUTES_MIN = 1.0
 LIVE_TRACKING_PREVIEW_MINUTES_MAX = 30.0
 LIVE_TRACKING_RADIUS_KM_FLOOR = 1.0
 LIVE_TRACKING_RADIUS_KM_CEILING = 200.0

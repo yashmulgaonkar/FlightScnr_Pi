@@ -201,7 +201,6 @@ def _renderer_state() -> dict:
         return {"state": "", "reason": ""}
 
 
-
 @app.get("/favicon.ico")
 def favicon():
     return send_from_directory(os.path.join(WEB_DIR, "static"), "favicon.ico", mimetype="image/x-icon")
@@ -1892,7 +1891,7 @@ def radar_save():
         # Saved only on a change: saving also clears a failed GPU start, and
         # every portal save would otherwise retry it at the next restart.
         wanted = str(data.get("renderer") or "").strip().lower()
-        if wanted != settings.renderer_setting() or data.get("renderer_retry"):
+        if wanted != settings.renderer_setting():
             settings.set_renderer(wanted)
     if "show_tag_leaders" in data:
         settings.set_show_tag_leaders(bool(data.get("show_tag_leaders")))
