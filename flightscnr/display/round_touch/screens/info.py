@@ -85,6 +85,7 @@ DISPLAY_ACTIONS = (
     "tag_leaders",
     "color_by_altitude",
     "radar_motion",
+    "renderer",
     "rim_style",
     "units",
     "range",
@@ -260,6 +261,7 @@ LIST_PICKER_KINDS = frozenset(
         # with a title, a close button, and no choices in it.
         "rim_style",
         "radar_motion",
+        "renderer",
         "idle_dim_after",
         "idle_dim_level",
         "idle_off_after",
@@ -281,6 +283,7 @@ _LIST_PICKER_TITLES = {
     "aircraft_tag_id": "settings.picker.aircraft_tag_id",
     "rim_style": "settings.picker.rim_style",
     "radar_motion": "settings.picker.radar_motion",
+    "renderer": "settings.picker.renderer",
     "min_height": "settings.picker.min_height",
     "max_height": "settings.picker.max_height",
     "aircraft_min_speed": "settings.picker.aircraft_min_speed",
@@ -322,6 +325,9 @@ _SYSTEM_CONFIRM_COPY = {
     "reboot": ("settings.confirm.reboot.title", "settings.confirm.reboot.detail"),
     "shutdown": ("settings.confirm.shutdown.title", "settings.confirm.shutdown.detail"),
     "restart": ("settings.confirm.restart.title", "settings.confirm.restart.detail"),
+    # Picked from the Display page; the app restarts to apply the renderer.
+    "renderer_cpu": ("settings.confirm.renderer_cpu.title", "settings.confirm.renderer.detail"),
+    "renderer_gpu": ("settings.confirm.renderer_gpu.title", "settings.confirm.renderer.detail"),
 }
 
 
@@ -600,6 +606,12 @@ def _build_settings_picker_items(kind: str) -> list[dict]:
             settings.RADAR_MOTIONS,
             settings.radar_motion_setting(),
             lambda mode: tr(settings.RADAR_MOTION_LABELS.get(mode, str(mode))),
+        )
+    if kind == "renderer":
+        return _enum_picker_items(
+            settings.RENDERERS,
+            settings.renderer_setting(),
+            lambda mode: tr(settings.RENDERER_LABELS.get(mode, str(mode))),
         )
     if kind == "min_height":
         return _enum_picker_items(
@@ -1784,7 +1796,8 @@ def draw_system_confirm_popup(surface, action: str) -> None:
         max(1, theme.s(2)),
         border_radius=theme.s(8),
     )
-    confirm_label = btn_font.render("Confirm", True, theme.LABEL)
+    confirm_text = "OK" if action.startswith("renderer_") else "Confirm"
+    confirm_label = btn_font.render(confirm_text, True, theme.LABEL)
     surface.blit(confirm_label, confirm_label.get_rect(center=confirm_rect.center))
 
     _system_confirm_buttons = [
@@ -3118,6 +3131,7 @@ def _display_row_labels() -> list[str]:
         ),
         tr("settings.row.color_altitude"),
         tr("settings.row.radar_motion", value=settings.radar_motion_label()),
+        tr("settings.row.renderer", value=settings.renderer_label()),
         tr("settings.row.rim_targets", value=settings.rim_target_style_label()),
         tr("settings.row.units", value=settings.unit_preset_label()),
         tr("settings.row.radar_range", value=settings.scale_label()),
@@ -3946,6 +3960,6 @@ def draw_info(
     nav.draw_curved_breadcrumb(surface, _breadcrumb(page))
     nav.draw_curved_page_dots(surface, page, len(nav.SETTINGS_PAGES))
     nav.draw_curved_footer(surface, list(footer_kinds_for_page(page)))
-    if page == PAGE_SYSTEM and system_confirm:
+    if system_confirm:
         draw_system_confirm_popup(surface, system_confirm)
     return max_scroll

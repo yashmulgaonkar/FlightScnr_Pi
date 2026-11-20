@@ -128,6 +128,10 @@ RADAR_MOTION_LABELS = {
 # Renderer: "cpu" draws on software surfaces (the default), "gpu" draws the
 # radar with textures when the device has an accelerated renderer (see gpu.py).
 RENDERERS = ("cpu", "gpu")
+RENDERER_LABELS = {
+    "cpu": "settings.opt.renderer.cpu",
+    "gpu": "settings.opt.renderer.gpu",
+}
 # Follow speed-based zoom bounds (issue #114) — portal / settings.json.
 LIVE_TRACKING_PREVIEW_MINUTES_MIN = 1.0
 LIVE_TRACKING_PREVIEW_MINUTES_MAX = 30.0
@@ -2999,6 +3003,10 @@ def renderer_setting() -> str:
     """Saved renderer: cpu (default) | gpu. Takes effect when the app restarts."""
     raw = str(_state.get("renderer") or "").strip().lower()
     return raw if raw in RENDERERS else "cpu"
+
+
+def renderer_label() -> str:
+    return tr(RENDERER_LABELS.get(renderer_setting(), "settings.opt.renderer.cpu"))
 
 
 def set_renderer(value: str) -> str:
