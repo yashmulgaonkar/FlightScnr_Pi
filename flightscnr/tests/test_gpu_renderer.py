@@ -387,7 +387,10 @@ class TestPortalControl:
         assert '<select id="renderer">' in html
         for value in gpu.RENDERERS:
             assert f'<option value="{value}"' in html
-        assert html.count('renderer: $("renderer")') == 2
+        # Only the Radar save changes the renderer (after OK / Cancel); the
+        # display-page saves send the value already saved.
+        assert html.count('renderer: $("renderer")') == 1
+        assert html.count("renderer: savedRenderer,") == 1
 
     def test_every_locale_has_the_renderer_strings(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

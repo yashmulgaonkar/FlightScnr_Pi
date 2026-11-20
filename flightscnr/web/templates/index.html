@@ -384,7 +384,7 @@
                 <option value="cpu" data-i18n="portal.radar.renderer.cpu">CPU (default)</option>
                 <option value="gpu" data-i18n="portal.radar.renderer.gpu">GPU (if the device supports it)</option>
             </select>
-            <p class="hint" data-i18n="portal.radar.renderer.hint">GPU draws the radar on the graphics chip: lighter on the processor and smoother. If the device has no accelerated renderer it goes back to CPU by itself. Takes effect after the app relaunches (System, Relaunch app).</p>
+            <p class="hint" data-i18n="portal.radar.renderer.hint">GPU draws the radar on the graphics chip: lighter on the processor and smoother. If the device has no accelerated renderer it goes back to CPU by itself. Changing it asks for confirmation, then saves and restarts the app.</p>
             <p class="hint" id="renderer_state" hidden></p>
             <label for="rim_target_style">Out-of-range rim targets</label>
             <select id="rim_target_style">
@@ -1250,6 +1250,9 @@
 
 <script>
 let pendingCallsign = "";
+// Renderer the display is configured for (cpu | gpu). Changing it needs an
+// app restart, so only the Radar save may change it (after an OK / Cancel).
+let savedRenderer = "cpu";
 let currentScaleIndex = 1;
 let rangePresetsMi = [2, 3, 5, 8, 10, 20, 30, 50];
 const STATUTE_MILE_KM = 1.609344;
@@ -1898,7 +1901,8 @@ async function loadAll() {
         if ($("tag_text_shadow")) $("tag_text_shadow").checked = r.tag_text_shadow !== false;
         if ($("hud_tap_labels")) $("hud_tap_labels").checked = !!r.hud_tap_labels;
         if ($("radar_motion")) $("radar_motion").value = r.radar_motion || (r.smooth_motion ? "smooth" : "standard");
-        if ($("renderer")) $("renderer").value = r.renderer === "gpu" ? "gpu" : "cpu";
+        savedRenderer = r.renderer === "gpu" ? "gpu" : "cpu";
+        if ($("renderer")) $("renderer").value = savedRenderer;
         if ($("renderer_state")) {
             const rs = r.renderer_state || {};
             let note = "";
@@ -2366,6 +2370,20 @@ function syncMinSpeedUnitLabels() {
 
 async function saveRadar() {
     clearStatus("radar-status");
+    const wantedRenderer = $("renderer") ? $("renderer").value : savedRenderer;
+    const rendererChanged = wantedRenderer !== savedRenderer;
+    if (rendererChanged && !window.confirm(i18nText(
+        "portal.radar.renderer.confirm",
+        "Switching the renderer restarts the app, so the display and portal will reconnect in a few seconds. Press OK to save and restart, or Cancel to keep the current renderer."
+    ))) {
+        // Cancel: nothing is saved; put the dropdown back.
+        $("renderer").value = savedRenderer;
+        showStatus("radar-status", i18nText(
+            "portal.radar.renderer.cancelled",
+            "Renderer change cancelled. Nothing was saved."
+        ));
+        return;
+    }
     try {
         const data = await jsonFetch("/location/set", {
             method: "POST",
@@ -2424,6 +2442,15 @@ async function saveRadar() {
             }),
         });
         showStatus("radar-status", i18nText("portal.radar.saved", "Radar settings saved."));
+        if (rendererChanged) {
+            savedRenderer = wantedRenderer;
+            const restart = await jsonFetch("/system/restart-app", { method: "POST" });
+            showStatus("radar-status", restart.message || i18nText(
+                "portal.system.restarting",
+                "FlightScnr is restarting…"
+            ));
+            return;
+        }
         await loadAll();
         // ATC airports are recomputed for the new center; force a fresh load.
         try { await loadAtc(); } catch (_) {}
@@ -2710,7 +2737,7 @@ async function saveAndReloadSettings(statusId) {
                 tag_text_shadow: $("tag_text_shadow") ? $("tag_text_shadow").checked : true,
                 hud_tap_labels: $("hud_tap_labels") ? $("hud_tap_labels").checked : false,
                 radar_motion: $("radar_motion") ? $("radar_motion").value : "standard",
-                renderer: $("renderer") ? $("renderer").value : "cpu",
+                renderer: savedRenderer,
                 rim_target_style: $("rim_target_style") ? $("rim_target_style").value : "plane",
                 show_precipitation: $("show_precip").checked,
                 show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
