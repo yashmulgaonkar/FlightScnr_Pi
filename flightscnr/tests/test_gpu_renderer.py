@@ -25,8 +25,9 @@ import pygame  # noqa: E402
 
 pygame.init()
 
-from display.round_touch import gpu, gpu_present, settings, theme  # noqa: E402
+from display.round_touch import gpu, gpu_present, radar_classic, settings, theme  # noqa: E402
 from display.round_touch import rotation as rotation_mod  # noqa: E402
+from display.round_touch.screens import radar  # noqa: E402
 
 SIDE = 200
 _REAL_DRAW_HUD = gpu_present._draw_hud
@@ -353,6 +354,20 @@ class TestSpritesAndOverlays:
         assert abs(got.get_at((50, 50))[0] - 128) <= 2
         assert got.get_at((150, 50))[0] == 255
 
+    def test_held_sprite_is_drawn_at_its_brightness(self, software_renderer, monkeypatch):
+        monkeypatch.setattr(rotation_mod, "rotation_degrees", lambda: 0)
+        base = pygame.Surface((SIDE, SIDE))
+        base.fill((0, 0, 0))
+        white = _dot((255, 255, 255, 255), 20)
+        held = [(("i", "a"), (white, 50, 50)), (("i", "b"), (white, 150, 50))]
+        rotation_mod.present_radar_sweep(
+            pygame.Surface((SIDE, SIDE)), base, 1, 0.0, (0, 0, 0), draw_sweep=False,
+            held=held, held_alpha={("i", "a"): 0.5},
+        )
+        got = _shot(software_renderer)
+        assert abs(got.get_at((50, 50))[0] - 128) <= 2
+        assert got.get_at((150, 50))[0] == 255
+
     def test_overlay_stamps_ride_on_top_and_clear(self, software_renderer, monkeypatch):
         monkeypatch.setattr(rotation_mod, "rotation_degrees", lambda: 0)
         show = {"on": True}
@@ -377,6 +392,86 @@ class TestSpritesAndOverlays:
         show["on"] = False
         rotation_mod.present_radar_sweep(display, base, 1, 0.0, (0, 0, 0), draw_sweep=False)
         assert _shot(software_renderer).get_at((60, 160))[:3] == (10, 20, 30)
+
+
+class TestGlowCurve:
+    def test_full_at_the_pass_and_settles_on_the_floor(self):
+        assert radar_classic.glow_brightness(0.0, 4.0) == 1.0
+        late = radar_classic.glow_brightness(3.99, 4.0)
+        assert radar_classic.FADE_FLOOR < late < radar_classic.FADE_FLOOR + 0.05
+
+    def test_never_brightens_between_passes(self):
+        values = [radar_classic.glow_brightness(t / 10.0, 4.0) for t in range(0, 80)]
+        assert all(b <= a for a, b in zip(values, values[1:]))
+        assert min(values) >= radar_classic.FADE_FLOOR
+
+    def test_departed_paint_decays_to_nothing(self):
+        gone = radar_classic.glow_brightness(4.0 * 1.8, 4.0, holds_floor=False)
+        assert gone <= radar_classic.FADE_GONE
+        assert radar_classic.glow_brightness(2.0, 4.0, holds_floor=False) == pytest.approx(
+            radar_classic.glow_brightness(2.0, 4.0)
+        )
+
+
+class TestFadeFollowsTheRenderer:
+    def test_cpu_renderer_returns_a_dimmed_copy(self, monkeypatch):
+        monkeypatch.setattr(gpu, "_active", False)
+        monkeypatch.setattr(radar, "_CLASSIC_FADE", True)
+        monkeypatch.setattr(theme, "SWEEP_PERIOD_MS", 4000)
+        radar._held_alpha_next.clear()
+        sprite = _dot((255, 255, 255, 255))
+        shown = radar._fade(("i", "a"), sprite, 100.0, 102.0)
+        assert shown is not sprite and shown.get_at((2, 2))[3] < 255
+        assert radar._held_alpha_next == {}
+
+    def test_gpu_renderer_keeps_the_sprite_and_publishes_brightness(self, monkeypatch):
+        monkeypatch.setattr(gpu, "_active", True)
+        monkeypatch.setattr(radar, "_CLASSIC_FADE", True)
+        monkeypatch.setattr(theme, "SWEEP_PERIOD_MS", 4000)
+        radar._held_alpha_next.clear()
+        sprite = _dot((255, 255, 255, 255))
+        assert radar._fade(("i", "a"), sprite, 100.0, 102.0) is sprite
+        assert radar._held_alpha_next[("i", "a")] == pytest.approx(
+            radar_classic.glow_brightness(2.0, 4.0)
+        )
+        assert radar._fade(("i", "b"), sprite, 100.0, 100.0) is sprite
+        assert ("i", "b") not in radar._held_alpha_next
+        assert radar._fade(("i", "c"), sprite, 100.0, 110.0, holds_floor=False) is None
+        radar._held_alpha_next.clear()
+
+
+class TestHudTexture:
+    def _hud(self, monkeypatch, color, gen):
+        from display.round_touch import radar_hud
+
+        hud = pygame.Surface((SIDE, SIDE), pygame.SRCALPHA)
+        hud.fill((0, 0, 0, 0))
+        hud.fill(color, (120, 60, 40, 80))
+        monkeypatch.setattr(settings, "radar_hud_enabled", lambda: True)
+        monkeypatch.setattr(radar_hud, "overlay_snapshot", lambda: (hud, gen))
+        monkeypatch.setattr(radar_hud, "rotated_overlay_snapshot", lambda _r: (None, None))
+        monkeypatch.setattr(radar_hud, "hud_bounds", lambda: pygame.Rect(120, 60, 40, 80))
+
+    def test_hud_uploads_once_per_rebuild(self, software_renderer, monkeypatch):
+        monkeypatch.setattr(gpu_present, "_draw_hud", _REAL_DRAW_HUD)
+        monkeypatch.setattr(rotation_mod, "rotation_degrees", lambda: 0)
+        monkeypatch.setattr(rotation_mod, "_rot_hud", None)
+        monkeypatch.setattr(rotation_mod, "_rot_hud_key", None)
+        self._hud(monkeypatch, (255, 255, 255, 255), 1)
+        base = pygame.Surface((SIDE, SIDE))
+        base.fill((10, 20, 30))
+        display = pygame.Surface((SIDE, SIDE))
+        rotation_mod.present_radar_sweep(display, base, 1, 0.0, (0, 0, 0), draw_sweep=False)
+        first = gpu_present._hud_tex
+        got = _shot(software_renderer)
+        assert got.get_at((140, 100))[:3] == (255, 255, 255)
+        assert got.get_at((100, 100))[:3] == (10, 20, 30)
+        rotation_mod.present_radar_sweep(display, base, 1, 0.0, (0, 0, 0), draw_sweep=False)
+        assert gpu_present._hud_tex is first
+        self._hud(monkeypatch, (255, 0, 0, 255), 2)
+        rotation_mod.present_radar_sweep(display, base, 1, 0.0, (0, 0, 0), draw_sweep=False)
+        assert gpu_present._hud_tex is not first
+        assert _shot(software_renderer).get_at((140, 100))[:3] == (255, 0, 0)
 
 
 class TestPortalControl:

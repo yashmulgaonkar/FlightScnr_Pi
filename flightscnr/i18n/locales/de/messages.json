@@ -1095,7 +1095,7 @@
   "portal.radar.renderer.label": "Renderer",
   "portal.radar.renderer.cpu": "CPU (Standard)",
   "portal.radar.renderer.gpu": "GPU (wenn das Gerät es unterstützt)",
-  "portal.radar.renderer.hint": "GPU zeichnet das Radar auf dem Grafikchip: weniger Last für den Prozessor und flüssiger. Hat das Gerät keinen beschleunigten Renderer, wechselt es von selbst zurück zur CPU. Eine Änderung wird bestätigt, dann gespeichert und die App neu gestartet.",
+  "portal.radar.renderer.hint": "GPU zeichnet das Radar auf dem Grafikchip: weniger Last für den Prozessor, und das klassische Radar blendet stufenlos aus. Hat das Gerät keinen beschleunigten Renderer, wechselt es von selbst zurück zur CPU. Eine Änderung wird bestätigt, dann gespeichert und die App neu gestartet.",
   "portal.radar.renderer.failed": "GPU konnte nicht starten, daher wird der CPU-Renderer verwendet. Zum erneuten Versuch CPU wählen, speichern, dann GPU wählen und erneut speichern.",
   "portal.radar.renderer.active": "GPU-Renderer läuft.",
   "portal.radar.renderer.confirm": "Beim Wechsel des Renderers wird die App neu gestartet; Display und Portal verbinden sich in wenigen Sekunden neu. OK speichert und startet neu, Abbrechen behält den aktuellen Renderer.",

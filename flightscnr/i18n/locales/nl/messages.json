@@ -1095,7 +1095,7 @@
   "portal.radar.renderer.label": "Renderer",
   "portal.radar.renderer.cpu": "CPU (standaard)",
   "portal.radar.renderer.gpu": "GPU (als het apparaat dit ondersteunt)",
-  "portal.radar.renderer.hint": "GPU tekent de radar op de grafische chip: minder belasting voor de processor en vloeiender. Heeft het apparaat geen versnelde renderer, dan schakelt het vanzelf terug naar CPU. Wijzigen vraagt om bevestiging, slaat dan op en herstart de app.",
+  "portal.radar.renderer.hint": "GPU tekent de radar op de grafische chip: minder belasting voor de processor, en de klassieke radar dooft vloeiend uit. Heeft het apparaat geen versnelde renderer, dan schakelt het vanzelf terug naar CPU. Wijzigen vraagt om bevestiging, slaat dan op en herstart de app.",
   "portal.radar.renderer.failed": "GPU kon niet starten, dus de CPU-renderer wordt gebruikt. Kies CPU, sla op, kies daarna GPU en sla opnieuw op om het nog eens te proberen.",
   "portal.radar.renderer.active": "GPU-renderer is actief.",
   "portal.radar.renderer.confirm": "Bij het wisselen van renderer herstart de app; scherm en portal verbinden binnen enkele seconden opnieuw. Kies OK om op te slaan en te herstarten, of Annuleren om de huidige te houden.",

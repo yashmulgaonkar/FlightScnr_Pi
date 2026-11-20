@@ -32,7 +32,7 @@ from display.round_touch import (
     earthquake_overlay,
 )
 from display.round_touch import airspace_overlay, cyclone_overlay
-from display.round_touch import alert_prefs, frame_debug
+from display.round_touch import alert_prefs, frame_debug, gpu
 from display.round_touch import radar_classic
 from display.round_touch import vessel_declutter
 from i18n import tr
@@ -1443,6 +1443,11 @@ _beam_latch = radar_classic.BeamLatch()
 # path stamps these once and only touches the ones that change. None in the
 # other motions, where every target is drawn each frame.
 _held_frame: list | None = None
+# GPU renderer: brightness (0..1) of the held items that are not at full, by
+# key. The sprites in ``_held_frame`` are then undimmed and the present path
+# draws them at this alpha (see _fade). Empty on the CPU renderer.
+_held_alpha: dict = {}
+_held_alpha_next: dict = {}
 # Trail tip of each held target as drawn at its last pass. The layer worker
 # moves the baked trail heads every few seconds; following them would redraw
 # every held tip between passes.
@@ -1807,7 +1812,8 @@ def _classic_rim_items(now: float, due: set) -> list:
     out = []
     for ident, (item, painted_at, _xy) in _rim_painted.items():
         sprite, x, y = item
-        out.append(((("r", ident)), (_faded(sprite, _fade_level_at(painted_at, now)), x, y)))
+        key = ("r", ident)
+        out.append((key, (_fade(key, sprite, painted_at, now), x, y)))
     return out
 
 
@@ -1834,6 +1840,27 @@ def _faded(sprite: pygame.Surface, level: int, *, holds_floor: bool = True):
     return dim
 
 
+def _fade(key, sprite: pygame.Surface, painted_at, now: float, *, holds_floor: bool = True):
+    """``sprite`` as held item ``key`` shows it ``now``, or None once its paint is gone.
+
+    CPU renderer: a dimmed copy, in FADE_LEVELS steps. GPU renderer: the
+    sprite itself, with its brightness left in ``_held_alpha_next`` for the
+    present path to draw it at, so the fade is continuous.
+    """
+    if not _CLASSIC_FADE or painted_at is None:
+        return sprite
+    if not gpu.active():
+        return _faded(sprite, _fade_level_at(painted_at, now), holds_floor=holds_floor)
+    brightness = radar_classic.glow_brightness(
+        now - painted_at, theme.SWEEP_PERIOD_MS / 1000.0, holds_floor=holds_floor
+    )
+    if brightness <= radar_classic.FADE_GONE:
+        return None
+    if brightness < 1.0:
+        _held_alpha_next[key] = brightness
+    return sprite
+
+
 def _fade_level_at(painted_at, now: float) -> int:
     if not _CLASSIC_FADE or painted_at is None:
         return 0
@@ -1844,7 +1871,6 @@ def _ghost_items(now: float) -> list:
     """Held items for targets that left the scope, dimmer each step until gone."""
     out = []
     for ident, (painted_at, parts) in _ghosts.copy().items():
-        level = _fade_level_at(painted_at, now)
         if not _CLASSIC_FADE or ident in _live_frame_cache:
             # Fade off: gone at once, as before. Painted again: the fresh
             # return replaces the old paint.
@@ -1852,7 +1878,7 @@ def _ghost_items(now: float) -> list:
             continue
         items = []
         for kind, (sprite, x, y) in parts:
-            dim = _faded(sprite, level, holds_floor=False)
+            dim = _fade((kind, ident), sprite, painted_at, now, holds_floor=False)
             if dim is not None:
                 items.append(((kind, ident), (dim, x, y)))
         if not items:
@@ -1915,6 +1941,11 @@ def live_held_frame_for(layer_gen) -> list | None:
     return tips + rest
 
 
+def live_held_alpha() -> dict:
+    """Brightness of the held items below full (GPU renderer; see _fade)."""
+    return _held_alpha
+
+
 def live_held_frame() -> list | None:
     """Held targets published by the latest ``live_icon_frame`` (classic motion)."""
     return _held_frame
@@ -1926,17 +1957,20 @@ def live_icon_frame(now: float | None = None) -> list:
     In classic motion this is only the tracked and selected aircraft; the
     rest are in ``live_held_frame``.
     """
-    global _phase_left, _live_connectors, _live_frame_cursor, _held_frame
+    global _phase_left, _live_connectors, _live_frame_cursor, _held_frame, _held_alpha
     _live_connectors = []
     icons = _live_icons
     if not icons:
         now = time.time() if now is None else now
         if settings.classic_radar_enabled():
             rim_due = _split_rim_due(_classic_due_ids([]))[1]
+            _held_alpha_next.clear()
             _held_frame = _ghost_items(now) + _classic_rim_items(now, rim_due)
+            _held_alpha = dict(_held_alpha_next)
             _beam_latch.painted([_RIM_KEY + ident for ident in rim_due])
         else:
             _held_frame = None
+            _held_alpha = {}
             _ghosts.clear()
             _rim_painted.clear()
         _held_tips.clear()
@@ -2109,24 +2143,25 @@ def live_icon_frame(now: float | None = None) -> list:
 
     glows = []
     out = []
-    fade_levels: dict = {}
+    painted_ats: dict = {}
+    _held_alpha_next.clear()
     for st in icons:
         cached = _live_frame_cache.get(st["id"])
         if cached is None:
             continue
         if held is not None and st["id"] not in moving:
-            level = _fade_level_at(cached[3] if len(cached) > 3 else None, now)
-            fade_levels[st["id"]] = level
-            if level <= 0:
-                if cached[2] is not None:
-                    held["g"].append((("g", st["id"]), cached[2]))
-                held["i"].append((("i", st["id"]), cached[1]))
-                continue
-            if cached[2] is not None:
-                sprite, x, y = cached[2]
-                held["g"].append((("g", st["id"]), (_faded(sprite, level), x, y)))
-            sprite, x, y = cached[1]
-            held["i"].append((("i", st["id"]), (_faded(sprite, level), x, y)))
+            painted_at = cached[3] if len(cached) > 3 else None
+            painted_ats[st["id"]] = painted_at
+            for kind, item in (("g", cached[2]), ("i", cached[1])):
+                if item is None:
+                    continue
+                key = (kind, st["id"])
+                shown = _fade(key, item[0], painted_at, now)
+                # The cached tuple itself while the sprite is unchanged, so the
+                # present path sees the same object from frame to frame.
+                held[kind].append(
+                    (key, item if shown is item[0] else (shown, item[1], item[2]))
+                )
             continue
         if cached[2] is not None:
             glows.append(cached[2])
@@ -2142,8 +2177,9 @@ def live_icon_frame(now: float | None = None) -> list:
         _vis_id, sprite, ix, iy = cached
         if held is not None and lb["id"] not in moving:
             # The tag dims with its icon.
-            dim = _faded(sprite, fade_levels.get(lb["id"], 0))
-            held["l"].append((("l", lb["id"]), (dim, ix, iy)))
+            key = ("l", lb["id"])
+            dim = _fade(key, sprite, painted_ats.get(lb["id"]), now)
+            held["l"].append((key, (dim, ix, iy)))
         else:
             out.append((sprite, ix, iy))
         _label_hits.append((
@@ -2153,6 +2189,7 @@ def live_icon_frame(now: float | None = None) -> list:
         ))
     if held is None:
         _held_frame = None
+        _held_alpha = {}
         _ghosts.clear()
         _rim_painted.clear()
     else:
@@ -2160,6 +2197,7 @@ def live_icon_frame(now: float | None = None) -> list:
             held["c"] + _ghost_items(now) + _classic_rim_items(now, rim_due)
             + held["g"] + held["i"] + held["l"]
         )
+        _held_alpha = dict(_held_alpha_next)
     return out
 
 
@@ -2174,7 +2212,13 @@ def draw_live_icons(surface) -> None:
     rotation._blit_live_connectors(
         surface, (0, 0), 0, [item for key, item in held if key[0] == "c"]
     )
+    step = (1.0 - radar_classic.FADE_FLOOR) / (radar_classic.FADE_LEVELS - 1)
     for key, (sprite, x, y) in ((k, it) for k, it in held if k[0] != "c"):
+        brightness = _held_alpha.get(key)
+        if brightness is not None:
+            # GPU renderer, on a frame composed on the CPU (pan, menus): the
+            # nearest stepped copy stands in for the continuous fade.
+            sprite = _faded(sprite, int(round((1.0 - brightness) / step)), holds_floor=False) or sprite
         surface.blit(sprite, (int(x) - sprite.get_width() // 2, int(y) - sprite.get_height() // 2))
     rotation._blit_live_connectors(surface, (0, 0), 0, _live_connectors)
     for sprite, x, y in frame:
