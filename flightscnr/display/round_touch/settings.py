@@ -127,6 +127,9 @@ RADAR_MOTION_LABELS = {
 }
 # Follow speed-based zoom bounds (issue #114) — portal / settings.json.
 LIVE_TRACKING_PREVIEW_MINUTES_MIN = 1.0
+# Renderer: "cpu" draws on software surfaces (the default), "gpu" draws the
+# radar with textures when the device has an accelerated renderer (see gpu.py).
+RENDERERS = ("cpu", "gpu")
 LIVE_TRACKING_PREVIEW_MINUTES_MAX = 30.0
 LIVE_TRACKING_RADIUS_KM_FLOOR = 1.0
 LIVE_TRACKING_RADIUS_KM_CEILING = 200.0
@@ -2990,6 +2993,26 @@ def classic_radar_enabled() -> bool:
 def smooth_motion_setting() -> bool:
     """True when the saved motion draws icons per frame (smooth or classic)."""
     return radar_motion_setting() != "standard"
+
+
+def renderer_setting() -> str:
+    """Saved renderer: cpu (default) | gpu. Takes effect when the app restarts."""
+    raw = str(_state.get("renderer") or "").strip().lower()
+    return raw if raw in RENDERERS else "cpu"
+
+
+def set_renderer(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    _state["renderer"] = raw if raw in RENDERERS else "cpu"
+    _save(_state)
+    # Saving the choice again is the way to retry after a failed GPU start.
+    try:
+        from display.round_touch import gpu
+
+        gpu.clear_state()
+    except Exception:
+        pass
+    return renderer_setting()
 
 
 def smooth_motion_enabled() -> bool:

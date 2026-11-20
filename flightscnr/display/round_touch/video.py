@@ -125,7 +125,12 @@ def init_display(width: int, height: int, fullscreen: bool) -> pygame.Surface:
             pygame.init()
             pygame.display.set_caption("FlightScnr Pi")
             logger.info("Opening SDL display %dx%d driver=%s", width, height, label)
-            surface = pygame.display.set_mode((width, height), flags)
+            from display.round_touch import gpu
+
+            # GPU renderer when chosen and available; None means the CPU one.
+            surface = gpu.open_display(width, height, flags)
+            if surface is None:
+                surface = pygame.display.set_mode((width, height), flags)
             try:
                 opened_w, opened_h = surface.get_size()
             except Exception:

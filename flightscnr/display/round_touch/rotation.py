@@ -18,7 +18,9 @@ import weakref
 
 import pygame
 
-from display.round_touch import frame_debug, theme
+from display.round_touch import frame_debug, gpu, theme
+
+logger = logging.getLogger(__name__)
 
 
 _rot_base: pygame.Surface | None = None
@@ -134,6 +136,9 @@ def prewarm_base(base_layer: pygame.Surface, layer_gen: int) -> None:
     live published radar layer — concurrent blit/present will lock-conflict.
     """
     global _next_base, _next_base_key
+    if gpu.active():
+        # The GPU rotates the layer as it draws it.
+        return
     rotation = rotation_degrees()
     # Key on generation only — the snapshot surface id differs from the
     # published layer id that present_radar_sweep sees.
@@ -245,7 +250,15 @@ def present_radar_sweep(
     their paint between sweep passes (see radar.live_held_frame), or None.
     ``held_for_gen(layer_gen)`` returns that list as it will be on a layer
     not shown yet (see radar.live_held_frame_for).
+
+    On the GPU renderer the frame is drawn by ``gpu_present`` instead.
     """
+    if gpu.active() and _present_gpu(
+        display, base_layer, layer_gen, sweep_angle_logical, sweep_color,
+        draw_sweep=draw_sweep, live_icons=live_icons,
+        live_connectors=live_connectors, live_rim=live_rim, held=held,
+    ):
+        return
     global _rot_base, _rot_base_key, _prev_sweep_rect, _pending_key, _needs_full
     global _next_base, _next_base_key, _prev_hud_rect, _prev_bubble_rect
     global _prev_airport_callout_rect, _prev_location_toast_rect
@@ -672,6 +685,10 @@ def _held_stamp(surface: pygame.Surface, rotation: int, key, item) -> None:
 
 def shown_layer_gen():
     """Generation of the radar layer the fast path is presenting, or None."""
+    if gpu.active():
+        from display.round_touch import gpu_present
+
+        return gpu_present.shown_layer_gen()
     return _rot_base_key[0] if _rot_base_key is not None else None
 
 
@@ -845,6 +862,28 @@ def _take_upload_bands(width: int, height: int) -> list[pygame.Rect]:
     if _upload_y >= height:
         _upload_y = None
     return [rect]
+
+
+def _present_gpu(display, base_layer, layer_gen, sweep_angle, sweep_color, **parts) -> bool:
+    """One radar frame on the GPU renderer. False hands the frame to the CPU path."""
+    global _needs_full
+    from display.round_touch import gpu_present
+
+    try:
+        if gpu_present.present_radar_sweep(
+            display, base_layer, layer_gen, sweep_angle, sweep_color, **parts
+        ):
+            return True
+    except Exception as exc:
+        logger.exception("GPU radar frame failed")
+        gpu.disable(f"radar frame failed: {exc}")
+        try:
+            gpu_present.reset()
+        except Exception:
+            pass
+    # The CPU path has not drawn this window yet: repaint all of it.
+    _needs_full = True
+    return False
 
 
 def _map_display_point(lx: float, ly: float, rotation: int, origin_off) -> tuple[int, int]:

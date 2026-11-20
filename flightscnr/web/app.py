@@ -183,6 +183,25 @@ def lookup_flight(callsign):
         return {"found": False, "error": str(e)}
 
 
+def _renderer_state() -> dict:
+    """What the display did with the renderer choice: {"state", "reason"}.
+
+    The display process leaves this in gpu_state.json: "ok" once the GPU
+    renderer is drawing, "failed" with a reason when it fell back to CPU.
+    """
+    try:
+        from display.round_touch import gpu
+
+        state = gpu.read_state()
+        return {
+            "state": str(state.get("status") or ""),
+            "reason": str(state.get("reason") or ""),
+        }
+    except Exception:
+        return {"state": "", "reason": ""}
+
+
+
 @app.get("/favicon.ico")
 def favicon():
     return send_from_directory(os.path.join(WEB_DIR, "static"), "favicon.ico", mimetype="image/x-icon")
@@ -1644,6 +1663,8 @@ def radar_json():
             "hud_tap_labels": settings.hud_tap_labels(),
             "smooth_motion": settings.smooth_motion_setting(),
             "radar_motion": settings.radar_motion_setting(),
+            "renderer": settings.renderer_setting(),
+            "renderer_state": _renderer_state(),
             "rim_target_style": settings.rim_target_style(),
             "show_precipitation": settings.show_precipitation(),
             "show_wildfires": settings.show_wildfires(),
@@ -1867,6 +1888,12 @@ def radar_save():
     elif "smooth_motion" in data:
         # Older portal pages and scripts still send the on/off switch.
         settings.set_smooth_motion(bool(data.get("smooth_motion")))
+    if "renderer" in data:
+        # Saved only on a change: saving also clears a failed GPU start, and
+        # every portal save would otherwise retry it at the next restart.
+        wanted = str(data.get("renderer") or "").strip().lower()
+        if wanted != settings.renderer_setting() or data.get("renderer_retry"):
+            settings.set_renderer(wanted)
     if "show_tag_leaders" in data:
         settings.set_show_tag_leaders(bool(data.get("show_tag_leaders")))
     if "tag_text_shadow" in data:
