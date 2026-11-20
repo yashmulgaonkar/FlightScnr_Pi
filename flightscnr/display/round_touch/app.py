@@ -2129,6 +2129,8 @@ class RoundTouchDisplay:
             radar.invalidate_frame_layer()
         elif action == "radar_motion":
             self._open_atc_picker("radar_motion")
+        elif action == "renderer":
+            self._open_atc_picker("renderer")
         elif action == "rim_style":
             self._open_atc_picker("rim_style")
         elif action == "precipitation":
@@ -2523,6 +2525,11 @@ class RoundTouchDisplay:
         if kind == "radar_motion":
             settings.set_radar_motion(choice)
             radar.invalidate_frame_layer()
+            return
+        if kind == "renderer":
+            # Nothing is saved until OK: switching restarts the app.
+            if choice in settings.RENDERERS and choice != settings.renderer_setting():
+                self._system_confirm = f"renderer_{choice}"
             return
         if kind == "min_height":
             try:
@@ -4871,7 +4878,13 @@ class RoundTouchDisplay:
 
         from utilities import system_control
 
-        if action == "reboot":
+        if action.startswith("renderer_"):
+            choice = action.split("_", 1)[1]
+            if choice not in settings.RENDERERS:
+                return
+            settings.set_renderer(choice)
+            result = system_control.request_app_restart()
+        elif action == "reboot":
             result = system_control.request_reboot()
         elif action == "shutdown":
             result = system_control.request_shutdown()
