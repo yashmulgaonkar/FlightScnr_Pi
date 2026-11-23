@@ -1086,6 +1086,7 @@ class RoundTouchDisplay:
                         live_rim=live_rim,
                         held=held,
                         held_for_gen=radar.live_held_frame_for,
+                        held_alpha=radar.live_held_alpha(),
                     )
                     self._stage("4_present", time.perf_counter() - _t)
                 else:
@@ -1101,6 +1102,7 @@ class RoundTouchDisplay:
                         live_rim=live_rim,
                         held=held,
                         held_for_gen=radar.live_held_frame_for,
+                        held_alpha=radar.live_held_alpha(),
                     )
                 return
 

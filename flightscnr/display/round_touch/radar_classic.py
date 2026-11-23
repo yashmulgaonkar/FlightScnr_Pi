@@ -120,3 +120,27 @@ def fade_brightness(level: int, *, holds_floor: bool = True) -> float:
         level = min(level, FADE_LEVELS - 1)
     step = (1.0 - FADE_FLOOR) / (FADE_LEVELS - 1)
     return max(0.0, 1.0 - level * step)
+
+
+# Continuous fade (GPU renderer): share of the sweep period over which the
+# paint decays towards the floor, phosphor style.
+GLOW_DECAY = 0.3
+# A departed target keeps decaying from the floor over this share of a period.
+GLOW_GONE_DECAY = 0.25
+
+
+def glow_brightness(age_s: float, period_s: float, *, holds_floor: bool = True) -> float:
+    """Brightness 0..1 of paint ``age_s`` old, as a smooth curve.
+
+    Full at the pass, then an exponential decay that settles on FADE_FLOOR by
+    the next pass. Paint that is not renewed (``holds_floor`` False) keeps
+    decaying from there to nothing. Needs a renderer where brightness is free
+    per draw; the stepped ``fade_level`` is the software equivalent.
+    """
+    if period_s <= 0.0 or age_s <= 0.0:
+        return 1.0
+    turns = age_s / period_s
+    level = FADE_FLOOR + (1.0 - FADE_FLOOR) * math.exp(-turns / GLOW_DECAY)
+    if not holds_floor and turns > 1.0:
+        level *= math.exp(-(turns - 1.0) / GLOW_GONE_DECAY)
+    return max(0.0, min(1.0, level))

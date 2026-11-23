@@ -1095,7 +1095,7 @@
   "portal.radar.renderer.label": "Megjelenítő",
   "portal.radar.renderer.cpu": "CPU (alapértelmezett)",
   "portal.radar.renderer.gpu": "GPU (ha az eszköz támogatja)",
-  "portal.radar.renderer.hint": "A GPU a grafikus chipen rajzolja a radart: kisebb terhelés a processzornak és simább mozgás. Ha az eszközben nincs gyorsított megjelenítő, magától visszavált CPU-ra. A módosításhoz megerősítés kell, majd az alkalmazás ment és újraindul.",
+  "portal.radar.renderer.hint": "A GPU a grafikus chipen rajzolja a radart: kisebb terhelés a processzornak, és a klasszikus radar folyamatosan halványul. Ha az eszközben nincs gyorsított megjelenítő, magától visszavált CPU-ra. A módosításhoz megerősítés kell, majd az alkalmazás ment és újraindul.",
   "portal.radar.renderer.failed": "A GPU nem tudott elindulni, ezért a CPU megjelenítő működik. Az újrapróbáláshoz válaszd a CPU-t, mentsd el, majd válaszd a GPU-t és mentsd el újra.",
   "portal.radar.renderer.active": "A GPU megjelenítő működik.",
   "portal.radar.renderer.confirm": "A megjelenítő váltása újraindítja az alkalmazást, a kijelző és a portál pár másodperc múlva újracsatlakozik. Az OK ment és újraindít, a Mégse megtartja a jelenlegit.",
