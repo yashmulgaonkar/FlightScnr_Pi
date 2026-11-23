@@ -83,10 +83,17 @@ def _notam_id(key: Any) -> str | None:
     return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
-def _title_label(title: Any) -> str:
-    """'New Bern, NC, Saturday, ...' -> 'New Bern'."""
-    head = str(title or "").split(",")[0].strip()
-    return (head[:18] or "TFR")
+def _title_full(title: Any) -> str:
+    """'disneyland theme park, CA, ...' -> 'Disneyland Theme Park'.
+
+    The FAA sends some names all lower or all upper case; mixed case is kept.
+    """
+    head = str(title or "").split(",")[0].strip() or "TFR"
+    return head.title() if head.islower() or head.isupper() else head
+
+
+def _short(name: str, limit: int = 18) -> str:
+    return name if len(name) <= limit else name[: limit - 1].rstrip() + "…"
 
 
 def _tag(xml: str, name: str) -> str | None:
@@ -138,9 +145,17 @@ _TYPE_NAMES = {
 def parse_detail(xml: str) -> dict[str, Any]:
     """Pull the active window and altitude limits from an XNOTAM detail file."""
     tz = _tag(xml, "codeTimeZone")
+    # Standing security TFRs carry no dates or purpose, only the NOTAM text.
+    text = _tag(xml, "txtDescrUSNS") or ""
     m = re.search(r"<TfrNot>\s*<codeType>\s*([^<\s]+)\s*</codeType>", xml)
     return {
         "purpose": _tag(xml, "txtDescrPurpose"),
+        "perm": bool(re.search(r"UNTIL FURTHER NOTICE|-PERM\b", text)),
+        "restriction": (
+            "All aircraft ops prohibited unless authorized"
+            if re.search(r"ALL ACFT\s+(?:FLT\s+)?OPS\s+ARE PROHIBITED", text)
+            else None
+        ),
         "type_name": _TYPE_NAMES.get(m.group(1)) if m else None,
         "city": _tag(xml, "txtNameCity"),
         "facility": _tag(xml, "codeFacility"),
@@ -198,7 +213,8 @@ def parse_features(
             {
                 "id": str(feat.get("id") or props.get("GID") or props.get("NOTAM_KEY")),
                 "notam": nid,
-                "name": _title_label(props.get("TITLE")),
+                "title": _title_full(props.get("TITLE")),
+                "name": _short(_title_full(props.get("TITLE"))),
                 "kind": str(props.get("LEGAL") or "").strip() or None,
                 "state": str(props.get("STATE") or "").strip() or None,
                 "rings": rings,
@@ -403,6 +419,14 @@ def _window_text(start: float | None, end: float | None) -> str | None:
     return None
 
 
+def _open_ended_text(area: dict[str, Any]) -> str | None:
+    """'Until further notice' for standing TFRs that have no expiry."""
+    if not area.get("perm"):
+        return None
+    start = area.get("start")
+    return f"from {_zulu(start)} · until further notice" if start else "Until further notice"
+
+
 def callout_for(
     area: dict[str, Any], x: int | None = None, y: int | None = None
 ) -> dict[str, Any]:
@@ -419,7 +443,7 @@ def callout_for(
             anchor = geo.screen_to_lat_lon(x, y)
         except Exception:
             anchor = None
-    head = f"TFR {area['name']}"
+    head = f"TFR {area.get('title') or area['name']}"
     kind = area.get("type_name") or (
         str(area["kind"]).title() if area.get("kind") else None
     )
@@ -429,14 +453,15 @@ def callout_for(
     if area.get("upper") or area.get("lower"):
         limits = f"{area.get('lower') or '?'} – {area.get('upper') or '?'}"
     lines = [head]
-    purpose = str(area.get("purpose") or "").strip()
+    purpose = str(area.get("purpose") or area.get("restriction") or "").strip()
     if purpose:
         lines += textwrap.wrap(purpose, 34, max_lines=2, placeholder="…")
     lines += [
         t
         for t in (
             limits,
-            _window_text(area.get("start"), area.get("end")),
+            _window_text(area.get("start"), area.get("end"))
+            or _open_ended_text(area),
             " · ".join(
                 p for p in (
                     f"NOTAM {area['notam']}" if area.get("notam") else None,

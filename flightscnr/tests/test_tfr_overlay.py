@@ -58,6 +58,16 @@ class TestParse(unittest.TestCase):
         self.assertEqual([a["name"] for a in out], ["New Bern"])
         self.assertEqual(out[0]["notam"], "6/9338")
 
+    def test_names_are_cased_and_only_the_radar_label_is_shortened(self):
+        out = to.parse_features(
+            [_feat("6/1-1-FDC-F", "disneyland theme park, CA, Monday", _poly(-77.05, 38.85))],
+            center_lat=38.9, center_lon=-77.0, radius_km=50)
+        self.assertEqual(out[0]["title"], "Disneyland Theme Park")
+        self.assertEqual(out[0]["name"], "Disneyland Theme…")
+        self.assertEqual(to._title_full("WASHINGTON, DC"), "Washington")
+        self.assertEqual(to._title_full("New Bern, NC"), "New Bern")
+        self.assertIn("Disneyland Theme Park", to.callout_for(out[0])["ident"])
+
     def test_notam_id(self):
         self.assertEqual(to._notam_id("5/6914-1-FDC-F"), "5/6914")
         self.assertIsNone(to._notam_id("junk"))
@@ -68,6 +78,19 @@ class TestParse(unittest.TestCase):
         self.assertFalse(to.is_active(d, _ts("2026-11-28T19:00:00")))
         self.assertTrue(to.is_active(d, _ts("2026-11-28T21:00:00")))
         self.assertFalse(to.is_active(d, _ts("2026-11-29T00:00:00")))
+
+    def test_standing_security_tfr_details(self):
+        d = to.parse_detail("<Not><codeTimeZone>UTC</codeTimeZone><TfrNot><codeType>99.7</codeType></TfrNot>"
+                            "<txtDescrUSNS>!FDC 6/6925 ZLA CA..PURSUANT TO 14 CFR 99.7, ALL ACFT FLT OPS ARE "
+                            "PROHIBITED: WI AN AREA EFFECTIVE IMMEDIATELY UNTIL FURTHER NOTICE. 26-PERM"
+                            "</txtDescrUSNS></Not>")
+        self.assertTrue(d["perm"])
+        self.assertEqual(d["restriction"], "All aircraft ops prohibited unless authorized")
+        self.assertIsNone(d["end"])
+        area = {"name": "Disney", "rings": [[(1.0, 1.0), (1.0, 2.0), (2.0, 1.0)]], **d}
+        lines = to.callout_for(area)["lines"]
+        self.assertIn("All aircraft ops prohibited unless authorized", " ".join(lines))  # wrapped
+        self.assertIn("Until further notice", lines)
 
     def test_unknown_window_stays_visible(self):
         d = to.parse_detail("<Not><dateEffective>2026-11-28T20:00:00</dateEffective>"
