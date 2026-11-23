@@ -239,6 +239,19 @@ def _plane_glyph(size: int, flight: dict | None = None) -> pygame.Surface:
     return _fit_glyph(surf, size)
 
 
+def _tfr_glyph(size: int) -> pygame.Surface:
+    """Magenta outlined polygon, matching the TFR region on the radar."""
+    big = size * 2
+    surf = pygame.Surface((big, big), pygame.SRCALPHA)
+    c, r = big // 2, big // 2 - 2
+    pts = [(c + r * math.cos(math.radians(a)), c + r * math.sin(math.radians(a)))
+           for a in range(-90, 270, 60)]
+    color = (230, 80, 230)
+    pygame.draw.polygon(surf, (*color, 90), pts)
+    pygame.draw.polygon(surf, (*color, 255), pts, max(2, big // 8))
+    return _fit_glyph(surf, size)
+
+
 def _fit_glyph(surf: pygame.Surface, size: int) -> pygame.Surface:
     """Crop to the drawn pixels, then scale to fill the icon box."""
     crop = surf.get_bounding_rect(min_alpha=8)
@@ -461,6 +474,8 @@ def _draw_uncached(surface: pygame.Surface) -> pygame.Rect | None:
                 lead = _chart_glyph(icon_px, entry.get("chart"))
             else:
                 lead = _classic_pin_glyph(icon_px, entry.get("airport"))
+        elif entry.get("kind") == "tfr":
+            lead = _tfr_glyph(icon_px)
         else:
             lead = _plane_glyph(icon_px, entry.get("flight"))
         label_a = int(255 * max(0.0, wedge_ps[i] - 0.55) / 0.45)

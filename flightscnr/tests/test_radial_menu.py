@@ -182,6 +182,20 @@ class TestPostAnimationStamp:
         radial_menu.close()
         assert radial_menu._stamp is None
 
+    def test_tfr_wedge_draws_with_its_own_glyph(self):
+        import time as _time
+
+        radial_menu.open_menu(
+            theme.CENTER_X, theme.CENTER_Y,
+            [{"kind": "flight", "label": "N1", "flight": {"heading": 10}},
+             {"kind": "airport", "label": "KHMT", "airport": {"ident": "KHMT"}},
+             {"kind": "tfr", "label": "TFR", "tfr": {"name": "X"}}],
+        )
+        radial_menu._opened_at = _time.monotonic() - 5.0
+        surface = pygame.Surface((theme.SIZE, theme.SIZE))
+        assert radial_menu.draw(surface) is not None
+        assert radial_menu._tfr_glyph(theme.s(14)).get_width() > 0
+
     def test_animating_menu_does_not_cache(self):
         from display.round_touch import radial_menu, theme
 

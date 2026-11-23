@@ -426,6 +426,11 @@
             </div>
             <p class="hint">FAA prohibited (red, P-) and restricted (orange, R-) airspace areas from the FAA special-use airspace dataset (no API key). United States only. Informational only — never use for navigation or flight planning; check current NOTAMs. Refreshes every few hours and on recenter or zoom.</p>
             <div class="chk">
+                <label for="show_tfrs">Show TFRs</label>
+                <span class="switch"><input id="show_tfrs" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">Active FAA temporary flight restrictions (magenta) — VIP movements, stadiums, airshows, wildfire and disaster areas, space launches (tfr.faa.gov, no API key). United States only. Upcoming and expired TFRs are hidden. Informational only — never use for navigation or flight planning; check current NOTAMs. Refreshes every 10 minutes.</p>
+            <div class="chk">
                 <label for="show_airport_centerlines">Show airport centerlines</label>
                 <span class="switch"><input id="show_airport_centerlines" type="checkbox"><span class="track"></span></span>
             </div>
@@ -1921,6 +1926,7 @@ async function loadAll() {
         if ($("show_earthquakes")) $("show_earthquakes").checked = !!r.show_earthquakes;
         if ($("show_cyclones")) $("show_cyclones").checked = !!r.show_cyclones;
         if ($("show_restricted_airspace")) $("show_restricted_airspace").checked = !!r.show_restricted_airspace;
+        if ($("show_tfrs")) $("show_tfrs").checked = !!r.show_tfrs;
         if ($("show_airport_centerlines")) $("show_airport_centerlines").checked = !!r.show_airport_centerlines;
         if ($("show_airport_icons")) $("show_airport_icons").checked = !!r.show_airport_icons;
         if ($("airport_icon_style")) $("airport_icon_style").value = r.airport_icon_style || "classic";
@@ -2424,6 +2430,7 @@ async function saveRadar() {
                 show_earthquakes: $("show_earthquakes") ? $("show_earthquakes").checked : false,
                 show_cyclones: $("show_cyclones") ? $("show_cyclones").checked : false,
                 show_restricted_airspace: $("show_restricted_airspace") ? $("show_restricted_airspace").checked : false,
+                show_tfrs: $("show_tfrs") ? $("show_tfrs").checked : false,
                 show_airport_centerlines: $("show_airport_centerlines") ? $("show_airport_centerlines").checked : false,
                 show_airport_icons: $("show_airport_icons") ? $("show_airport_icons").checked : false,
                 airport_icon_style: $("airport_icon_style") ? $("airport_icon_style").value : "classic",
@@ -2744,6 +2751,7 @@ async function saveAndReloadSettings(statusId) {
                 show_earthquakes: $("show_earthquakes") ? $("show_earthquakes").checked : false,
                 show_cyclones: $("show_cyclones") ? $("show_cyclones").checked : false,
                 show_restricted_airspace: $("show_restricted_airspace") ? $("show_restricted_airspace").checked : false,
+                show_tfrs: $("show_tfrs") ? $("show_tfrs").checked : false,
                 show_airport_centerlines: $("show_airport_centerlines") ? $("show_airport_centerlines").checked : false,
                 show_airport_icons: $("show_airport_icons") ? $("show_airport_icons").checked : false,
                 airport_icon_style: $("airport_icon_style") ? $("airport_icon_style").value : "classic",

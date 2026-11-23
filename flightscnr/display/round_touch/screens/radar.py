@@ -32,7 +32,7 @@ from display.round_touch import (
     wildfire_overlay,
     earthquake_overlay,
 )
-from display.round_touch import airspace_overlay, cyclone_overlay
+from display.round_touch import airspace_overlay, cyclone_overlay, tfr_overlay
 from display.round_touch import alert_prefs, frame_debug, gpu
 from display.round_touch import radar_classic
 from display.round_touch import vessel_declutter
@@ -339,6 +339,7 @@ def _build_frame_layer(build: pygame.Surface, backdrop, flights, offset) -> bool
     build.blit(backdrop, (0, 0))
     _t = _rebuild_stage("2r_blit", _t)
     airspace_overlay.draw_airspace(build, pan_offset=offset)
+    tfr_overlay.draw_tfrs(build, pan_offset=offset)
     wildfire_overlay.draw_fires(build, pan_offset=offset)
     earthquake_overlay.draw_quakes(build, pan_offset=offset)
     cyclone_overlay.draw_cyclones(build, pan_offset=offset)
@@ -591,6 +592,7 @@ def draw_radar(
     wildfire_overlay.request_refresh()
     earthquake_overlay.request_refresh()
     airspace_overlay.request_refresh()
+    tfr_overlay.request_refresh()
     cyclone_overlay.request_refresh()
 
     if pan_mode:
@@ -645,6 +647,7 @@ def draw_radar(
         else:
             airport_overlay.draw_airports(surface, pan_offset=offset)
             airspace_overlay.draw_airspace(surface, pan_offset=offset)
+            tfr_overlay.draw_tfrs(surface, pan_offset=offset)
             wildfire_overlay.draw_fires(surface, pan_offset=offset)
             earthquake_overlay.draw_quakes(surface, pan_offset=offset)
             cyclone_overlay.draw_cyclones(surface, pan_offset=offset)
@@ -3139,7 +3142,11 @@ def _draw_map_attribution(surface):
     quake_text = earthquake_overlay.attribution_text()
     if quake_text:
         parts.append(quake_text)
-    for extra in (airspace_overlay.attribution_text(), cyclone_overlay.attribution_text()):
+    for extra in (
+        airspace_overlay.attribution_text(),
+        tfr_overlay.attribution_text(),
+        cyclone_overlay.attribution_text(),
+    ):
         if extra:
             parts.append(extra)
     if not parts:

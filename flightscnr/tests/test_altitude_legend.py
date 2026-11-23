@@ -92,6 +92,7 @@ def test_radar_cached_layer_contains_legend_in_each_motion_mode(motion):
     with ExitStack() as stack:
         for module, name in (
             (radar.airspace_overlay, "draw_airspace"),
+            (radar.tfr_overlay, "draw_tfrs"),
             (radar.wildfire_overlay, "draw_fires"),
             (radar.earthquake_overlay, "draw_quakes"),
             (radar.cyclone_overlay, "draw_cyclones"),
@@ -120,7 +121,8 @@ def test_map_credits_stay_inside_controls_and_clear_of_legend(side):
     theme.set_framebuffer_side(side)
     surface = pygame.Surface((side, side), pygame.SRCALPHA)
     providers = (radar.map_bg, radar.rainviewer_overlay, radar.wildfire_overlay,
-                 radar.earthquake_overlay, radar.airspace_overlay, radar.cyclone_overlay)
+                 radar.earthquake_overlay, radar.airspace_overlay, radar.tfr_overlay,
+                 radar.cyclone_overlay)
     with ExitStack() as stack:
         for provider in providers:
             stack.enter_context(mock.patch.object(provider, "attribution_text", return_value=None))
