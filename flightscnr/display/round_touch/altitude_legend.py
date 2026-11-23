@@ -20,6 +20,19 @@ _TICKS = ((0, "0ft"), (2000, "2k"), (8000, "8k"), (10000, "10k"),
           (20000, "20k"), (30000, "30k"), (40000, "40k+"))
 
 
+# Labels are drawn this many times larger, rotated smoothly, then scaled down:
+# pygame.transform.rotate has no smoothing and leaves jagged glyph edges.
+_LABEL_OVERSAMPLE = 4
+
+
+def _tangent_label(text: str, font_size: int, angle: float) -> pygame.Surface:
+    big = draw_utils.load_font(font_size * _LABEL_OVERSAMPLE).render(text, True, (220, 233, 236))
+    big = pygame.transform.rotozoom(big, -math.degrees(angle - math.pi / 2), 1.0)
+    return pygame.transform.smoothscale(
+        big, (max(1, big.get_width() // _LABEL_OVERSAMPLE), max(1, big.get_height() // _LABEL_OVERSAMPLE))
+    )
+
+
 @lru_cache(maxsize=4)
 def _panel(radius: int, font_size: int) -> tuple[pygame.Surface, pygame.Rect]:
     """Cache a narrow rim segment, with glyphs tangent to the circular screen."""
@@ -29,7 +42,6 @@ def _panel(radius: int, font_size: int) -> tuple[pygame.Surface, pygame.Rect]:
     bar_r = radius - 2 * unit
     text_r = radius - 9 * unit
     bar_half = max(1, round(unit / 2))
-    font = draw_utils.load_font(font_size)
     # Leave the south compass glyph between the 10k and 20k labels.
     angles = [math.radians(a) for a in (128, 116, 104, 97, 78, 65, 52)]
     start, end = angles[0], angles[-1]
@@ -55,8 +67,7 @@ def _panel(radius: int, font_size: int) -> tuple[pygame.Surface, pygame.Rect]:
         pygame.draw.line(panel, color, point(bar_r-bar_half, angle), point(bar_r+bar_half, angle), 2)
     for index, (_, text) in enumerate(_TICKS):
         angle = angles[index]
-        label = font.render(text, True, (220, 233, 236))
-        label = pygame.transform.rotate(label, -math.degrees(angle-math.pi/2))
+        label = _tangent_label(text, font_size, angle)
         panel.blit(label, label.get_rect(center=point(text_r, angle)))
     # Crop transparent space; no full-frame cached surfaces on the Pi.
     crop = panel.get_bounding_rect()
