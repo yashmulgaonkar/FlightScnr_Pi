@@ -3099,14 +3099,13 @@ def _draw_map_attribution(surface):
     text = " · ".join(parts)
     font = draw.load_font(theme.s(8))
     rendered = draw.render_text_cached(font, text, theme.HINT)
-    # Keep credits inside the bottom controls when the rim is used by the
-    # altitude scale. Neither the HUD geometry nor its hit targets change.
-    if altitude_legend.visible():
-        inner_radius = int(theme.VISIBLE_RADIUS * 0.84) - theme.s(23)
-        bottom = theme.CENTER_Y + theme.VISIBLE_RADIUS - theme.s(110)
-        dy = bottom - theme.CENTER_Y
-        half = int(math.sqrt(max(1, inner_radius**2 - dy**2)))
-        if rendered.get_width() > 2 * half:
+    # The altitude scale uses the bottom rim, so the credits sit centred just
+    # above it, clear of the scale and its labels and of a bottom HUD.
+    legend = altitude_legend.rect()
+    if legend is not None:
+        bottom = legend.top - theme.s(4)
+        half = draw.circle_half_width_at_row(bottom - rendered.get_height(), rendered.get_height())
+        if half > 0 and rendered.get_width() > 2 * half:
             rendered = pygame.transform.smoothscale(rendered, (2 * half, rendered.get_height()))
         surface.blit(rendered, rendered.get_rect(midbottom=(theme.CENTER_X, bottom)))
         return

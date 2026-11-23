@@ -127,8 +127,12 @@ def test_map_credits_stay_inside_controls_and_clear_of_legend(side):
         radar.map_bg.attribution_text.return_value = "© OpenStreetMap contributors · © CARTO"
         radar._draw_map_attribution(surface)
     credits = surface.get_bounding_rect()
+    legend = altitude_legend.rect()
     assert credits.width > 0
     assert abs(credits.centerx - theme.CENTER_X) <= 1  # Font ink may have asymmetric padding.
-    inner = int(theme.VISIBLE_RADIUS * 0.84) - theme.s(20)
+    # Just above the scale, not floating in the radar field.
+    assert credits.bottom <= legend.top
+    assert legend.top - credits.bottom <= theme.s(12)
+    limit = theme.VISIBLE_RADIUS - theme.s(6)
     for x, y in (credits.topleft, credits.topright, credits.bottomleft, credits.bottomright):
-        assert (x-theme.CENTER_X)**2 + (y-theme.CENTER_Y)**2 < inner**2
+        assert (x-theme.CENTER_X)**2 + (y-theme.CENTER_Y)**2 < limit**2

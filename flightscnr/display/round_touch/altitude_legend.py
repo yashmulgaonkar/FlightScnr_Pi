@@ -67,6 +67,14 @@ def visible() -> bool:
     return settings.color_by_altitude() and settings.traffic_mode() != "marine"
 
 
+def rect() -> pygame.Rect | None:
+    """Where the palette is drawn, or None while it is hidden."""
+    if not visible():
+        return None
+    _, offset = _panel(theme.VISIBLE_RADIUS, theme.s(6))
+    return offset.move(theme.CENTER_X, theme.CENTER_Y)
+
+
 def draw(surface: pygame.Surface) -> pygame.Rect | None:
     """Place the palette outside the menu without changing the menu geometry."""
     if not visible():
