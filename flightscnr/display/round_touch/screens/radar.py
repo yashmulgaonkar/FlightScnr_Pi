@@ -19,6 +19,7 @@ import pygame
 
 from display.round_touch import (
     aircraft,
+    altitude_legend,
     airport_overlay,
     draw,
     geo,
@@ -349,6 +350,7 @@ def _build_frame_layer(build: pygame.Surface, backdrop, flights, offset) -> bool
     _t = _rebuild_stage("2r_flights", _t)
     _draw_status(build, flights)
     _draw_map_attribution(build)
+    altitude_legend.draw(build)
     try:
         from display.round_touch import zoom_buttons
 
@@ -649,6 +651,7 @@ def draw_radar(
             _draw_flights(surface, flights)
             _draw_status(surface, flights)
             _draw_map_attribution(surface)
+            altitude_legend.draw(surface)
             from display.round_touch import zoom_buttons
 
             zoom_buttons.draw(surface)
@@ -3144,6 +3147,16 @@ def _draw_map_attribution(surface):
     text = " · ".join(parts)
     font = draw.load_font(theme.s(8))
     rendered = draw.render_text_cached(font, text, theme.HINT)
+    # The altitude scale uses the bottom rim, so the credits sit centred just
+    # above it, clear of the scale and its labels and of a bottom HUD.
+    legend = altitude_legend.rect()
+    if legend is not None:
+        bottom = legend.top - theme.s(4)
+        half = draw.circle_half_width_at_row(bottom - rendered.get_height(), rendered.get_height())
+        if half > 0 and rendered.get_width() > 2 * half:
+            rendered = pygame.transform.smoothscale(rendered, (2 * half, rendered.get_height()))
+        surface.blit(rendered, rendered.get_rect(midbottom=(theme.CENTER_X, bottom)))
+        return
     # Sit near the bottom rim (was ~0.52·R — mid-lower and too prominent).
     y = theme.CENTER_Y + theme.VISIBLE_RADIUS - theme.s(22) - rendered.get_height()
     half = draw.circle_half_width_at_row(y, rendered.get_height())
