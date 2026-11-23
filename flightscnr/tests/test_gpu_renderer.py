@@ -440,6 +440,17 @@ class TestFadeFollowsTheRenderer:
         radar._held_alpha_next.clear()
 
 
+class TestCpuComposedGhost:
+    def test_nearly_gone_ghost_is_not_drawn_at_full_brightness(self, monkeypatch):
+        sprite = _dot((255, 255, 255, 255))
+        monkeypatch.setattr(radar, "_held_frame", [(("i", "a"), (sprite, 5, 5))])
+        monkeypatch.setattr(radar, "_held_alpha", {("i", "a"): 0.07})
+        monkeypatch.setattr(radar, "live_icon_frame", lambda *a, **k: [])
+        surface = pygame.Surface((10, 10), pygame.SRCALPHA)
+        radar.draw_live_icons(surface)
+        assert surface.get_at((5, 5))[3] == 0
+
+
 class TestHudTexture:
     def _hud(self, monkeypatch, color, gen):
         from display.round_touch import radar_hud

@@ -2218,7 +2218,11 @@ def draw_live_icons(surface) -> None:
         if brightness is not None:
             # GPU renderer, on a frame composed on the CPU (pan, menus): the
             # nearest stepped copy stands in for the continuous fade.
-            sprite = _faded(sprite, int(round((1.0 - brightness) / step)), holds_floor=False) or sprite
+            sprite = _faded(sprite, int(round((1.0 - brightness) / step)), holds_floor=False)
+            if sprite is None:
+                # The stepped table runs out before the smooth curve does; the
+                # paint is as good as gone, so do not fall back to full brightness.
+                continue
         surface.blit(sprite, (int(x) - sprite.get_width() // 2, int(y) - sprite.get_height() // 2))
     rotation._blit_live_connectors(surface, (0, 0), 0, _live_connectors)
     for sprite, x, y in frame:
