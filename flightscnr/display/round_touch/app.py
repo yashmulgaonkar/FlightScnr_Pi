@@ -2163,6 +2163,14 @@ class RoundTouchDisplay:
             if settings.show_restricted_airspace():
                 airspace_overlay.request_refresh(force=True)
             radar.invalidate_frame_layer()
+        elif action == "tfrs":
+            from display.round_touch import tfr_overlay
+
+            settings.toggle_show_tfrs()
+            tfr_overlay.invalidate()
+            if settings.show_tfrs():
+                tfr_overlay.request_refresh(force=True)
+            radar.invalidate_frame_layer()
         elif action == "airport_centerlines":
             from display.round_touch import airport_overlay
 
@@ -6777,7 +6785,19 @@ class RoundTouchDisplay:
         pick_r = theme.s(24)
         near_flights = radar.flights_near(self._radar_flights(), x, y, pick_r)
         near_airports = airport_overlay.airports_near(x, y, pick_r)
-        if len(near_flights) + len(near_airports) >= 2:
+        # A TFR under the finger is a target too, so a tap on an aircraft or
+        # airport inside one offers a menu instead of always hiding the TFR.
+        from display.round_touch import tfr_overlay
+
+        tfr = tfr_overlay.pick_tfr_at(x, y)
+        if tfr is not None:
+            # The pick radius for a lone aircraft/airport is wider than the
+            # menu's; include whatever would have won so it stays selectable.
+            if flight is not None and all(f is not flight for f, _ in near_flights):
+                near_flights.append((flight, flight_d2 if flight_d2 is not None else 0))
+            if airport is not None and all(a is not airport for a, _ in near_airports):
+                near_airports.append((airport, airport_d2 if airport_d2 is not None else 0))
+        if len(near_flights) + len(near_airports) + (1 if tfr is not None else 0) >= 2:
             from utilities.airline_branding import display_flight_id_for_flight
 
             cands = [
@@ -6797,8 +6817,14 @@ class RoundTouchDisplay:
                 for a, d2 in near_airports
             ]
             cands.sort(key=lambda item: item[0])
+            items = [c[1] for c in cands]
+            if tfr is not None:
+                # Last wedge, always kept even when the ring is full.
+                items = items[: radial_menu.MAX_ENTRIES - 1] + [
+                    {"kind": "tfr", "label": "TFR", "tfr": tfr, "x": x, "y": y}
+                ]
             airport_overlay.clear_callout()
-            radial_menu.open_menu(x, y, [c[1] for c in cands])
+            radial_menu.open_menu(x, y, items)
             radar.invalidate_frame_layer()
             self._note_activity()
             return True
@@ -6834,12 +6860,25 @@ class RoundTouchDisplay:
             radar.invalidate_frame_layer()
             self._note_activity()
             return True
+        # Lowest priority: a tap inside a TFR region shows its details.
+        if tfr is not None:
+            airport_overlay.show_callout(tfr_overlay.callout_for(tfr, x, y))
+            self._note_activity()
+            return True
         return False
 
     def _radial_menu_select(self, entry: dict) -> None:
         """Open the target picked from the radial menu."""
         if entry.get("kind") == "flight" and entry.get("flight") is not None:
             self._open_picked_flight(entry["flight"])
+            return
+        if entry.get("kind") == "tfr" and entry.get("tfr") is not None:
+            from display.round_touch import tfr_overlay
+
+            airport_overlay.show_callout(
+                tfr_overlay.callout_for(entry["tfr"], entry.get("x"), entry.get("y"))
+            )
+            self._note_activity()
             return
         airport = entry.get("airport")
         if airport is None:

@@ -1671,6 +1671,7 @@ def radar_json():
             "earthquake_voice_enabled": settings.earthquake_voice_enabled(),
             "show_cyclones": settings.show_cyclones(),
             "show_restricted_airspace": settings.show_restricted_airspace(),
+            "show_tfrs": settings.show_tfrs(),
             "show_airport_centerlines": settings.show_airport_centerlines(),
             "show_airport_icons": settings.show_airport_icons(),
             "airport_icon_style": settings.airport_icon_style(),
@@ -1932,6 +1933,13 @@ def radar_save():
         airspace_overlay.invalidate()
         if settings.show_restricted_airspace():
             airspace_overlay.request_refresh(force=True)
+    if "show_tfrs" in data:
+        from display.round_touch import tfr_overlay
+
+        settings.set_show_tfrs(bool(data.get("show_tfrs")))
+        tfr_overlay.invalidate()
+        if settings.show_tfrs():
+            tfr_overlay.request_refresh(force=True)
     if "earthquake_voice_enabled" in data:
         from display.round_touch import earthquake_overlay
 

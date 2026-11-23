@@ -229,5 +229,76 @@ class TestAirportTapPriority(unittest.TestCase):
         fake._open_picked_fire.assert_not_called()
 
 
+class TestMultiLineCallout(unittest.TestCase):
+    def test_lines_callout_draws(self):
+        import pygame
+
+        from display.round_touch import airport_overlay, theme
+
+        pygame.init()
+        surf = pygame.Surface((theme.SIZE, theme.SIZE), pygame.SRCALPHA)
+        airport_overlay.show_callout(
+            {"lat": 0.0, "lon": 0.0, "lines": ["TFR X", "purpose", "SFC – 5000 ft", "NOTAM 6/1"]}
+        )
+        try:
+            with mock.patch.object(
+                airport_overlay, "_screen_xy", return_value=(theme.CENTER_X, theme.CENTER_Y)
+            ):
+                rect = airport_overlay.draw_callout(surf)
+            self.assertIsNotNone(rect)
+            self.assertGreater(rect.height, theme.s(40))
+        finally:
+            airport_overlay.clear_callout()
+
+
+class TestTfrTapPriority(unittest.TestCase):
+    """A TFR under the finger is a menu target, not hidden behind aircraft."""
+
+    def _tap(self, flight, tfr):
+        from display.round_touch.app import RoundTouchDisplay
+
+        fake = mock.Mock()
+        fake._radar_flights = lambda: [flight] if flight else []
+        fake._note_activity = mock.Mock()
+        near = [(flight, 4.0)] if flight else []
+        base = "display.round_touch.app."
+        with mock.patch(base + "radar.pick_flight_at",
+                        return_value=(flight, 4.0 if flight else None)), \
+             mock.patch(base + "radar.flights_near", return_value=list(near)), \
+             mock.patch(base + "radar.invalidate_frame_layer"), \
+             mock.patch(base + "wildfire_overlay.pick_fire_at", return_value=(None, None)), \
+             mock.patch(base + "earthquake_overlay.pick_quake_at", return_value=(None, None)), \
+             mock.patch(base + "airport_overlay.pick_airport_at", return_value=(None, None)), \
+             mock.patch(base + "airport_overlay.airports_near", return_value=[]), \
+             mock.patch(base + "airport_overlay.show_callout") as show, \
+             mock.patch("display.round_touch.tfr_overlay.pick_tfr_at", return_value=tfr), \
+             mock.patch("display.round_touch.tfr_overlay.callout_for", return_value={"ident": "T"}), \
+             mock.patch("display.round_touch.radial_menu.open_menu") as menu:
+            opened = RoundTouchDisplay._open_flight_or_fire_at(fake, 100, 500)
+        return fake, opened, menu, show
+
+    def test_aircraft_inside_tfr_offers_menu_with_tfr_last(self):
+        flight = {"callsign": "UAL1"}
+        tfr = {"name": "Here", "rings": []}
+        fake, opened, menu, show = self._tap(flight, tfr)
+        self.assertTrue(opened)
+        fake._open_picked_flight.assert_not_called()
+        items = menu.call_args[0][2]
+        self.assertEqual([i["kind"] for i in items], ["flight", "tfr"])
+        self.assertIs(items[-1]["tfr"], tfr)
+
+    def test_lone_tfr_shows_details(self):
+        fake, opened, menu, show = self._tap(None, {"name": "Here", "rings": []})
+        self.assertTrue(opened)
+        menu.assert_not_called()
+        show.assert_called_once()
+
+    def test_aircraft_outside_tfr_still_opens_directly(self):
+        flight = {"callsign": "UAL1"}
+        fake, opened, menu, show = self._tap(flight, None)
+        menu.assert_not_called()
+        fake._open_picked_flight.assert_called_once_with(flight)
+
+
 if __name__ == "__main__":
     unittest.main()

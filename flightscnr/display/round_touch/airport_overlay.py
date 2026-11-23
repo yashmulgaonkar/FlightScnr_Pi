@@ -633,7 +633,13 @@ def draw_callout(
     oy = int(pan_offset[1]) if pan_offset else 0
     pin_x, pin_y = int(pos[0]) + ox, int(pos[1]) + oy
 
-    line1, line2 = _callout_lines(airport)
+    extra = airport.get("lines")
+    if extra:
+        # Generic multi-line toast (e.g. TFR details): first line is the title.
+        line1, rest = str(extra[0]), [str(t) for t in extra[1:] if t]
+    else:
+        line1, line2 = _callout_lines(airport)
+        rest = [line2] if line2 else []
     font1 = draw.load_font(max(12, theme.s(14)), bold=True)
     font2 = draw.load_font(max(10, theme.s(12)), bold=False)
     try:
@@ -644,15 +650,13 @@ def draw_callout(
         glyph, fill_rgba = (28, 30, 34), (255, 255, 255, 180)
 
     surf1 = font1.render(line1, True, theme.TAG_TYPE)
-    surf2 = font2.render(line2, True, glyph) if line2 else None
+    rest_surfs = [font2.render(t, True, glyph) for t in rest]
     pad_x = theme.s(12)
     pad_y = theme.s(8)
-    gap = theme.s(2) if surf2 is not None else 0
-    width = pad_x * 2 + max(
-        surf1.get_width(), surf2.get_width() if surf2 is not None else 0
-    )
-    height = pad_y * 2 + surf1.get_height() + gap + (
-        surf2.get_height() if surf2 is not None else 0
+    gap = theme.s(2) if rest_surfs else 0
+    width = pad_x * 2 + max([surf1.get_width()] + [r.get_width() for r in rest_surfs])
+    height = pad_y * 2 + surf1.get_height() + sum(
+        gap + r.get_height() for r in rest_surfs
     )
     # Prefer above the pin so the finger does not cover the toast.
     bubble = pygame.Rect(0, 0, width, height)
@@ -694,9 +698,11 @@ def draw_callout(
     )
     y = pad_y
     panel.blit(surf1, ((bubble.width - surf1.get_width()) // 2, y))
-    y += surf1.get_height() + gap
-    if surf2 is not None:
-        panel.blit(surf2, ((bubble.width - surf2.get_width()) // 2, y))
+    y += surf1.get_height()
+    for r in rest_surfs:
+        y += gap
+        panel.blit(r, ((bubble.width - r.get_width()) // 2, y))
+        y += r.get_height()
     surface.blit(panel, bubble.topleft)
     _callout_rect = bubble.copy()
     return _callout_rect

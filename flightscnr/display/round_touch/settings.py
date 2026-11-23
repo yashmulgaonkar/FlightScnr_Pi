@@ -452,6 +452,8 @@ _defaults = {
     # NOAA NHC active cyclones; FAA prohibited/restricted airspace (US).
     "show_cyclones": False,
     "show_restricted_airspace": False,
+    # FAA temporary flight restrictions (US).
+    "show_tfrs": False,
     # OurAirports runway centerlines on dark/light maps (not VFR).
     "show_airport_centerlines": True,
     # airport.png pins for large/medium/small airports in range.
@@ -1477,6 +1479,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("earthquake_voice_enabled"),
         bool(state.get("show_cyclones")),
         bool(state.get("show_restricted_airspace")),
+        bool(state.get("show_tfrs")),
         state.get("show_airport_centerlines"),
         state.get("show_airport_icons"),
         str(state.get("airport_icon_style") or "classic"),
@@ -2393,6 +2396,20 @@ def toggle_show_restricted_airspace():
 
 def set_show_restricted_airspace(enabled: bool):
     _state["show_restricted_airspace"] = bool(enabled)
+    _save(_state)
+
+
+def show_tfrs() -> bool:
+    return bool(_state.get("show_tfrs", False))
+
+
+def toggle_show_tfrs():
+    _state["show_tfrs"] = not show_tfrs()
+    _save(_state)
+
+
+def set_show_tfrs(enabled: bool):
+    _state["show_tfrs"] = bool(enabled)
     _save(_state)
 
 

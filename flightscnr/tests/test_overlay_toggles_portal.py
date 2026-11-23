@@ -89,3 +89,19 @@ def test_device_layers_rows_present_and_aligned():
     assert len(actions) == len(info._layers_row_labels())
     assert "cyclones" in info._TOGGLE_ROW_STATE
     assert "restricted_airspace" in info._TOGGLE_ROW_STATE
+
+
+def test_tfr_toggle_round_trip_and_row(portal):
+    from display.round_touch import tfr_overlay
+    from display.round_touch.screens import info
+
+    client, settings = portal
+    assert settings.show_tfrs() is False
+    with mock.patch.object(tfr_overlay, "request_refresh") as tfr:
+        assert client.post("/radar", json={"show_tfrs": True}).status_code == 200
+    assert settings.show_tfrs() is True
+    tfr.assert_called_once_with(force=True)
+    assert client.get("/radar/json").get_json()["show_tfrs"] is True
+    assert 'id="show_tfrs"' in client.get("/").get_data(as_text=True)
+    assert "tfrs" in info.layers_actions() and "tfrs" in info._TOGGLE_ROW_STATE
+    assert len(info.layers_actions()) == len(info._layers_row_labels())
