@@ -2155,6 +2155,12 @@ class RoundTouchDisplay:
             if settings.show_cyclones():
                 cyclone_overlay.request_refresh(force=True)
             radar.invalidate_frame_layer()
+        elif action == "santa":
+            from display.round_touch import santa_overlay
+
+            settings.toggle_show_santa()
+            santa_overlay.invalidate()
+            radar.invalidate_frame_layer()
         elif action == "restricted_airspace":
             from display.round_touch import airspace_overlay
 

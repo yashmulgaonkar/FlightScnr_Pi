@@ -421,6 +421,11 @@
             </div>
             <p class="hint">Active hurricanes and tropical storms from the NOAA National Hurricane Center (nhc.noaa.gov, no API key). Atlantic and eastern/central Pacific only. Storms inside the radar show their name, category and 24-hour motion; storms beyond the edge get a pointer with the distance. Informational only — follow official advisories. Refreshes every 15 minutes.</p>
             <div class="chk">
+                <label for="show_santa">Follow Santa (Dec 24-25)</label>
+                <span class="switch"><input id="show_santa" type="checkbox"><span class="track"></span></span>
+            </div>
+            <p class="hint">Christmas Eve novelty. Santa appears on the radar on Dec 24-25 (UTC), or as a pointer with the distance when he is beyond the edge. His position is simulated from the clock (he reaches each city just after local midnight), not a live feed. Nothing is fetched from the internet. Entertainment only.</p>
+            <div class="chk">
                 <label for="show_restricted_airspace">Show restricted airspace</label>
                 <span class="switch"><input id="show_restricted_airspace" type="checkbox"><span class="track"></span></span>
             </div>
@@ -1925,6 +1930,7 @@ async function loadAll() {
         if ($("show_wildfires")) $("show_wildfires").checked = !!r.show_wildfires;
         if ($("show_earthquakes")) $("show_earthquakes").checked = !!r.show_earthquakes;
         if ($("show_cyclones")) $("show_cyclones").checked = !!r.show_cyclones;
+        if ($("show_santa")) $("show_santa").checked = !!r.show_santa;
         if ($("show_restricted_airspace")) $("show_restricted_airspace").checked = !!r.show_restricted_airspace;
         if ($("show_tfrs")) $("show_tfrs").checked = !!r.show_tfrs;
         if ($("show_airport_centerlines")) $("show_airport_centerlines").checked = !!r.show_airport_centerlines;
@@ -2429,6 +2435,7 @@ async function saveRadar() {
                 show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
                 show_earthquakes: $("show_earthquakes") ? $("show_earthquakes").checked : false,
                 show_cyclones: $("show_cyclones") ? $("show_cyclones").checked : false,
+                show_santa: $("show_santa") ? $("show_santa").checked : false,
                 show_restricted_airspace: $("show_restricted_airspace") ? $("show_restricted_airspace").checked : false,
                 show_tfrs: $("show_tfrs") ? $("show_tfrs").checked : false,
                 show_airport_centerlines: $("show_airport_centerlines") ? $("show_airport_centerlines").checked : false,
@@ -2750,6 +2757,7 @@ async function saveAndReloadSettings(statusId) {
                 show_wildfires: $("show_wildfires") ? $("show_wildfires").checked : false,
                 show_earthquakes: $("show_earthquakes") ? $("show_earthquakes").checked : false,
                 show_cyclones: $("show_cyclones") ? $("show_cyclones").checked : false,
+                show_santa: $("show_santa") ? $("show_santa").checked : false,
                 show_restricted_airspace: $("show_restricted_airspace") ? $("show_restricted_airspace").checked : false,
                 show_tfrs: $("show_tfrs") ? $("show_tfrs").checked : false,
                 show_airport_centerlines: $("show_airport_centerlines") ? $("show_airport_centerlines").checked : false,

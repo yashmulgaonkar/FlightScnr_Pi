@@ -105,3 +105,21 @@ def test_tfr_toggle_round_trip_and_row(portal):
     assert 'id="show_tfrs"' in client.get("/").get_data(as_text=True)
     assert "tfrs" in info.layers_actions() and "tfrs" in info._TOGGLE_ROW_STATE
     assert len(info.layers_actions()) == len(info._layers_row_labels())
+
+
+def test_santa_toggle_round_trip_and_row(portal):
+    from display.round_touch import santa_overlay
+    from display.round_touch.screens import info
+
+    client, settings = portal
+    assert settings.show_santa() is False
+    with mock.patch.object(santa_overlay, "invalidate") as inv:
+        assert client.post("/radar", json={"show_santa": True}).status_code == 200
+    inv.assert_called_once_with()
+    assert settings.show_santa() is True
+    assert client.get("/radar/json").get_json()["show_santa"] is True
+    assert 'id="show_santa"' in client.get("/").get_data(as_text=True)
+    assert "santa" in info.layers_actions() and "santa" in info._TOGGLE_ROW_STATE
+    assert len(info.layers_actions()) == len(info._layers_row_labels())
+    client.post("/radar", json={"show_santa": False})
+    assert settings.show_santa() is False
