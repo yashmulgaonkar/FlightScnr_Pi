@@ -451,6 +451,8 @@ _defaults = {
     "earthquake_voice_enabled": False,
     # NOAA NHC active cyclones; FAA prohibited/restricted airspace (US).
     "show_cyclones": False,
+    # Christmas Eve novelty: follow Santa around the world (local model, no network).
+    "show_santa": False,
     "show_restricted_airspace": False,
     # FAA temporary flight restrictions (US).
     "show_tfrs": False,
@@ -1478,6 +1480,7 @@ def _settings_snapshot(state: dict) -> tuple:
         state.get("show_earthquakes"),
         state.get("earthquake_voice_enabled"),
         bool(state.get("show_cyclones")),
+        bool(state.get("show_santa")),
         bool(state.get("show_restricted_airspace")),
         bool(state.get("show_tfrs")),
         state.get("show_airport_centerlines"),
@@ -2382,6 +2385,20 @@ def toggle_show_cyclones():
 
 def set_show_cyclones(enabled: bool):
     _state["show_cyclones"] = bool(enabled)
+    _save(_state)
+
+
+def show_santa() -> bool:
+    return bool(_state.get("show_santa", False))
+
+
+def toggle_show_santa():
+    _state["show_santa"] = not show_santa()
+    _save(_state)
+
+
+def set_show_santa(enabled: bool):
+    _state["show_santa"] = bool(enabled)
     _save(_state)
 
 

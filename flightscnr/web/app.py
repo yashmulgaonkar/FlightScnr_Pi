@@ -1670,6 +1670,7 @@ def radar_json():
             "show_earthquakes": settings.show_earthquakes(),
             "earthquake_voice_enabled": settings.earthquake_voice_enabled(),
             "show_cyclones": settings.show_cyclones(),
+            "show_santa": settings.show_santa(),
             "show_restricted_airspace": settings.show_restricted_airspace(),
             "show_tfrs": settings.show_tfrs(),
             "show_airport_centerlines": settings.show_airport_centerlines(),
@@ -1926,6 +1927,11 @@ def radar_save():
         cyclone_overlay.invalidate()
         if settings.show_cyclones():
             cyclone_overlay.request_refresh(force=True)
+    if "show_santa" in data:
+        from display.round_touch import santa_overlay
+
+        settings.set_show_santa(bool(data.get("show_santa")))
+        santa_overlay.invalidate()
     if "show_restricted_airspace" in data:
         from display.round_touch import airspace_overlay
 

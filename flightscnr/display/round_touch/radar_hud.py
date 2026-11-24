@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from datetime import datetime
 
 import pygame
@@ -1555,6 +1556,38 @@ def hud_bounds() -> pygame.Rect:
     if _hud_bounds.width <= 0 or _hud_bounds.height <= 0:
         return pygame.Rect(0, 0, 0, 0)
     return _hud_bounds.copy()
+
+
+_arc_cache: tuple[float, tuple[float, float, int, int] | None] = (0.0, None)
+
+
+def reserved_arc() -> tuple[float, float, int, int] | None:
+    """Where the HUD pill sits, so other overlays can keep clear of it.
+
+    Returns ``(mid_angle, half_span, r_mid, band_px)``: the pill's centre angle
+    in radians from +x (pygame y grows down), half its angular width, the radius
+    of its centreline and its thickness. None when the HUD is off. Cached for a
+    couple of seconds because the width follows live content (AQI, AutoFloor).
+    """
+    global _arc_cache
+    now = time.monotonic()
+    ts, cached = _arc_cache
+    if now - ts < 2.0:
+        return cached
+    arc = None
+    try:
+        if settings.radar_hud_enabled():
+            g = _geometry(_wx_snapshot())
+            arc = (
+                float(g["mid"]),
+                float(g["half_span"]),
+                int(g["r_mid"]),
+                int(g["band"]),
+            )
+    except Exception:
+        arc = None
+    _arc_cache = (now, arc)
+    return arc
 
 
 def _overlay_signature() -> tuple:

@@ -32,7 +32,7 @@ from display.round_touch import (
     wildfire_overlay,
     earthquake_overlay,
 )
-from display.round_touch import airspace_overlay, cyclone_overlay, tfr_overlay
+from display.round_touch import airspace_overlay, cyclone_overlay, santa_overlay, tfr_overlay
 from display.round_touch import alert_prefs, frame_debug, gpu
 from display.round_touch import radar_classic
 from display.round_touch import vessel_declutter
@@ -343,6 +343,7 @@ def _build_frame_layer(build: pygame.Surface, backdrop, flights, offset) -> bool
     wildfire_overlay.draw_fires(build, pan_offset=offset)
     earthquake_overlay.draw_quakes(build, pan_offset=offset)
     cyclone_overlay.draw_cyclones(build, pan_offset=offset)
+    santa_overlay.draw_santa(build, pan_offset=offset)
     _t = _rebuild_stage("2r_fires", _t)
     _building_icons = [] if live_icons_enabled() else None
     _building_labels = [] if live_icons_enabled() else None
@@ -594,6 +595,7 @@ def draw_radar(
     airspace_overlay.request_refresh()
     tfr_overlay.request_refresh()
     cyclone_overlay.request_refresh()
+    santa_overlay.request_refresh()
 
     if pan_mode:
         _draw_map_pan_overlay(
@@ -651,6 +653,7 @@ def draw_radar(
             wildfire_overlay.draw_fires(surface, pan_offset=offset)
             earthquake_overlay.draw_quakes(surface, pan_offset=offset)
             cyclone_overlay.draw_cyclones(surface, pan_offset=offset)
+            santa_overlay.draw_santa(surface, pan_offset=offset)
             _draw_flights(surface, flights)
             _draw_status(surface, flights)
             _draw_map_attribution(surface)
@@ -3146,6 +3149,7 @@ def _draw_map_attribution(surface):
         airspace_overlay.attribution_text(),
         tfr_overlay.attribution_text(),
         cyclone_overlay.attribution_text(),
+        santa_overlay.attribution_text(),
     ):
         if extra:
             parts.append(extra)
