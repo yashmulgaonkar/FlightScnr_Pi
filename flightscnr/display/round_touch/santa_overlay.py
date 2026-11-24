@@ -11,10 +11,16 @@
 
 There is no public, documented live feed for Santa's position, so this overlay
 does not call out to the network at all. Santa's position is a pure function of
-the clock: he leaves the North Pole, reaches each stop shortly after local
-midnight (Christmas Day, local time) as the midnight line sweeps west around
-the globe, and flies home after the last stop. Positions between stops follow
-the great circle, interpolated by time.
+the clock and the radar's own location: he leaves the North Pole, reaches each
+stop shortly after local midnight (Christmas Day, local time) as the midnight
+line sweeps west around the globe, and flies home after the last stop. He
+pauses at every stop for a few minutes. Positions between stops follow the
+great circle, interpolated by time.
+
+Every radar also gets a visit: the device's own location is added as a stop at
+00:30 local time on Dec 25 (local time as set on the Pi), so Santa passes
+through each radar's range once. That makes the route depend on where the
+device is, so two radars in different places do not show the same Santa.
 
 The overlay is inert outside Dec 24 00:00 UTC to Dec 26 00:00 UTC. For testing
 before Christmas set ``FLIGHTSCNR_SANTA_FAKE_UTC`` to an ISO timestamp such as
@@ -42,6 +48,10 @@ EARTH_RADIUS_KM = 6371.0088
 ARRIVAL_LOCAL_MINUTES = 30
 # Stops that share a UTC offset are staggered so each has a distinct arrival.
 TIE_STAGGER_MIN = 12
+# Santa stays at each stop this long (must be shorter than TIE_STAGGER_MIN).
+DWELL_MIN = 6
+# Name of the stop added at the radar's own location.
+HOME_STOP_NAME = "Home"
 # Lead-in from the North Pole to the first stop, and the flight home.
 DEPART_LEAD_MIN = 90
 RETURN_LEAD_MIN = 90
@@ -108,26 +118,70 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def build_route(year: int) -> list[dict[str, Any]]:
-    """Ordered stops for ``year`` with their UTC arrival datetimes."""
+def _local_offset_hours(year: int) -> float:
+    """UTC offset (hours) of the Pi's local timezone on Dec 25 of ``year``."""
+    try:
+        local = datetime(year, 12, 25, 0, 30).astimezone()
+        return local.utcoffset().total_seconds() / 3600.0
+    except Exception:
+        return 0.0
+
+
+def _home() -> tuple[float, float] | None:
+    """The radar's own location, or None when it has not been set."""
+    try:
+        from config import location_configured
+
+        if not location_configured():
+            return None
+    except Exception:
+        pass
+    try:
+        lat, lon = geo.LOCATION_HOME
+        return float(lat), float(lon)
+    except Exception:
+        return None
+
+
+def build_route(
+    year: int, home: tuple[float, float] | None = None
+) -> list[dict[str, Any]]:
+    """Ordered stops for ``year`` with their UTC arrival datetimes.
+
+    When ``home`` is given it is added as one more stop, arriving at 00:30 local
+    time on Dec 25 (the Pi's timezone). If that collides with a built-in stop in
+    the same timezone, home goes first and the other stop is staggered after it.
+    """
+    home_key = None if home is None else (round(home[0], 3), round(home[1], 3))
+    home_off = _local_offset_hours(year) if home is not None else None
+    key = (year, home_key, home_off)
     with _lock:
-        cached = _route_cache.get(year)
+        cached = _route_cache.get(key)
     if cached is not None:
         return cached
     christmas = datetime(year, 12, 25, tzinfo=timezone.utc)
+    raw: list[tuple[str, float, float, float, bool]] = [
+        (n, la, lo, off, False) for n, la, lo, off in _STOPS_RAW
+    ]
+    if home is not None:
+        raw.append((HOME_STOP_NAME, home[0], home[1], float(home_off), True))
     seen: dict[float, int] = {}
     stops: list[dict[str, Any]] = []
-    for name, lat, lon, offset in sorted(_STOPS_RAW, key=lambda s: -s[3]):
+    for name, lat, lon, offset, is_home in sorted(
+        raw, key=lambda s: (-s[3], 0 if s[4] else 1)
+    ):
         k = seen.get(offset, 0)
         seen[offset] = k + 1
         local_midnight_utc = christmas - timedelta(hours=offset)
         arrive = local_midnight_utc + timedelta(
             minutes=ARRIVAL_LOCAL_MINUTES + k * TIE_STAGGER_MIN
         )
-        stops.append({"name": name, "lat": lat, "lon": lon, "arrive": arrive})
+        stops.append(
+            {"name": name, "lat": lat, "lon": lon, "arrive": arrive, "home": is_home}
+        )
     stops.sort(key=lambda s: s["arrive"])
     with _lock:
-        _route_cache[year] = stops
+        _route_cache[key] = stops
     return stops
 
 
@@ -179,56 +233,74 @@ def bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
 
 
-def position_at(when: datetime | None = None) -> dict[str, Any] | None:
+def position_at(
+    when: datetime | None = None, home: tuple[float, float] | None = None
+) -> dict[str, Any] | None:
     """Santa's state at ``when`` (UTC), or None outside the Dec 24-25 window.
 
+    ``home`` adds the radar's own location as a stop (see ``build_route``).
     Keys: lat, lon, phase (``pole`` | ``flying`` | ``delivering`` | ``home``),
-    heading_deg, near (nearest stop name) and label (human text).
+    heading_deg, near (nearest stop name), at_home (True while he is at the
+    radar's own location) and label (human text).
     """
     when = (when or now_utc()).astimezone(timezone.utc)
     start, end = window(when.year)
     if not (start <= when < end):
         return None
-    route = build_route(when.year)
+    route = build_route(when.year, home)
     first, last = route[0], route[-1]
     depart = first["arrive"] - timedelta(minutes=DEPART_LEAD_MIN)
     home_at = last["arrive"] + timedelta(minutes=RETURN_LEAD_MIN)
+    dwell = timedelta(minutes=DWELL_MIN)
 
-    # Waypoints in time order, including the pole at both ends.
-    pts = (
-        [(depart, NORTH_POLE[1], NORTH_POLE[2], NORTH_POLE[0])]
-        + [(s["arrive"], s["lat"], s["lon"], s["name"]) for s in route]
-        + [(home_at, NORTH_POLE[1], NORTH_POLE[2], NORTH_POLE[0])]
-    )
     if when < depart:
         return {
             "lat": 90.0, "lon": 0.0, "phase": "pole", "heading_deg": 0.0,
-            "near": NORTH_POLE[0], "label": "Loading the sleigh at the North Pole",
+            "near": NORTH_POLE[0], "at_home": False,
+            "label": "Loading the sleigh at the North Pole",
         }
     if when >= home_at:
         return {
             "lat": 90.0, "lon": 0.0, "phase": "home", "heading_deg": 0.0,
-            "near": NORTH_POLE[0], "label": "Back at the North Pole",
+            "near": NORTH_POLE[0], "at_home": False,
+            "label": "Back at the North Pole",
         }
-    for (t0, la0, lo0, n0), (t1, la1, lo1, n1) in zip(pts, pts[1:]):
-        if t0 <= when < t1:
-            span = (t1 - t0).total_seconds()
-            frac = (when - t0).total_seconds() / span if span > 0 else 1.0
-            lat, lon = great_circle_point(la0, lo0, la1, lo1, frac)
-            heading = bearing_deg(lat, lon, la1, lo1) if frac < 1.0 else 0.0
-            # "delivering" for the first 10 min after reaching a real stop.
-            since = (when - t0).total_seconds() / 60.0
-            if n0 != NORTH_POLE[0] and since <= 10.0:
-                return {
-                    "lat": lat, "lon": lon, "phase": "delivering",
-                    "heading_deg": heading, "near": n0,
-                    "label": f"Delivering presents in {n0}",
-                }
-            nxt = n1
+
+    # (arrive, leave, lat, lon, name, is_home_stop, is_pole), in time order.
+    way = (
+        [(depart, depart, NORTH_POLE[1], NORTH_POLE[2], NORTH_POLE[0], False, True)]
+        + [(s["arrive"], s["arrive"] + dwell, s["lat"], s["lon"], s["name"],
+            bool(s.get("home")), False) for s in route]
+        + [(home_at, home_at, NORTH_POLE[1], NORTH_POLE[2], NORTH_POLE[0], False, True)]
+    )
+    for a, b in zip(way, way[1:]):
+        a_arr, a_leave, a_lat, a_lon, a_name, a_home, a_pole = a
+        b_arr, _bl, b_lat, b_lon, b_name, b_home, b_pole = b
+        if not a_pole and a_arr <= when < a_leave:
+            if a_home:
+                label = "Delivering presents at your place"
+            else:
+                label = f"Delivering presents in {a_name}"
+            return {
+                "lat": a_lat, "lon": a_lon, "phase": "delivering",
+                "heading_deg": bearing_deg(a_lat, a_lon, b_lat, b_lon),
+                "near": a_name, "at_home": a_home, "label": label,
+            }
+        if a_leave <= when < b_arr:
+            span = (b_arr - a_leave).total_seconds()
+            frac = (when - a_leave).total_seconds() / span if span > 0 else 1.0
+            lat, lon = great_circle_point(a_lat, a_lon, b_lat, b_lon, frac)
+            heading = bearing_deg(lat, lon, b_lat, b_lon) if frac < 1.0 else 0.0
+            if b_pole:
+                label = "Heading back to the North Pole"
+            elif b_home:
+                label = "On the way to your place"
+            else:
+                label = f"On the way to {b_name}"
             return {
                 "lat": lat, "lon": lon, "phase": "flying",
-                "heading_deg": heading, "near": nxt,
-                "label": f"On the way to {nxt}",
+                "heading_deg": heading, "near": b_name, "at_home": False,
+                "label": label,
             }
     return None
 
@@ -236,7 +308,7 @@ def position_at(when: datetime | None = None) -> dict[str, Any] | None:
 def get_santa() -> dict[str, Any] | None:
     if not _enabled():
         return None
-    return position_at()
+    return position_at(home=_home())
 
 
 def request_refresh(*, force: bool = False) -> None:

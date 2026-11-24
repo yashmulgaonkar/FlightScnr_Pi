@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
@@ -73,7 +74,8 @@ class TestPosition(unittest.TestCase):
 
     def test_midpoint_between_stops_is_between_them(self):
         a, b = so.build_route(YEAR)[12:14]  # Paris -> London
-        mid = a["arrive"] + (b["arrive"] - a["arrive"]) / 2
+        left = a["arrive"] + timedelta(minutes=so.DWELL_MIN)  # he pauses first
+        mid = left + (b["arrive"] - left) / 2
         pos = so.position_at(mid)
         total = so.haversine_km(a["lat"], a["lon"], b["lat"], b["lon"])
         d_a = so.haversine_km(pos["lat"], pos["lon"], a["lat"], a["lon"])
@@ -123,15 +125,125 @@ class TestFakeClockAndToggle(unittest.TestCase):
             self.assertIsNone(so.status_text())
 
     def test_enabled_during_window(self):
-        with mock.patch.object(so, "_enabled", return_value=True), mock.patch.dict(
-            os.environ, {so.FAKE_UTC_ENV: "2026-12-25T05:30:00"}
-        ):
+        with mock.patch.object(so, "_enabled", return_value=True), mock.patch.object(
+            so, "_home", return_value=None
+        ), mock.patch.dict(os.environ, {so.FAKE_UTC_ENV: "2026-12-25T05:30:00"}):
             self.assertEqual(so.get_santa()["near"], "New York")
             self.assertEqual(so.attribution_text(), "Santa (simulated)")
             self.assertIn("km", so.status_text())
 
     def test_default_off(self):
         self.assertIs(settings._defaults["show_santa"], False)
+
+
+def _set_tz(name):
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = name
+    time.tzset()
+    return old
+
+
+def _restore_tz(old):
+    if old is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = old
+    time.tzset()
+
+
+@unittest.skipUnless(hasattr(time, "tzset"), "needs time.tzset")
+class TestHomeStop(unittest.TestCase):
+    """Every radar gets a visit: its own location is a stop at 00:30 local."""
+
+    RALEIGH = (35.8, -78.6)
+
+    def setUp(self):
+        self._old_tz = _set_tz("America/New_York")
+
+    def tearDown(self):
+        _restore_tz(self._old_tz)
+
+    def test_home_is_a_stop_at_0030_local(self):
+        route = so.build_route(YEAR, self.RALEIGH)
+        home = next(s for s in route if s["home"])
+        self.assertEqual(home["arrive"], utc(YEAR, 12, 25, 5, 30))  # 00:30 EST
+        self.assertEqual(len(route), len(so.build_route(YEAR)) + 1)
+        times = [s["arrive"] for s in route]
+        self.assertEqual(times, sorted(times))
+        self.assertEqual(len(set(times)), len(times))
+
+    def test_home_goes_before_a_same_timezone_stop(self):
+        route = so.build_route(YEAR, self.RALEIGH)
+        names = [s["name"] for s in route]
+        self.assertLess(names.index("Home"), names.index("New York"))
+        ny = next(s for s in route if s["name"] == "New York")
+        self.assertEqual(ny["arrive"], utc(YEAR, 12, 25, 5, 30 + so.TIE_STAGGER_MIN))
+
+    def test_santa_is_at_home_on_arrival(self):
+        pos = so.position_at(utc(YEAR, 12, 25, 5, 30), self.RALEIGH)
+        self.assertEqual(pos["phase"], "delivering")
+        self.assertTrue(pos["at_home"])
+        self.assertIn("your place", pos["label"])
+        self.assertLess(so.haversine_km(pos["lat"], pos["lon"], *self.RALEIGH), 1.0)
+
+    def test_he_pauses_then_leaves(self):
+        arrive = utc(YEAR, 12, 25, 5, 30)
+        still = so.position_at(arrive + timedelta(minutes=so.DWELL_MIN - 1), self.RALEIGH)
+        self.assertTrue(still["at_home"])
+        self.assertLess(so.haversine_km(still["lat"], still["lon"], *self.RALEIGH), 1.0)
+        gone = so.position_at(arrive + timedelta(minutes=so.DWELL_MIN + 3), self.RALEIGH)
+        self.assertFalse(gone["at_home"])
+        self.assertGreater(so.haversine_km(gone["lat"], gone["lon"], *self.RALEIGH), 10.0)
+
+    def test_on_the_way_label_before_arrival(self):
+        pos = so.position_at(utc(YEAR, 12, 25, 5, 0), self.RALEIGH)
+        self.assertEqual(pos["phase"], "flying")
+        self.assertEqual(pos["label"], "On the way to your place")
+        self.assertEqual(pos["near"], "Home")
+
+    def test_new_york_stop_still_reached(self):
+        ny = next(s for s in so.build_route(YEAR, self.RALEIGH) if s["name"] == "New York")
+        pos = so.position_at(ny["arrive"], self.RALEIGH)
+        self.assertLess(so.haversine_km(pos["lat"], pos["lon"], ny["lat"], ny["lon"]), 1.0)
+
+    def test_without_home_nothing_changes(self):
+        self.assertFalse(any(s["home"] for s in so.build_route(YEAR)))
+        pos = so.position_at(utc(YEAR, 12, 25, 5, 30))
+        self.assertFalse(pos["at_home"])
+        self.assertEqual(pos["near"], "New York")
+
+    def test_other_timezone_uses_its_own_midnight(self):
+        old = _set_tz("Asia/Tokyo")
+        try:
+            tokyo = (35.7, 139.7)
+            home = next(s for s in so.build_route(YEAR, tokyo) if s["home"])
+            self.assertEqual(home["arrive"], utc(YEAR, 12, 24, 15, 30))  # 00:30 JST
+            pos = so.position_at(home["arrive"], tokyo)
+            self.assertTrue(pos["at_home"])
+        finally:
+            _restore_tz(old)
+
+    def test_no_teleporting_with_home_included(self):
+        t = utc(YEAR, 12, 24, 0, 0)
+        prev = so.position_at(t, self.RALEIGH)
+        worst = 0.0
+        while t < utc(YEAR, 12, 26, 0, 0) - timedelta(minutes=5):
+            t += timedelta(minutes=5)
+            cur = so.position_at(t, self.RALEIGH)
+            worst = max(worst, so.haversine_km(prev["lat"], prev["lon"], cur["lat"], cur["lon"]))
+            prev = cur
+        self.assertLess(worst, 5000.0)
+
+    def test_home_unset_means_no_home_stop(self):
+        with mock.patch("config.location_configured", return_value=False):
+            self.assertIsNone(so._home())
+
+    def test_get_santa_uses_the_radars_location(self):
+        with mock.patch.object(so, "_enabled", return_value=True), mock.patch.object(
+            so, "_home", return_value=self.RALEIGH
+        ), mock.patch.dict(os.environ, {so.FAKE_UTC_ENV: "2026-12-25T05:33:00"}):
+            self.assertTrue(so.get_santa()["at_home"])
+            self.assertIn("your place", so.status_text())
 
 
 class TestDraw(unittest.TestCase):
@@ -162,6 +274,28 @@ class TestDraw(unittest.TestCase):
             self.pygame.image.tostring(blank, "RGB"),
             self.pygame.image.tostring(self.surface, "RGB"),
         )
+
+    @unittest.skipUnless(hasattr(time, "tzset"), "needs time.tzset")
+    def test_sleigh_is_drawn_on_the_radar_when_he_is_at_home(self):
+        from display.round_touch import geo, theme
+
+        old = _set_tz("America/New_York")
+        try:
+            home = (float(geo.LOCATION_HOME[0]), float(geo.LOCATION_HOME[1]))
+            blank = self.surface.copy()
+            with mock.patch.object(so, "_enabled", return_value=True), mock.patch.object(
+                so, "_home", return_value=home
+            ), mock.patch.dict(os.environ, {so.FAKE_UTC_ENV: "2026-12-25T05:33:00"}), \
+                    mock.patch("display.round_touch.radar_hud.reserved_arc", return_value=None):
+                so.draw_santa(self.surface)
+            box = self.pygame.Rect(0, 0, 120, 60)
+            box.center = (theme.CENTER_X, theme.CENTER_Y)
+            self.assertNotEqual(
+                self.pygame.image.tostring(blank.subsurface(box), "RGB"),
+                self.pygame.image.tostring(self.surface.subsurface(box), "RGB"),
+            )
+        finally:
+            _restore_tz(old)
 
     def test_inactive_paints_nothing(self):
         blank = self.surface.copy()
