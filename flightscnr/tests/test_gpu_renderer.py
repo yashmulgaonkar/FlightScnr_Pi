@@ -451,6 +451,71 @@ class TestCpuComposedGhost:
         assert surface.get_at((5, 5))[3] == 0
 
 
+class TestSpriteTexturesFreeOnRenderThread:
+    """A texture freed off the render thread leaks its GPU buffer for good."""
+
+    @pytest.fixture
+    def fake_textures(self, monkeypatch):
+        import threading
+
+        freed_on = []
+
+        class _Tex:
+            blend_mode = 0
+
+            def __del__(self):
+                freed_on.append(threading.get_ident())
+
+        class _Video:
+            class Texture:
+                @staticmethod
+                def from_surface(_ren, _surface):
+                    return _Tex()
+
+        monkeypatch.setattr(gpu_present, "_video", lambda: _Video)
+        gpu_present.reset()
+        yield freed_on
+        gpu_present.reset()
+
+    def test_sprite_dropped_on_another_thread_keeps_its_texture_until_the_render_thread(
+        self, fake_textures
+    ):
+        import gc
+        import threading
+
+        holder = [pygame.Surface((8, 8), pygame.SRCALPHA)]
+        gpu_present._texture(object(), holder[0])
+        worker = threading.Thread(target=holder.clear)
+        worker.start()
+        worker.join()
+        gc.collect()
+        assert fake_textures == []
+        assert len(gpu_present._textures) == 1
+        gpu_present._release_dead_textures()
+        gc.collect()
+        assert fake_textures == [threading.get_ident()]
+        assert gpu_present._textures == {}
+
+    def test_live_sprite_keeps_one_texture(self, fake_textures):
+        sprite = pygame.Surface((8, 8), pygame.SRCALPHA)
+        first = gpu_present._texture(object(), sprite)
+        assert gpu_present._texture(object(), sprite) is first
+        assert fake_textures == []
+
+    def test_reused_id_gets_its_own_texture(self, fake_textures):
+        sprite = pygame.Surface((8, 8), pygame.SRCALPHA)
+        key = id(sprite)
+        old = gpu_present._texture(object(), sprite)
+        other = pygame.Surface((8, 8), pygame.SRCALPHA)
+        # As if ``other`` had been allocated at the address ``sprite`` had.
+        gpu_present._textures[id(other)] = gpu_present._textures.pop(key)
+        new = gpu_present._texture(object(), other)
+        assert new is not old
+        gpu_present._dead_textures.append(id(other))
+        gpu_present._release_dead_textures()
+        assert gpu_present._textures[id(other)][1] is new
+
+
 class TestHudTexture:
     def _hud(self, monkeypatch, color, gen):
         from display.round_touch import radar_hud

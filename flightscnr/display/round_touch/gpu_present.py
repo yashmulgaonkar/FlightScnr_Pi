@@ -29,6 +29,7 @@ frame.
 
 from __future__ import annotations
 
+import collections
 import math
 import time
 import weakref
@@ -43,7 +44,14 @@ _base_size = None
 _base_key = None
 _base_scratch = None
 _renderer_ref = None
-_textures: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+# id(sprite) -> (weak reference to the sprite, its texture). A texture must be
+# released on the render thread: SDL deletes it in whichever GL context is
+# current on the calling thread, and a thread with none (the radar builds and
+# drops sprites off the render thread) frees nothing, so the driver keeps the
+# buffer for good. The weak reference only queues the id; _texture() and
+# present() drop the queued textures.
+_textures: dict = {}
+_dead_textures: collections.deque = collections.deque()
 _pixel_tex = None
 _sweep_tex = None
 _sweep_key = None
@@ -71,6 +79,7 @@ def reset() -> None:
     _base_scratch = None
     _renderer_ref = None
     _textures.clear()
+    _dead_textures.clear()
     _pixel_tex = None
     _sweep_tex = None
     _sweep_key = None
@@ -93,12 +102,28 @@ def _video():
     return video
 
 
+def _release_dead_textures() -> None:
+    """Drop the textures of sprites that are gone. Render thread only."""
+    while _dead_textures:
+        try:
+            key = _dead_textures.popleft()
+        except IndexError:
+            return
+        entry = _textures.get(key)
+        # The id may already belong to a newer sprite; that one stays.
+        if entry is not None and entry[0]() is None:
+            del _textures[key]
+
+
 def _texture(ren, sprite: pygame.Surface):
-    tex = _textures.get(sprite)
-    if tex is None:
-        tex = _video().Texture.from_surface(ren, sprite)
-        tex.blend_mode = _BLEND
-        _textures[sprite] = tex
+    _release_dead_textures()
+    key = id(sprite)
+    entry = _textures.get(key)
+    if entry is not None and entry[0]() is sprite:
+        return entry[1]
+    tex = _video().Texture.from_surface(ren, sprite)
+    tex.blend_mode = _BLEND
+    _textures[key] = (weakref.ref(sprite, lambda _ref, key=key: _dead_textures.append(key)), tex)
     return tex
 
 
@@ -347,6 +372,7 @@ def present_radar_sweep(
     if _renderer_ref is not ren:
         reset()
         _renderer_ref = ren
+    _release_dead_textures()
     debug = frame_debug.ENABLED
     if debug:
         _t = time.perf_counter()
